@@ -205,8 +205,9 @@ export function TrayPopover() {
   // ── Event listeners ──
 
   useEffect(() => {
-    // On mount, read cached data immediately
+    // On mount, read cached data and sync selected provider to Rust
     loadCachedSummary();
+    invoke("set_tray_display_provider", { providerId: activeTab }).catch(() => {});
 
     // On tray click: instant cache read + fire-and-forget refresh
     let unlistenPopover: (() => void) | null = null;
@@ -290,6 +291,8 @@ export function TrayPopover() {
     try {
       localStorage.setItem(TAB_STORAGE_KEY, tabId);
     } catch { /* ignore */ }
+    // Update menu bar tray percentage to show this provider's usage
+    invoke("set_tray_display_provider", { providerId: tabId }).catch(() => {});
   };
 
   // ── Navigation helpers ──
