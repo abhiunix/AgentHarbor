@@ -1,0 +1,992 @@
+//! Claude Code analytics provider.
+//! Auth: 3-tier — silent auto-detect → user sign-in → keychain import
+//! API: api.anthropic.com/api/oauth/usage + /api/oauth/profile + /api/oauth/account
+
+use crate::analytics::http;
+use crate::analytics::token_store;
+use crate::analytics::types::*;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+// ── In-memory cache (300s TTL) ──────────────────────────────────────────────
+
+struct ClaudeCacheEntry {
+    data: ProviderAnalytics,
+    fetched_at: std::time::Instant,
+}
+
+lazy_static::lazy_static! {
+    static ref CLAUDE_CACHE: Mutex<Option<ClaudeCacheEntry>> = Mutex::new(None);
+}
+
+const CLAUDE_CACHE_TTL_SECS: u64 = 300; // 5 minutes
+use std::fs;
+use std::path::PathBuf;
+
+// ── Credential types ────────────────────────────────────────────────────────
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeCredentials {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    expires_at: Option<u64>,
+    scopes: Option<Vec<String>>,
+    subscription_type: Option<String>,
+    rate_limit_tier: Option<String>,
+}
+
+// ── API response types ──────────────────────────────────────────────────────
+
+#[derive(Deserialize, Debug)]
+struct UsageWindow {
+    utilization: Option<f64>,
+    resets_at: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ExtraUsage {
+    is_enabled: Option<bool>,
+    monthly_limit: Option<f64>,
+    used_credits: Option<f64>,
+    utilization: Option<f64>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ClaudeUsageResponse {
+    five_hour: Option<UsageWindow>,
+    seven_day: Option<UsageWindow>,
+    seven_day_oauth_apps: Option<UsageWindow>,
+    seven_day_opus: Option<UsageWindow>,
+    seven_day_sonnet: Option<UsageWindow>,
+    seven_day_cowork: Option<UsageWindow>,
+    extra_usage: Option<ExtraUsage>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ProfileAccount {
+    uuid: Option<String>,
+    full_name: Option<String>,
+    display_name: Option<String>,
+    email: Option<String>,
+    has_claude_max: Option<bool>,
+    has_claude_pro: Option<bool>,
+    created_at: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ProfileOrg {
+    uuid: Option<String>,
+    name: Option<String>,
+    organization_type: Option<String>,
+    billing_type: Option<String>,
+    rate_limit_tier: Option<String>,
+    has_extra_usage_enabled: Option<bool>,
+    subscription_status: Option<String>,
+    subscription_created_at: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ProfileApp {
+    name: Option<String>,
+    slug: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ClaudeProfileResponse {
+    account: Option<ProfileAccount>,
+    organization: Option<ProfileOrg>,
+    application: Option<ProfileApp>,
+}
+
+// ── Auth Result Types (for Tauri commands) ──────────────────────────────────
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SilentCheckResult {
+    pub found: bool,
+    pub method: String, // "stored", "credentials-file", "none"
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct KeychainImportResult {
+    pub success: bool,
+    pub method: String,
+    pub error: Option<String>,
+}
+
+// ── Helpers: File-based credentials ─────────────────────────────────────────
+
+fn credentials_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join(".credentials.json")
+}
+
+fn read_auto_credentials() -> Result<ClaudeCredentials, String> {
+    let path = credentials_path();
+    if !path.exists() {
+        return Err("Claude credentials file not found".into());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read credentials: {}", e))?;
+    serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse credentials: {}", e))
+}
+
+// ── Helpers: Keychain credentials ───────────────────────────────────────────
+
+/// Read OAuth token from Claude Code's native keychain entry.
+/// WARNING: This WILL trigger a macOS password/Touch ID prompt!
+/// Returns (access_token, Option<refresh_token>) from the macOS Keychain.
+fn read_keychain_credentials() -> Result<(String, Option<String>), String> {
+    let usernames = vec![
+        whoami::username(),
+        "default".to_string(),
+    ];
+
+    for username in &usernames {
+        if let Ok(entry) = keyring::Entry::new("Claude Code-credentials", username) {
+            if let Ok(secret) = entry.get_password() {
+                if let Some(tokens) = extract_tokens_from_keychain_json(&secret) {
+                    return Ok(tokens);
+                }
+            }
+        }
+    }
+
+    Err("No Claude Code credentials found in keychain".into())
+}
+
+/// Extract access token + optional refresh token from keychain JSON.
+/// Returns (access_token, Option<refresh_token>).
+fn extract_tokens_from_keychain_json(secret: &str) -> Option<(String, Option<String>)> {
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(secret) {
+        // {"claudeAiOauth":{"accessToken":"...","refreshToken":"..."}}
+        if let Some(oauth_obj) = json.get("claudeAiOauth") {
+            if let Some(token) = oauth_obj.get("accessToken").and_then(|v| v.as_str()) {
+                if !token.is_empty() {
+                    let refresh = oauth_obj.get("refreshToken")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(String::from);
+                    return Some((token.to_string(), refresh));
+                }
+            }
+        }
+        // {"accessToken":"...","refreshToken":"..."}
+        if let Some(token) = json.get("accessToken").and_then(|v| v.as_str()) {
+            if !token.is_empty() {
+                let refresh = json.get("refreshToken")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from);
+                return Some((token.to_string(), refresh));
+            }
+        }
+        // {"access_token":"...","refresh_token":"..."}
+        if let Some(token) = json.get("access_token").and_then(|v| v.as_str()) {
+            if !token.is_empty() {
+                let refresh = json.get("refresh_token")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from);
+                return Some((token.to_string(), refresh));
+            }
+        }
+    }
+    let trimmed = secret.trim();
+    if trimmed.starts_with("sk-ant-") || trimmed.starts_with("ey") {
+        return Some((trimmed.to_string(), None));
+    }
+    None
+}
+
+// ── OAuth PKCE Flow ─────────────────────────────────────────────────────────
+
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use sha2::{Digest, Sha256};
+
+const OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const OAUTH_AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
+const OAUTH_TOKEN_URL: &str = "https://api.anthropic.com/v1/oauth/token";
+const OAUTH_REDIRECT_URI: &str = "https://console.anthropic.com/oauth/code/callback";
+const OAUTH_SCOPES: &str = "org:create_api_key user:profile user:inference";
+
+/// In-memory PKCE state for the current OAuth flow
+static OAUTH_STATE: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+// (code_verifier, state_nonce)
+
+fn generate_pkce() -> (String, String) {
+    // Generate 32 random bytes for code_verifier
+    let mut verifier_bytes = [0u8; 32];
+    getrandom::fill(&mut verifier_bytes).expect("Failed to generate random bytes");
+    let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+
+    // code_challenge = BASE64URL(SHA256(code_verifier))
+    let mut hasher = Sha256::new();
+    hasher.update(code_verifier.as_bytes());
+    let hash = hasher.finalize();
+    let code_challenge = URL_SAFE_NO_PAD.encode(hash);
+
+    (code_verifier, code_challenge)
+}
+
+fn generate_state() -> String {
+    let mut state_bytes = [0u8; 32];
+    getrandom::fill(&mut state_bytes).expect("Failed to generate random bytes");
+    URL_SAFE_NO_PAD.encode(state_bytes)
+}
+
+// ── Token Resolution (silent only — NO keychain) ───────────────────────────
+
+/// Try to refresh an expired access token using the stored refresh token.
+/// Returns the new access token on success.
+fn try_refresh_access_token() -> Option<String> {
+    let refresh_token = token_store::get_provider_token("claude-code", "refresh-token")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())?;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .ok()?;
+
+    let body = serde_json::json!({
+        "grant_type": "refresh_token",
+        "client_id": OAUTH_CLIENT_ID,
+        "refresh_token": refresh_token,
+    });
+
+    let resp = client
+        .post(OAUTH_TOKEN_URL)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .ok()?;
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    let json: serde_json::Value = resp.json().ok()?;
+    let new_token = json.get("access_token")?.as_str()?;
+    if new_token.is_empty() {
+        return None;
+    }
+
+    // Save the refreshed token
+    let _ = token_store::store_provider_token("claude-code", "access-token", new_token);
+    // Update refresh token if a new one was issued
+    if let Some(new_rt) = json.get("refresh_token").and_then(|v| v.as_str()) {
+        if !new_rt.is_empty() {
+            let _ = token_store::store_provider_token("claude-code", "refresh-token", new_rt);
+        }
+    }
+
+    Some(new_token.to_string())
+}
+
+/// Resolve token WITHOUT touching keychain. Used by analytics fetchers.
+/// Checks: stored token → credentials file → refresh token.
+fn resolve_access_token_silent() -> Result<(String, String), String> {
+    // 1. AgentHarbor's own stored token (saved from prior sign-in or keychain import)
+    if let Ok(Some(token)) = token_store::get_provider_token("claude-code", "access-token") {
+        if !token.is_empty() {
+            return Ok((token, "stored".into()));
+        }
+    }
+
+    // 2. ~/.claude/.credentials.json (plain file, no prompt)
+    if let Ok(creds) = read_auto_credentials() {
+        if let Some(token) = creds.access_token {
+            if !token.is_empty() {
+                let _ = token_store::store_provider_token("claude-code", "access-token", &token);
+                return Ok((token, "credentials-file".into()));
+            }
+        }
+    }
+
+    // 3. Try refreshing with stored refresh token
+    if let Some(token) = try_refresh_access_token() {
+        return Ok((token, "refreshed".into()));
+    }
+
+    Err("No Claude credentials found silently. Use Sign In or Import from Keychain.".into())
+}
+
+// ── Tauri Commands: Auth Flow ───────────────────────────────────────────────
+
+/// Tier 0: Silent credential check — no keychain, no prompts, no API calls.
+/// Returns whether credentials were found and by which method.
+#[tauri::command]
+pub fn claude_check_silent_credentials() -> SilentCheckResult {
+    match resolve_access_token_silent() {
+        Ok((_, method)) => SilentCheckResult { found: true, method },
+        Err(_) => SilentCheckResult { found: false, method: "none".into() },
+    }
+}
+
+/// Option B: Import token from macOS Keychain.
+/// WILL trigger system password/Touch ID prompt.
+/// Only called after user explicitly consents via UI.
+#[tauri::command]
+pub fn claude_import_from_keychain() -> KeychainImportResult {
+    match read_keychain_credentials() {
+        Ok((access_token, refresh_token)) => {
+            // Save access token to AgentHarbor's store
+            if let Err(e) = token_store::store_provider_token("claude-code", "access-token", &access_token) {
+                return KeychainImportResult {
+                    success: false,
+                    method: "keychain".into(),
+                    error: Some(format!("Token found but failed to save: {}", e)),
+                };
+            }
+            // Also save the refresh token if present — needed for profile/account API calls
+            if let Some(ref rt) = refresh_token {
+                let _ = token_store::store_provider_token("claude-code", "refresh-token", rt);
+            }
+            KeychainImportResult { success: true, method: "keychain".into(), error: None }
+        }
+        Err(e) => KeychainImportResult {
+            success: false,
+            method: "keychain".into(),
+            error: Some(e),
+        },
+    }
+}
+
+/// Option A: Store a token provided by the user (after browser sign-in).
+#[tauri::command]
+pub fn claude_store_manual_token(token: String) -> Result<String, String> {
+    if token.trim().is_empty() {
+        return Err("Token cannot be empty".into());
+    }
+
+    // Quick validation: try fetching profile
+    let extra_headers = http::headers(&[("anthropic-beta", "oauth-2025-04-20")]);
+    let _profile: serde_json::Value = http::authed_get(
+        "https://api.anthropic.com/api/oauth/profile",
+        token.trim(),
+        Some(extra_headers),
+    ).map_err(|e| format!("Token validation failed: {}", e))?;
+
+    // Token is valid — save it
+    token_store::store_provider_token("claude-code", "access-token", token.trim())
+        .map_err(|e| format!("Failed to save token: {}", e))?;
+
+    Ok("Token saved successfully".into())
+}
+
+/// Disconnect: remove stored token.
+#[tauri::command]
+pub fn claude_disconnect() -> Result<(), String> {
+    let _ = token_store::delete_provider_token("claude-code", "access-token");
+    Ok(())
+}
+
+/// Start OAuth PKCE flow: generate URL for the user to open in browser.
+#[tauri::command]
+pub fn claude_start_oauth() -> Result<String, String> {
+    let (code_verifier, code_challenge) = generate_pkce();
+    let state = generate_state();
+
+    // Store PKCE state for the exchange step
+    if let Ok(mut guard) = OAUTH_STATE.lock() {
+        *guard = Some((code_verifier, state.clone()));
+    }
+
+    let url = format!(
+        "{}?code=true&client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
+        OAUTH_AUTHORIZE_URL,
+        OAUTH_CLIENT_ID,
+        urlencoding::encode(OAUTH_REDIRECT_URI),
+        urlencoding::encode(OAUTH_SCOPES),
+        code_challenge,
+        state,
+    );
+
+    Ok(url)
+}
+
+/// Complete OAuth flow: exchange the auth code for an access token.
+/// The user pastes the full code from the callback page (code#state format or just code).
+#[tauri::command]
+pub fn claude_exchange_oauth_code(auth_code: String) -> Result<String, String> {
+    let auth_code = auth_code.trim().to_string();
+    if auth_code.is_empty() {
+        return Err("Auth code cannot be empty".into());
+    }
+
+    // Retrieve stored PKCE verifier and state
+    let (code_verifier, _expected_state) = {
+        let guard = OAUTH_STATE.lock().map_err(|e| format!("Lock error: {}", e))?;
+        guard.clone().ok_or("No OAuth flow in progress. Click 'Sign In' first.")?
+    };
+
+    // The callback page shows "code#state" — split if present
+    let code = if auth_code.contains('#') {
+        auth_code.split('#').next().unwrap_or(&auth_code).to_string()
+    } else {
+        auth_code
+    };
+
+    // Retrieve stored state for the exchange
+    let stored_state = {
+        let guard = OAUTH_STATE.lock().map_err(|e| format!("Lock error: {}", e))?;
+        guard.as_ref().map(|(_, s)| s.clone()).unwrap_or_default()
+    };
+
+    // Exchange code for access token via api.anthropic.com (no Cloudflare)
+    // NOTE: anthropic-beta header must NOT be included — it causes "Invalid request format"
+    // NOTE: state param IS required — without it the endpoint rejects the request
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let body = serde_json::json!({
+        "grant_type": "authorization_code",
+        "client_id": OAUTH_CLIENT_ID,
+        "code": code,
+        "redirect_uri": OAUTH_REDIRECT_URI,
+        "code_verifier": code_verifier,
+        "state": stored_state,
+    });
+
+    let resp = client
+        .post(OAUTH_TOKEN_URL)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Token exchange request failed: {}", e))?;
+
+    let status = resp.status();
+    let body = resp.text().map_err(|e| format!("Failed to read response: {}", e))?;
+
+    if !status.is_success() {
+        return Err(format!("Token exchange failed ({}): {}", status, body));
+    }
+
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+    let access_token = json.get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("No access_token in response")?;
+
+    let refresh_token = json.get("refresh_token")
+        .and_then(|v| v.as_str());
+
+    // Save tokens to our store
+    token_store::store_provider_token("claude-code", "access-token", access_token)
+        .map_err(|e| format!("Failed to save access token: {}", e))?;
+
+    if let Some(rt) = refresh_token {
+        let _ = token_store::store_provider_token("claude-code", "refresh-token", rt);
+    }
+
+    // Clear PKCE state
+    if let Ok(mut guard) = OAUTH_STATE.lock() {
+        *guard = None;
+    }
+
+    Ok("Sign in successful".into())
+}
+
+// ── Rate Limit Parsing ──────────────────────────────────────────────────────
+
+fn parse_window(
+    window: &Option<UsageWindow>,
+    label: &str,
+    window_seconds: Option<i64>,
+) -> Option<RateLimitWindow> {
+    let w = window.as_ref()?;
+    let utilization = w.utilization?;
+    Some(RateLimitWindow {
+        provider_id: "claude-code".into(),
+        label: label.into(),
+        used_percent: utilization,
+        remaining_percent: (100.0 - utilization).max(0.0),
+        resets_at: w.resets_at.clone(),
+        resets_in_seconds: None,
+        window_seconds,
+    })
+}
+
+// ── Public API (uses silent resolution only) ────────────────────────────────
+
+/// Fetch Claude Code analytics (rate limits + profile).
+/// Uses silent token resolution — never triggers keychain prompt.
+/// Results are cached for 300s to avoid repeated API calls.
+pub fn fetch_claude_analytics() -> ProviderAnalytics {
+    // Return cached data if still fresh
+    if let Ok(guard) = CLAUDE_CACHE.lock() {
+        if let Some(ref entry) = *guard {
+            if entry.fetched_at.elapsed().as_secs() < CLAUDE_CACHE_TTL_SECS {
+                return entry.data.clone();
+            }
+        }
+    }
+
+    let result = fetch_claude_analytics_uncached();
+
+    // Cache successful results
+    if result.status.connected {
+        if let Ok(mut guard) = CLAUDE_CACHE.lock() {
+            *guard = Some(ClaudeCacheEntry {
+                data: result.clone(),
+                fetched_at: std::time::Instant::now(),
+            });
+        }
+    }
+
+    result
+}
+
+fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
+    let now = Utc::now().to_rfc3339();
+
+    let (token, method) = match resolve_access_token_silent() {
+        Ok(t) => t,
+        Err(e) => {
+            return ProviderAnalytics {
+                provider_id: "claude-code".into(),
+                provider_name: "Claude Code".into(),
+                status: ProviderStatus {
+                    provider_id: "claude-code".into(),
+                    provider_name: "Claude Code".into(),
+                    connected: false,
+                    connection_method: "none".into(),
+                    account_email: None,
+                    plan_name: None,
+                    org_name: None,
+                    error: Some(e),
+                },
+                rate_limits: vec![],
+                credit_usage: None,
+                token_counts: None,
+                extra: HashMap::new(),
+                fetched_at: now,
+            };
+        }
+    };
+
+    let extra_headers = http::headers(&[("anthropic-beta", "oauth-2025-04-20")]);
+
+    // Fetch usage + profile with the current token
+    let mut active_token = token;
+    let mut usage: Option<ClaudeUsageResponse> = http::authed_get(
+        "https://api.anthropic.com/api/oauth/usage",
+        &active_token,
+        Some(extra_headers.clone()),
+    ).ok();
+
+    let mut profile: Option<ClaudeProfileResponse> = http::authed_get(
+        "https://api.anthropic.com/api/oauth/profile",
+        &active_token,
+        Some(extra_headers.clone()),
+    ).ok();
+
+    // If profile or usage is empty (token may be expired), try refreshing and retrying both
+    let usage_empty = usage.is_none() || usage.as_ref().and_then(|u| u.five_hour.as_ref()).is_none();
+    let profile_empty = profile.is_none() || profile.as_ref().and_then(|p| p.account.as_ref()).is_none();
+    if usage_empty || profile_empty {
+        if let Some(new_token) = try_refresh_access_token() {
+            active_token = new_token;
+            let fresh_headers = http::headers(&[("anthropic-beta", "oauth-2025-04-20")]);
+            if usage_empty {
+                usage = http::authed_get(
+                    "https://api.anthropic.com/api/oauth/usage",
+                    &active_token,
+                    Some(fresh_headers.clone()),
+                ).ok();
+            }
+            if profile_empty {
+                profile = http::authed_get(
+                    "https://api.anthropic.com/api/oauth/profile",
+                    &active_token,
+                    Some(fresh_headers),
+                ).ok();
+            }
+        }
+    }
+    let _ = active_token; // suppress unused warning
+
+    // Build rate limits
+    let mut rate_limits = Vec::new();
+    if let Some(ref u) = usage {
+        if let Some(w) = parse_window(&u.five_hour, "Session (5h)", Some(18000)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day, "Weekly (All)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day_opus, "Opus (7d)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day_sonnet, "Sonnet (7d)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day_oauth_apps, "OAuth Apps (7d)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day_cowork, "Cowork (7d)", Some(604800)) {
+            rate_limits.push(w);
+        }
+    }
+
+    // Build credit usage
+    let credit_usage = usage.as_ref().and_then(|u| {
+        let extra = u.extra_usage.as_ref()?;
+        if !extra.is_enabled.unwrap_or(false) { return None; }
+        Some(CreditUsage {
+            provider_id: "claude-code".into(),
+            used: extra.used_credits.unwrap_or(0.0) / 100.0,
+            limit: extra.monthly_limit.map(|l| l / 100.0),
+            remaining: {
+                let limit = extra.monthly_limit.unwrap_or(0.0) / 100.0;
+                let used = extra.used_credits.unwrap_or(0.0) / 100.0;
+                (limit - used).max(0.0)
+            },
+            currency: "USD".into(),
+            billing_cycle_end: None,
+            plan_name: None,
+        })
+    });
+
+    // Build extra data from profile
+    let mut extra = HashMap::new();
+    let (email, plan, org_name) = if let Some(ref p) = profile {
+        let email = p.account.as_ref().and_then(|a| a.email.clone());
+        let org = p.organization.as_ref();
+        let plan = org.and_then(|o| {
+            if let Some(ref tier) = o.rate_limit_tier {
+                if tier.contains("max") { Some("Max".to_string()) }
+                else if tier.contains("pro") { Some("Pro".to_string()) }
+                else { Some(tier.clone()) }
+            } else {
+                o.organization_type.clone()
+            }
+        });
+        let org_name = org.and_then(|o| o.name.clone());
+        let sub_status = org.and_then(|o| o.subscription_status.clone());
+
+        if let Some(ref acct) = p.account {
+            if let Some(true) = acct.has_claude_max {
+                extra.insert("has_claude_max".into(), serde_json::Value::Bool(true));
+            }
+            if let Some(ref created) = acct.created_at {
+                extra.insert("account_created_at".into(), serde_json::Value::String(created.clone()));
+            }
+        }
+        if let Some(ref s) = sub_status {
+            extra.insert("subscription_status".into(), serde_json::Value::String(s.clone()));
+        }
+        if let Some(ref tier) = org.and_then(|o| o.rate_limit_tier.clone()) {
+            extra.insert("rate_limit_tier".into(), serde_json::Value::String(tier.clone()));
+        }
+
+        (email, plan, org_name)
+    } else {
+        let creds = read_auto_credentials().ok();
+        let plan = creds.as_ref().and_then(|c| c.subscription_type.clone());
+        (None, plan, None)
+    };
+
+    // Enrich with today's local session stats
+    enrich_with_today_stats(&mut extra);
+
+    ProviderAnalytics {
+        provider_id: "claude-code".into(),
+        provider_name: "Claude Code".into(),
+        status: ProviderStatus {
+            provider_id: "claude-code".into(),
+            provider_name: "Claude Code".into(),
+            connected: true,
+            connection_method: method,
+            account_email: email,
+            plan_name: plan,
+            org_name,
+            error: None,
+        },
+        rate_limits,
+        credit_usage,
+        token_counts: None,
+        extra,
+        fetched_at: now,
+    }
+}
+
+/// Token stats accumulator for a time window with model-aware cost tracking.
+#[derive(Default, Clone)]
+struct WindowStats {
+    sessions: i64,
+    messages: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read: i64,
+    cache_write: i64,
+    // Model-aware running cost totals
+    total_cost: f64,
+    input_cost: f64,
+    output_cost: f64,
+    cache_read_cost: f64,
+    cache_write_cost: f64,
+}
+
+impl WindowStats {
+    fn total_tokens(&self) -> i64 {
+        self.input_tokens + self.output_tokens + self.cache_read + self.cache_write
+    }
+
+    /// Add token usage with model-aware cost calculation
+    fn add_usage(&mut self, model: Option<&str>, inp: i64, outp: i64, cr: i64, cw: i64) {
+        self.input_tokens += inp;
+        self.output_tokens += outp;
+        self.cache_read += cr;
+        self.cache_write += cw;
+
+        let pricing = crate::analytics::cost_engine::get_pricing(model.unwrap_or("sonnet"));
+        let mtok = 1_000_000.0_f64;
+        let ic = (inp as f64 / mtok) * pricing.input_per_mtok;
+        let oc = (outp as f64 / mtok) * pricing.output_per_mtok;
+        let crc = (cr as f64 / mtok) * pricing.cache_read_per_mtok;
+        let cwc = (cw as f64 / mtok) * pricing.cache_write_per_mtok;
+        self.input_cost += ic;
+        self.output_cost += oc;
+        self.cache_read_cost += crc;
+        self.cache_write_cost += cwc;
+        self.total_cost += ic + oc + crc + cwc;
+    }
+
+    fn insert_to_extra(&self, prefix: &str, extra: &mut HashMap<String, serde_json::Value>) {
+        if self.sessions == 0 { return; }
+        extra.insert(format!("{}_sessions", prefix), serde_json::json!(self.sessions));
+        extra.insert(format!("{}_messages", prefix), serde_json::json!(self.messages));
+        extra.insert(format!("{}_tokens", prefix), serde_json::json!(self.total_tokens()));
+        extra.insert(format!("{}_input_tokens", prefix), serde_json::json!(self.input_tokens));
+        extra.insert(format!("{}_output_tokens", prefix), serde_json::json!(self.output_tokens));
+        extra.insert(format!("{}_cache_read", prefix), serde_json::json!(self.cache_read));
+        extra.insert(format!("{}_cache_write", prefix), serde_json::json!(self.cache_write));
+        extra.insert(format!("{}_cost", prefix), serde_json::json!(self.total_cost));
+        extra.insert(format!("{}_input_cost", prefix), serde_json::json!(self.input_cost));
+        extra.insert(format!("{}_output_cost", prefix), serde_json::json!(self.output_cost));
+        extra.insert(format!("{}_cache_read_cost", prefix), serde_json::json!(self.cache_read_cost));
+        extra.insert(format!("{}_cache_write_cost", prefix), serde_json::json!(self.cache_write_cost));
+    }
+}
+
+/// Start of the current **calendar day in IST** (Asia/Kolkata, UTC+5:30, no DST), as UTC.
+/// Used for tray "Today" and analytics `today` range so midnight matches Indian Standard Time.
+pub fn claude_calendar_day_start_ist_utc() -> chrono::DateTime<chrono::Utc> {
+    use chrono::{TimeZone, Utc};
+    let ist = chrono::FixedOffset::east_opt(5 * 3600 + 30 * 60).expect("IST offset");
+    let now_ist = Utc::now().with_timezone(&ist);
+    let naive_midnight = now_ist
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    ist.from_local_datetime(&naive_midnight)
+        .single()
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(Utc::now)
+}
+
+/// Start of local calendar week (Monday 00:00) as file `modified` time floor.
+/// JSONL files older than this are skipped in tray stats (`enrich_with_today_stats`) and must be
+/// skipped when V2 aggregates the **`today`** (IST calendar day) window so totals match the menu bar.
+pub fn projects_jsonl_tray_mtime_floor() -> std::time::SystemTime {
+    use chrono::{Datelike, NaiveTime, TimeZone};
+    let local_now = chrono::Local::now();
+    let weekday = local_now.weekday().num_days_from_monday();
+    let monday_naive = (local_now.date_naive() - chrono::Duration::days(weekday as i64))
+        .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+    chrono::Local
+        .from_local_datetime(&monday_naive)
+        .single()
+        .map(|dt| {
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(dt.timestamp() as u64)
+        })
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now() - std::time::Duration::from_secs(86400)
+        })
+}
+
+/// Enrich extra with local JSONL stats for **today (IST)**, **this week**, and **all time**.
+fn enrich_with_today_stats(extra: &mut HashMap<String, serde_json::Value>) {
+    let claude_dir = match dirs::home_dir() {
+        Some(h) => h.join(".claude").join("projects"),
+        None => return,
+    };
+    if !claude_dir.exists() { return; }
+
+    use chrono::{Datelike, NaiveTime, TimeZone};
+    let local_now = chrono::Local::now();
+    let utc_now = chrono::Utc::now();
+
+    fn to_z_string(dt: chrono::DateTime<chrono::Utc>) -> String {
+        dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    }
+
+    let cutoff_today = to_z_string(claude_calendar_day_start_ist_utc());
+
+    let weekday = local_now.weekday().num_days_from_monday();
+    let monday_naive = (local_now.date_naive() - chrono::Duration::days(weekday as i64))
+        .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+    let cutoff_week = chrono::Local.from_local_datetime(&monday_naive).single()
+        .map(|dt| to_z_string(dt.with_timezone(&chrono::Utc)))
+        .unwrap_or_else(|| to_z_string(utc_now - chrono::Duration::days(7)));
+
+    let week_sys = projects_jsonl_tray_mtime_floor();
+
+    let mut stats_today = WindowStats::default();
+    let mut stats_week = WindowStats::default();
+    let mut stats_all = WindowStats::default();
+
+    let mut sessions_today = std::collections::HashSet::new();
+    let mut sessions_week = std::collections::HashSet::new();
+    let mut sessions_all = std::collections::HashSet::new();
+
+    fn collect_jsonl_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect_jsonl_files(&path, out);
+                } else if path.extension().map_or(false, |e| e == "jsonl") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    let mut all_jsonl: Vec<std::path::PathBuf> = Vec::new();
+    collect_jsonl_files(&claude_dir, &mut all_jsonl);
+
+    for path in &all_jsonl {
+        let modified_after_week = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .map(|t| t >= week_sys)
+            .unwrap_or(false);
+
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let file_id = path.to_string_lossy().to_string();
+        // Per-file dedup: skip duplicate streaming chunks by (message.id, requestId)
+        let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for line in content.lines() {
+            let ts_ref = {
+                let needle1 = "\"timestamp\":\"";
+                let needle2 = "\"timestamp\": \"";
+                let start_and_len = line.find(needle1).map(|i| (i + needle1.len(), needle1.len()))
+                    .or_else(|| line.find(needle2).map(|i| (i + needle2.len(), needle2.len())));
+                if let Some((val_start, _)) = start_and_len {
+                    let rest = &line[val_start..];
+                    rest.find('"').map(|end| &line[val_start..val_start + end])
+                } else {
+                    None
+                }
+            };
+
+            let ts_str = match ts_ref {
+                Some(s) if !s.is_empty() => s,
+                _ => continue,
+            };
+
+            let in_week = modified_after_week && ts_str >= cutoff_week.as_str();
+            let in_today = modified_after_week && ts_str >= cutoff_today.as_str();
+
+            let is_user = line.contains("\"type\":\"user\"") || line.contains("\"type\": \"user\"");
+            let is_assistant = line.contains("\"type\":\"assistant\"") || line.contains("\"type\": \"assistant\"");
+
+            if is_user || is_assistant {
+                stats_all.messages += 1; sessions_all.insert(file_id.clone());
+                if in_week { stats_week.messages += 1; sessions_week.insert(file_id.clone()); }
+                if in_today { stats_today.messages += 1; sessions_today.insert(file_id.clone()); }
+            }
+
+            if line.contains("\"usage\"") {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
+                    // Deduplicate streaming chunks by (message.id, requestId)
+                    let msg = val.get("message");
+                    let message_id = msg.and_then(|m| m.get("id")).and_then(|v| v.as_str());
+                    let request_id = val.get("requestId").and_then(|v| v.as_str());
+                    if let (Some(mid), Some(rid)) = (message_id, request_id) {
+                        let key = format!("{}:{}", mid, rid);
+                        if seen_keys.contains(&key) {
+                            continue;
+                        }
+                        seen_keys.insert(key);
+                    }
+
+                    let usage = msg.and_then(|m| m.get("usage"))
+                        .or_else(|| val.get("usage"));
+                    let model_str = msg.and_then(|m| m.get("model")).and_then(|v| v.as_str());
+
+                    if let Some(usage) = usage {
+                        let inp = usage.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let outp = usage.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let cr = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let cw = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+
+                        stats_all.add_usage(model_str, inp, outp, cr, cw);
+                        if in_week { stats_week.add_usage(model_str, inp, outp, cr, cw); }
+                        if in_today { stats_today.add_usage(model_str, inp, outp, cr, cw); }
+                    }
+                }
+            }
+        }
+    }
+
+    stats_today.sessions = sessions_today.len() as i64;
+    stats_week.sessions = sessions_week.len() as i64;
+    stats_all.sessions = sessions_all.len() as i64;
+
+    stats_today.insert_to_extra("start_today", extra);
+    stats_week.insert_to_extra("this_week", extra);
+    stats_all.insert_to_extra("all_time", extra);
+}
+
+/// Fetch the full account data from /api/oauth/account (silent only).
+pub fn fetch_claude_account() -> Result<serde_json::Value, String> {
+    let (token, _) = resolve_access_token_silent()?;
+    let extra_headers = http::headers(&[("anthropic-beta", "oauth-2025-04-20")]);
+    http::authed_get::<serde_json::Value>(
+        "https://api.anthropic.com/api/oauth/account",
+        &token,
+        Some(extra_headers),
+    )
+}
+
+/// Check if credentials exist silently (without API calls or keychain).
+pub fn check_connection() -> ProviderStatus {
+    match resolve_access_token_silent() {
+        Ok((_, method)) => ProviderStatus {
+            provider_id: "claude-code".into(),
+            provider_name: "Claude Code".into(),
+            connected: true,
+            connection_method: method,
+            account_email: None,
+            plan_name: None,
+            org_name: None,
+            error: None,
+        },
+        Err(e) => ProviderStatus {
+            provider_id: "claude-code".into(),
+            provider_name: "Claude Code".into(),
+            connected: false,
+            connection_method: "none".into(),
+            account_email: None,
+            plan_name: None,
+            org_name: None,
+            error: Some(e),
+        },
+    }
+}
