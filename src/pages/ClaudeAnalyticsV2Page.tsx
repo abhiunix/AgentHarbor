@@ -192,22 +192,23 @@ function timeAgo(iso: string | null): string {
 }
 
 function resetCountdown(resetsAt: string | null, windowSeconds?: number | null): string {
-  let diff: number;
   if (resetsAt) {
-    diff = new Date(resetsAt).getTime() - Date.now();
-  } else if (windowSeconds && windowSeconds > 0) {
-    // No explicit reset time — estimate from window duration
-    diff = windowSeconds * 1000; // worst case: full window remaining
-  } else {
-    return "—";
+    const diff = new Date(resetsAt).getTime() - Date.now();
+    if (diff <= 0) return "now";
+    const s = Math.floor(diff / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h > 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
   }
-  if (diff <= 0) return "now";
-  const s = Math.floor(diff / 1000);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (h > 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+  // Fallback: estimate from window size (5h session = 18000s, 7d = 604800s)
+  if (windowSeconds) {
+    const h = Math.floor(windowSeconds / 3600);
+    if (h >= 24) return `~${Math.floor(h / 24)}d`;
+    return `~${h}h`;
+  }
+  return "—";
 }
 
 const COLORS = ["#3b82f6", "#8b5cf6", "#22c55e", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16", "#a855f7", "#14b8a6"];
@@ -1138,11 +1139,7 @@ function ClaudeAnalyticsV2Inner() {
                             <div>
                               <span className="text-text-secondary">{rl.label}</span>
                               <span className="text-text-muted text-[10px] ml-2">
-                                Resets {rl.resets_at
-                                  ? new Date(rl.resets_at).toLocaleDateString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })
-                                  : rl.window_seconds
-                                    ? `in ${resetCountdown(null, rl.window_seconds)}`
-                                    : "—"}
+                                Resets {rl.resets_at ? new Date(rl.resets_at).toLocaleDateString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }) : (rl.window_seconds ? `in ~${Math.floor(rl.window_seconds / 86400)}d` : "—")}
                               </span>
                             </div>
                           </div>
