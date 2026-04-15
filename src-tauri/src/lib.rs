@@ -382,7 +382,6 @@ pub fn run() {
             update_tray_tooltip,
             crate::analytics::commands::refresh_tray_data,
             crate::analytics::commands::force_refresh_provider,
-            crate::analytics::commands::set_tray_display_provider,
             crate::tray::show_main_window,
             // Claude Code Auth Flow
             claude_check_silent_credentials,

@@ -25,9 +25,6 @@ lazy_static::lazy_static! {
 
     /// Whether the background refresh loop is running.
     static ref TRAY_REFRESH_ACTIVE: StdMutex<bool> = StdMutex::new(false);
-
-    /// The currently selected provider in the tray popover (for menu bar percentage display).
-    static ref TRAY_SELECTED_PROVIDER: StdMutex<String> = StdMutex::new("claude-code".to_string());
 }
 
 const TRAY_REFRESH_INTERVAL_SECS: u64 = 120;
@@ -242,47 +239,7 @@ fn refresh_and_emit() {
     if let Ok(guard) = TRAY_APP_HANDLE.lock() {
         if let Some(ref app) = *guard {
             let _ = app.emit("tray-data-updated", &summary);
-
-            // Update menu bar tray title with selected provider's worst rate limit %
-            update_tray_title(app, &summary);
         }
-    }
-}
-
-/// Update the tray icon title text (shown next to icon in macOS menu bar).
-/// Shows the worst rate limit percentage of the currently selected provider.
-fn update_tray_title(app: &AppHandle<Wry>, summary: &TraySummary) {
-    let selected = TRAY_SELECTED_PROVIDER.lock()
-        .map(|g| g.clone())
-        .unwrap_or_else(|_| "claude-code".to_string());
-
-    let provider = summary.providers.iter()
-        .find(|p| p.provider_id == selected);
-
-    let title = if let Some(p) = provider {
-        if !p.connected {
-            None
-        } else if p.rate_limits.is_empty() {
-            None
-        } else {
-            // Pick the worst (highest used_percent) primary rate limit
-            let worst = p.rate_limits.iter()
-                .filter(|rl| {
-                    rl.label.contains("Session") || rl.label.contains("5h")
-                        || rl.label.contains("Primary") || rl.label.contains("Pro")
-                })
-                .max_by(|a, b| a.used_percent.partial_cmp(&b.used_percent).unwrap_or(std::cmp::Ordering::Equal));
-            // Fallback to any rate limit if no primary found
-            let worst = worst.or_else(|| p.rate_limits.iter()
-                .max_by(|a, b| a.used_percent.partial_cmp(&b.used_percent).unwrap_or(std::cmp::Ordering::Equal)));
-            worst.map(|rl| format!("{:.0}%", rl.used_percent))
-        }
-    } else {
-        None
-    };
-
-    if let Some(tray) = app.tray_by_id("main-tray") {
-        let _ = tray.set_title(title.as_deref());
     }
 }
 
@@ -343,25 +300,6 @@ pub fn get_tray_summary() -> TraySummary {
 #[tauri::command]
 pub fn refresh_tray_data() {
     thread::spawn(|| refresh_and_emit());
-}
-
-/// Set the selected provider for tray menu bar percentage display.
-/// Called from the frontend when user switches tabs in the tray popover.
-#[tauri::command]
-pub fn set_tray_display_provider(provider_id: String) {
-    if let Ok(mut guard) = TRAY_SELECTED_PROVIDER.lock() {
-        *guard = provider_id;
-    }
-    // Immediately update the tray title with the new provider's data
-    if let Ok(cache_guard) = TRAY_SUMMARY_CACHE.lock() {
-        if let Some(ref summary) = *cache_guard {
-            if let Ok(app_guard) = TRAY_APP_HANDLE.lock() {
-                if let Some(ref app) = *app_guard {
-                    update_tray_title(app, summary);
-                }
-            }
-        }
-    }
 }
 
 /// Force-refresh a specific provider by clearing its cache and re-fetching.
