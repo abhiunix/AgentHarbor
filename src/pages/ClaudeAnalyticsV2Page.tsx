@@ -191,9 +191,16 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(m / 60)}h ago`;
 }
 
-function resetCountdown(resetsAt: string | null): string {
-  if (!resetsAt) return "";
-  const diff = new Date(resetsAt).getTime() - Date.now();
+function resetCountdown(resetsAt: string | null, windowSeconds?: number | null): string {
+  let diff: number;
+  if (resetsAt) {
+    diff = new Date(resetsAt).getTime() - Date.now();
+  } else if (windowSeconds && windowSeconds > 0) {
+    // No explicit reset time — estimate from window duration
+    diff = windowSeconds * 1000; // worst case: full window remaining
+  } else {
+    return "—";
+  }
   if (diff <= 0) return "now";
   const s = Math.floor(diff / 1000);
   const h = Math.floor(s / 3600);
@@ -1095,7 +1102,7 @@ function ClaudeAnalyticsV2Inner() {
                         <div className="flex justify-between text-xs mb-1">
                           <div>
                             <span className="text-text-secondary">{rl.label}</span>
-                            {rl.resets_at && <span className="text-text-muted text-[10px] ml-2">Resets in {resetCountdown(rl.resets_at) || "—"}</span>}
+                            <span className="text-text-muted text-[10px] ml-2">Resets in {resetCountdown(rl.resets_at, rl.window_seconds)}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1130,11 +1137,13 @@ function ClaudeAnalyticsV2Inner() {
                           <div className="flex justify-between text-xs mb-1">
                             <div>
                               <span className="text-text-secondary">{rl.label}</span>
-                              {rl.resets_at && (
-                                <span className="text-text-muted text-[10px] ml-2">
-                                  Resets {new Date(rl.resets_at).toLocaleDateString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}
-                                </span>
-                              )}
+                              <span className="text-text-muted text-[10px] ml-2">
+                                Resets {rl.resets_at
+                                  ? new Date(rl.resets_at).toLocaleDateString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })
+                                  : rl.window_seconds
+                                    ? `in ${resetCountdown(null, rl.window_seconds)}`
+                                    : "—"}
+                              </span>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
