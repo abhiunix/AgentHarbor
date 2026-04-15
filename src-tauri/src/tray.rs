@@ -88,6 +88,12 @@ pub fn show_main_window(app: AppHandle) {
     }
 }
 
+/// Tauri command: quit the app from tray popover actions.
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 pub fn setup_tray(app: &AppHandle<Wry>, show: bool) -> tauri::Result<()> {
     if show && !TRAY_CREATED.load(Ordering::SeqCst) {
         let quit_item = MenuItem::with_id(app, "quit", "Quit AgentHarbor", true, None::<&str>)?;
@@ -119,6 +125,7 @@ pub fn setup_tray(app: &AppHandle<Wry>, show: bool) -> tauri::Result<()> {
         .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
         .position(-9999.0, -9999.0) // offscreen until first show
         .decorations(false)
+        .transparent(true)
         .always_on_top(true)
         .visible(false)
         .skip_taskbar(true)

@@ -53,26 +53,60 @@ function barColor(percent: number): string {
   return "bg-red-500";
 }
 
-function formatResetLabel(rl: RateLimitWindow): string {
-  // Try resets_at first (absolute time) for "Resets Fri 4:30 PM" style
+function isSessionWindow(label: string): boolean {
+  const lower = label.toLowerCase();
+  return lower.includes("session") || lower.includes("5h");
+}
+
+function resolveResetDate(rl: RateLimitWindow): Date | null {
   if (rl.resets_at) {
     const d = new Date(rl.resets_at);
-    if (!isNaN(d.getTime())) {
-      const now = new Date();
-      const diffMs = d.getTime() - now.getTime();
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  if (rl.resets_in_seconds != null && rl.resets_in_seconds > 0) {
+    return new Date(Date.now() + rl.resets_in_seconds * 1000);
+  }
+
+  if (rl.window_seconds != null && rl.window_seconds > 0) {
+    return new Date(Date.now() + rl.window_seconds * 1000);
+  }
+
+  return null;
+}
+
+function formatAbsoluteResetDate(d: Date): string {
+  const datePart = d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const timePart = d
+    .toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .toLowerCase();
+  return `${datePart} at ${timePart}`;
+}
+
+function formatResetLabel(rl: RateLimitWindow): string {
+  const resetDate = resolveResetDate(rl);
+
+  if (resetDate) {
+    if (isSessionWindow(rl.label)) {
+      const diffMs = resetDate.getTime() - Date.now();
       if (diffMs > 0 && diffMs < 24 * 3600 * 1000) {
-        // Within 24h — show "Resets in Xh Ym"
         const h = Math.floor(diffMs / 3600000);
         const m = Math.floor((diffMs % 3600000) / 60000);
         return h > 0 ? `Resets in ${h}h ${m}m` : `Resets in ${m}m`;
       }
-      // Further away — show "Resets Day HH:MM AM/PM"
-      const day = d.toLocaleDateString("en-US", { weekday: "short" });
-      const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-      return `Resets ${day} ${time}`;
     }
+
+    return `Resets ${formatAbsoluteResetDate(resetDate)}`;
   }
-  // Fallback to resets_in_seconds
+
+  // Final fallback to duration format when date resolution isn't possible.
   if (rl.resets_in_seconds != null && rl.resets_in_seconds > 0) {
     const s = rl.resets_in_seconds;
     if (s < 3600) return `Resets in ${Math.round(s / 60)}m`;
