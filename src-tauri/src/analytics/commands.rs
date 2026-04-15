@@ -1,10 +1,11 @@
 //! Tauri commands for the unified analytics system.
 
 use serde::Serialize;
+use std::cmp::Ordering;
 use std::sync::Mutex as StdMutex;
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Wry};
+use tauri::{image::Image, AppHandle, Emitter, Wry};
 
 use crate::analytics::types::*;
 use crate::analytics::{
@@ -25,9 +26,18 @@ lazy_static::lazy_static! {
 
     /// Whether the background refresh loop is running.
     static ref TRAY_REFRESH_ACTIVE: StdMutex<bool> = StdMutex::new(false);
+
+    /// Last selected tray provider tab from the frontend.
+    static ref TRAY_ACTIVE_PROVIDER: StdMutex<Option<String>> = StdMutex::new(None);
 }
 
 const TRAY_REFRESH_INTERVAL_SECS: u64 = 120;
+const PRIMARY_PROVIDER_IDS: [&str; 4] = ["claude-code", "cursor", "codex", "gemini"];
+
+const CLAUDE_CODE_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/claude-code.png");
+const CURSOR_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/cursor.png");
+const CODEX_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/codex.png");
+const GEMINI_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/gemini.png");
 
 // ── Provider status ─────────────────────────────────────────────────────────
 
@@ -150,6 +160,171 @@ pub struct TraySummary {
     pub fetched_at: String,
 }
 
+fn is_primary_rate_window(label: &str) -> bool {
+    label.contains("5h") || label.contains("Weekly") || label.contains("Session")
+}
+
+fn pick_primary_provider_rate(provider: &TrayProviderSummary) -> Option<RateLimitWindow> {
+    let best_primary = provider
+        .rate_limits
+        .iter()
+        .filter(|rl| is_primary_rate_window(&rl.label))
+        .min_by(|a, b| {
+            a.remaining_percent
+                .partial_cmp(&b.remaining_percent)
+                .unwrap_or(Ordering::Equal)
+        })
+        .cloned();
+
+    if best_primary.is_some() {
+        return best_primary;
+    }
+
+    provider
+        .rate_limits
+        .iter()
+        .min_by(|a, b| {
+            a.remaining_percent
+                .partial_cmp(&b.remaining_percent)
+                .unwrap_or(Ordering::Equal)
+        })
+        .cloned()
+}
+
+fn numeric_extra_value(
+    provider: &TrayProviderSummary,
+    key: &str,
+) -> Option<f64> {
+    provider.extra.get(key).and_then(|value| value.as_f64())
+}
+
+fn compute_provider_used_percent(provider: &TrayProviderSummary) -> Option<f64> {
+    if let Some(rate) = pick_primary_provider_rate(provider) {
+        return Some(rate.used_percent.clamp(0.0, 100.0));
+    }
+
+    // Cursor tray percent comes from the API's individualUsage.plan.totalPercentUsed
+    // field. The menu bar title later rounds this to a whole number (e.g. 66.3 -> 66%).
+    if let Some(percent) = numeric_extra_value(provider, "plan_total_percent_used") {
+        return Some(percent.clamp(0.0, 100.0));
+    }
+
+    if let Some(credit) = provider.credit_usage.as_ref() {
+        if let Some(limit) = credit.limit {
+            if limit > 0.0 {
+                let percent = (credit.used / limit) * 100.0;
+                return Some(percent.clamp(0.0, 100.0));
+            }
+        }
+    }
+
+    // Fallback for providers that expose team on-demand spend in `extra`.
+    let team_used = numeric_extra_value(provider, "team_od_used_usd");
+    let team_limit = numeric_extra_value(provider, "team_od_limit_usd");
+    if let (Some(used), Some(limit)) = (team_used, team_limit) {
+        if limit > 0.0 {
+            let percent = (used / limit) * 100.0;
+            return Some(percent.clamp(0.0, 100.0));
+        }
+    }
+
+    None
+}
+
+fn pick_display_provider_id(
+    summary: &TraySummary,
+    active_provider_id: Option<&str>,
+) -> Option<String> {
+    if let Some(provider_id) = active_provider_id {
+        if summary
+            .providers
+            .iter()
+            .any(|p| p.provider_id == provider_id && p.connected)
+        {
+            return Some(provider_id.to_string());
+        }
+    }
+
+    if let Some(worst) = summary.worst_rate_limit.as_ref() {
+        return Some(worst.provider_id.clone());
+    }
+
+    summary
+        .providers
+        .iter()
+        .find(|p| p.connected)
+        .map(|p| p.provider_id.clone())
+}
+
+fn icon_bytes_for_provider(provider_id: &str) -> &'static [u8] {
+    match provider_id {
+        "claude-code" => CLAUDE_CODE_TRAY_ICON_PNG,
+        "cursor" => CURSOR_TRAY_ICON_PNG,
+        "codex" => CODEX_TRAY_ICON_PNG,
+        "gemini" => GEMINI_TRAY_ICON_PNG,
+        _ => &[],
+    }
+}
+
+fn load_provider_tray_icon(provider_id: &str) -> Option<Image<'static>> {
+    let icon_bytes = icon_bytes_for_provider(provider_id);
+    if icon_bytes.is_empty() {
+        return None;
+    }
+
+    if let Ok(img) = Image::from_bytes(icon_bytes) {
+        return Some(img.to_owned());
+    }
+
+    None
+}
+
+fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
+    let active_provider_id = TRAY_ACTIVE_PROVIDER
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    let display_provider_id =
+        pick_display_provider_id(summary, active_provider_id.as_deref());
+    let display_provider = display_provider_id.as_ref().and_then(|provider_id| {
+        summary
+            .providers
+            .iter()
+            .find(|provider| provider.provider_id == *provider_id)
+    });
+    let display_used_percent = display_provider
+        .and_then(compute_provider_used_percent)
+        .or_else(|| {
+            summary
+                .worst_rate_limit
+                .as_ref()
+                .map(|rate| rate.used_percent.clamp(0.0, 100.0))
+        });
+
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        if let Some(used_percent) = display_used_percent {
+            let rounded_percent = used_percent.round() as u32;
+            // Keep title as pure percentage because provider identity is conveyed
+            // by the tray icon. Rendering both icon + unicode symbol causes a
+            // duplicate-looking icon in the menu bar.
+            let title = format!("{}%", rounded_percent);
+            let _ = tray.set_title(Some(&title));
+        } else {
+            let _ = tray.set_title(Option::<&str>::None);
+        }
+
+        if let Some(provider_id) = display_provider_id {
+            if let Some(icon) = load_provider_tray_icon(&provider_id) {
+                let _ = tray.set_icon(Some(icon));
+            } else {
+                let _ = tray.set_icon(Option::<Image<'_>>::None);
+            }
+        } else {
+            let _ = tray.set_icon(Option::<Image<'_>>::None);
+        }
+    }
+}
+
 /// Build a TraySummary by fetching all 4 providers IN PARALLEL.
 /// Each provider runs in its own thread, so total time = max(provider_times).
 fn build_tray_summary() -> TraySummary {
@@ -207,15 +382,11 @@ fn build_tray_summary() -> TraySummary {
     let worst_rate_limit = providers
         .iter()
         .flat_map(|p| p.rate_limits.iter())
-        .filter(|rl| {
-            rl.label.contains("5h")
-                || rl.label.contains("Weekly")
-                || rl.label.contains("Session")
-        })
+        .filter(|rl| is_primary_rate_window(&rl.label))
         .min_by(|a, b| {
             a.remaining_percent
                 .partial_cmp(&b.remaining_percent)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(Ordering::Equal)
         })
         .cloned();
 
@@ -239,6 +410,7 @@ fn refresh_and_emit() {
     if let Ok(guard) = TRAY_APP_HANDLE.lock() {
         if let Some(ref app) = *guard {
             let _ = app.emit("tray-data-updated", &summary);
+            update_tray_indicator(app, &summary);
         }
     }
 }
@@ -325,6 +497,32 @@ pub fn update_tray_tooltip(app: tauri::AppHandle, text: String) -> Result<(), St
     if let Some(tray) = app.tray_by_id("main-tray") {
         tray.set_tooltip(Some(&text)).map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// Track the tray's active provider tab so Rust can render icon/title for it.
+#[tauri::command]
+pub fn set_tray_active_provider(app: tauri::AppHandle, provider_id: String) -> Result<(), String> {
+    let normalized = provider_id.trim().to_string();
+
+    {
+        let mut guard = TRAY_ACTIVE_PROVIDER
+            .lock()
+            .map_err(|e| format!("Tray active provider lock error: {}", e))?;
+
+        if PRIMARY_PROVIDER_IDS.contains(&normalized.as_str()) {
+            *guard = Some(normalized.clone());
+        } else {
+            *guard = None;
+        }
+    }
+
+    if let Ok(summary_guard) = TRAY_SUMMARY_CACHE.lock() {
+        if let Some(ref summary) = *summary_guard {
+            update_tray_indicator(&app, summary);
+        }
+    }
+
     Ok(())
 }
 

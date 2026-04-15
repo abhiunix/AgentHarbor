@@ -117,7 +117,7 @@ use analytics::commands::{
     get_all_provider_status, get_provider_analytics, get_all_provider_analytics,
     save_provider_token, delete_provider_token, has_provider_token,
     get_all_provider_info, copilot_start_device_flow, copilot_poll_device_flow,
-    get_tray_summary, update_tray_tooltip,
+    get_tray_summary, update_tray_tooltip, set_tray_active_provider,
 };
 use commands::claude_history::{get_claude_history, get_claude_active_sessions};
 use commands::claude_metadata::{
@@ -380,9 +380,11 @@ pub fn run() {
             // Tray popover
             get_tray_summary,
             update_tray_tooltip,
+            set_tray_active_provider,
             crate::analytics::commands::refresh_tray_data,
             crate::analytics::commands::force_refresh_provider,
             crate::tray::show_main_window,
+            crate::tray::quit_app,
             // Claude Code Auth Flow
             claude_check_silent_credentials,
             claude_import_from_keychain,

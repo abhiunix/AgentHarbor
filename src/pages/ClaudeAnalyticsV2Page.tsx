@@ -211,6 +211,42 @@ function resetCountdown(resetsAt: string | null, windowSeconds?: number | null):
   return "—";
 }
 
+function resolveResetDate(rl: RateLimitWindow): Date | null {
+  if (rl.resets_at) {
+    const d = new Date(rl.resets_at);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  if (rl.resets_in_seconds != null && rl.resets_in_seconds > 0) {
+    return new Date(Date.now() + rl.resets_in_seconds * 1000);
+  }
+
+  if (rl.window_seconds != null && rl.window_seconds > 0) {
+    return new Date(Date.now() + rl.window_seconds * 1000);
+  }
+
+  return null;
+}
+
+function formatResetDateLabel(rl: RateLimitWindow): string {
+  const resetDate = resolveResetDate(rl);
+  if (!resetDate) return "—";
+
+  const datePart = resetDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const timePart = resetDate
+    .toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .toLowerCase();
+
+  return `${datePart} at ${timePart}`;
+}
+
 const COLORS = ["#3b82f6", "#8b5cf6", "#22c55e", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16", "#a855f7", "#14b8a6"];
 const TOOLTIP_STYLE = { background: "#1a1b23", border: "1px solid #2a2b36", borderRadius: "8px", fontSize: "11px" };
 
@@ -1139,7 +1175,7 @@ function ClaudeAnalyticsV2Inner() {
                             <div>
                               <span className="text-text-secondary">{rl.label}</span>
                               <span className="text-text-muted text-[10px] ml-2">
-                                Resets {rl.resets_at ? new Date(rl.resets_at).toLocaleDateString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }) : (rl.window_seconds ? `in ~${Math.floor(rl.window_seconds / 86400)}d` : "—")}
+                                Resets {formatResetDateLabel(rl)}
                               </span>
                             </div>
                           </div>

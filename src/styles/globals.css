@@ -26,6 +26,14 @@
     overflow: hidden;
   }
 
+  body.tray-popover-body {
+    background: transparent;
+  }
+
+  #root.tray-popover-root {
+    background: transparent;
+  }
+
   ::-webkit-scrollbar {
     width: 6px;
   }
