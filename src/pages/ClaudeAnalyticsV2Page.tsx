@@ -1095,7 +1095,7 @@ function ClaudeAnalyticsV2Inner() {
                         <div className="flex justify-between text-xs mb-1">
                           <div>
                             <span className="text-text-secondary">{rl.label}</span>
-                            <span className="text-text-muted text-[10px] ml-2">Resets in {resetCountdown(rl.resets_at)}</span>
+                            {rl.resets_at && <span className="text-text-muted text-[10px] ml-2">Resets in {resetCountdown(rl.resets_at) || "—"}</span>}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1130,9 +1130,11 @@ function ClaudeAnalyticsV2Inner() {
                           <div className="flex justify-between text-xs mb-1">
                             <div>
                               <span className="text-text-secondary">{rl.label}</span>
-                              <span className="text-text-muted text-[10px] ml-2">
-                                Resets {rl.resets_at ? new Date(rl.resets_at).toLocaleDateString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "—"}
-                              </span>
+                              {rl.resets_at && (
+                                <span className="text-text-muted text-[10px] ml-2">
+                                  Resets {new Date(rl.resets_at).toLocaleDateString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
