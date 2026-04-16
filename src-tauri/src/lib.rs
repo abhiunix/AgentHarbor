@@ -174,7 +174,10 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         let current_settings = get_settings();
-                        if current_settings.general.keep_running_on_close {
+                        // Hide instead of quit when tray is active OR keep_running_on_close is set
+                        if current_settings.general.show_in_menu_bar
+                            || current_settings.general.keep_running_on_close
+                        {
                             api.prevent_close();
                             if let Some(w) = handle.get_webview_window("main") {
                                 let _ = w.hide();
