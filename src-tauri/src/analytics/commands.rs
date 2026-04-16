@@ -165,6 +165,36 @@ fn is_primary_rate_window(label: &str) -> bool {
 }
 
 fn pick_primary_provider_rate(provider: &TrayProviderSummary) -> Option<RateLimitWindow> {
+    // Claude-specific: prefer Session (5h) first, fall back to Weekly only when
+    // session used% is 0%.  This shows the session rate in the tray unless the
+    // user hasn't started a session yet.
+    if provider.provider_id == "claude-code" {
+        let session = provider
+            .rate_limits
+            .iter()
+            .find(|rl| rl.label.contains("5h") || rl.label.contains("Session"))
+            .cloned();
+        if let Some(ref s) = session {
+            if s.used_percent > 0.0 {
+                return session;
+            }
+        }
+        // Session is 0% — fall back to Weekly
+        let weekly = provider
+            .rate_limits
+            .iter()
+            .find(|rl| rl.label.contains("Weekly"))
+            .cloned();
+        if weekly.is_some() {
+            return weekly;
+        }
+        // Neither found, return session anyway (shows 0%)
+        if session.is_some() {
+            return session;
+        }
+    }
+
+    // Non-Claude providers: pick the most constrained primary window
     let best_primary = provider
         .rate_limits
         .iter()
@@ -379,16 +409,16 @@ fn build_tray_summary() -> TraySummary {
 
     let connected_count = providers.iter().filter(|p| p.connected).count() as u32;
 
+    // Pick one representative rate per provider (respects Claude session-first
+    // logic), then find the worst across all providers.
     let worst_rate_limit = providers
         .iter()
-        .flat_map(|p| p.rate_limits.iter())
-        .filter(|rl| is_primary_rate_window(&rl.label))
+        .filter_map(|p| pick_primary_provider_rate(p))
         .min_by(|a, b| {
             a.remaining_percent
                 .partial_cmp(&b.remaining_percent)
                 .unwrap_or(Ordering::Equal)
-        })
-        .cloned();
+        });
 
     TraySummary {
         providers,
