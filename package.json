@@ -1,7 +1,7 @@
 {
   "name": "agentharbor",
   "private": true,
-  "version": "1.0.113",
+  "version": "1.0.117",
   "type": "module",
   "scripts": {
     "dev": "vite",
