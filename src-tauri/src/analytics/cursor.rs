@@ -58,6 +58,7 @@ struct UsageOnDemand {
 #[serde(rename_all = "camelCase")]
 struct IndividualUsage {
     plan: Option<UsagePlan>,
+    on_demand: Option<UsageOnDemand>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -395,11 +396,18 @@ fn fetch_cursor_analytics_uncached() -> ProviderAnalytics {
 
     let mut extra = HashMap::new();
     if let Some(ref u) = usage {
-        if let Some(on_demand) = u.on_demand_used_cents {
+        // Prefer nested individualUsage.onDemand (V2) over top-level onDemandUsedCents (legacy).
+        let individual_od = u.individual_usage.as_ref().and_then(|iu| iu.on_demand.as_ref());
+        let od_used_cents = individual_od.and_then(|od| od.used).or(u.on_demand_used_cents);
+        let od_limit_cents = individual_od.and_then(|od| od.limit).or(u.on_demand_limit_cents);
+        if let Some(on_demand) = od_used_cents {
             extra.insert("on_demand_used_usd".into(), serde_json::Value::from(on_demand / 100.0));
         }
-        if let Some(on_demand_limit) = u.on_demand_limit_cents {
+        if let Some(on_demand_limit) = od_limit_cents {
             extra.insert("on_demand_limit_usd".into(), serde_json::Value::from(on_demand_limit / 100.0));
+        }
+        if let Some(enabled) = individual_od.and_then(|od| od.enabled) {
+            extra.insert("on_demand_enabled".into(), serde_json::json!(enabled));
         }
         if let Some(ref start) = u.billing_cycle_start {
             extra.insert("billing_cycle_start".into(), serde_json::Value::String(start.clone()));
