@@ -1,6 +1,7 @@
 import { getAdapterIconImg } from "../../lib/adapterPlugins";
 import { emitTo } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -417,6 +418,11 @@ function CursorCard({ provider }: { provider: TrayProviderSummary }) {
   const teamHardLimit = ex.team_hard_limit_usd as number | undefined;
   const teamHardLimitDynamic = ex.team_hard_limit_dynamic as boolean | undefined;
 
+  const includedVal = included ?? 0;
+  const bonusVal = bonus ?? 0;
+  const onDemandVal = onDemand ?? 0;
+  const totalSpent = includedVal + bonusVal + onDemandVal;
+
   return (
     <div>
       {cu && (
@@ -426,44 +432,76 @@ function CursorCard({ provider }: { provider: TrayProviderSummary }) {
             <div className="flex items-center justify-between text-[11px] mb-0.5">
               <span className="text-[#9394a1]">Usage Breakdown</span>
               <span className="text-[#e8e9ed] font-mono">
-                {formatCurrency(totalBudget ?? cu.used, cu.currency)} <span className="text-[#9394a1]">total spent</span>
+                {formatCurrency(totalSpent > 0 ? totalSpent : (totalBudget ?? cu.used), cu.currency)} <span className="text-[#9394a1]">total spent</span>
               </span>
             </div>
-            {cu.limit != null && cu.limit > 0 && (
+            {totalSpent > 0 && (
               <div className="h-1.5 rounded-full bg-[#2a2b36] overflow-hidden flex">
-                {included != null && included > 0 && (
+                {includedVal > 0 && (
                   <div
                     className="h-full bg-blue-500 transition-all duration-300"
-                    style={{ width: `${Math.min(100, (included / cu.limit) * 100)}%` }}
+                    style={{ width: `${(includedVal / totalSpent) * 100}%` }}
                   />
                 )}
-                {bonus != null && bonus > 0 && (
+                {bonusVal > 0 && (
                   <div
                     className="h-full bg-emerald-500 transition-all duration-300"
-                    style={{ width: `${Math.min(100, (bonus / cu.limit) * 100)}%` }}
+                    style={{ width: `${(bonusVal / totalSpent) * 100}%` }}
+                  />
+                )}
+                {onDemandVal > 0 && (
+                  <div
+                    className="h-full bg-amber-500 transition-all duration-300"
+                    style={{ width: `${(onDemandVal / totalSpent) * 100}%` }}
                   />
                 )}
               </div>
             )}
-            {(included != null || bonus != null) && (
-              <div className="flex gap-3 mt-0.5 text-[9px]">
+            {(included != null || bonus != null || onDemandVal > 0) && (
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[9px]">
                 {included != null && (
                   <span className="flex items-center gap-1">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />
-                    <span className="text-[#9394a1]">{formatCurrency(included, "USD")} included</span>
+                    <span className="text-[#9394a1]">{formatCurrency(includedVal, "USD")} included</span>
                   </span>
                 )}
-                {bonus != null && bonus > 0 && (
+                {bonus != null && bonusVal > 0 && (
                   <span className="flex items-center gap-1">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    <span className="text-[#9394a1]">{formatCurrency(bonus, "USD")} bonus</span>
+                    <span className="text-[#9394a1]">{formatCurrency(bonusVal, "USD")} bonus</span>
+                  </span>
+                )}
+                {onDemandVal > 0 && (
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <span className="text-[#9394a1]">{formatCurrency(onDemandVal, "USD")} on-demand</span>
                   </span>
                 )}
               </div>
             )}
             {(billingStart || cu.billing_cycle_end) && (
-              <div className="text-[9px] text-[#9394a1] mt-0.5">
-                Billing cycle: {billingStart ? new Date(billingStart).toLocaleDateString() : "?"} – {cu.billing_cycle_end ? new Date(cu.billing_cycle_end).toLocaleDateString() : "?"}
+              <div className="flex items-center justify-between mt-0.5">
+                <span className="text-[9px] text-[#9394a1]">
+                  Billing cycle: {billingStart ? new Date(billingStart).toLocaleDateString() : "?"} – {cu.billing_cycle_end ? new Date(cu.billing_cycle_end).toLocaleDateString() : "?"}
+                </span>
+                <button
+                  onClick={() => openUrl("https://cursor.com/dashboard/usage")}
+                  className="text-[9px] text-blue-400 hover:text-blue-300 hover:underline"
+                  title="Open cursor.com/dashboard/usage"
+                >
+                  View on Cursor ↗
+                </button>
+              </div>
+            )}
+            {!billingStart && !cu.billing_cycle_end && (
+              <div className="flex justify-end mt-0.5">
+                <button
+                  onClick={() => openUrl("https://cursor.com/dashboard/usage")}
+                  className="text-[9px] text-blue-400 hover:text-blue-300 hover:underline"
+                  title="Open cursor.com/dashboard/usage"
+                >
+                  View on Cursor ↗
+                </button>
               </div>
             )}
           </div>
