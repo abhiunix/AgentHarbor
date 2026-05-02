@@ -164,6 +164,37 @@ fn is_primary_rate_window(label: &str) -> bool {
     label.contains("5h") || label.contains("Weekly") || label.contains("Session")
 }
 
+/// Tray title metric for a provider.
+#[derive(Clone, Debug)]
+enum DisplayMetric {
+    /// Capped usage — rendered as "X%".
+    Percent(f64),
+    /// Uncapped Enterprise spend — rendered as "$X" (rounded dollars).
+    Spend { amount: f64, currency: String },
+}
+
+/// True for Claude Code accounts on Enterprise plan with no monthly cap set.
+/// Such providers have no meaningful percentage to display.
+fn is_uncapped_enterprise(provider: &TrayProviderSummary) -> bool {
+    if provider.provider_id != "claude-code" {
+        return false;
+    }
+    let is_ent = provider
+        .extra
+        .get("is_enterprise")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !is_ent {
+        return false;
+    }
+    let no_cap = provider
+        .credit_usage
+        .as_ref()
+        .map(|c| c.limit.is_none())
+        .unwrap_or(true);
+    no_cap
+}
+
 fn pick_primary_provider_rate(provider: &TrayProviderSummary) -> Option<RateLimitWindow> {
     // Claude-specific: prefer Session (5h) first, fall back to Weekly only when
     // session used% is 0%.  This shows the session rate in the tray unless the
@@ -228,22 +259,33 @@ fn numeric_extra_value(
     provider.extra.get(key).and_then(|value| value.as_f64())
 }
 
-fn compute_provider_used_percent(provider: &TrayProviderSummary) -> Option<f64> {
+fn compute_provider_display_metric(provider: &TrayProviderSummary) -> Option<DisplayMetric> {
+    // Claude Enterprise without a cap: percentage is meaningless — show $-spend.
+    if is_uncapped_enterprise(provider) {
+        if let Some(credit) = provider.credit_usage.as_ref() {
+            return Some(DisplayMetric::Spend {
+                amount: credit.used,
+                currency: credit.currency.clone(),
+            });
+        }
+        return None;
+    }
+
     if let Some(rate) = pick_primary_provider_rate(provider) {
-        return Some(rate.used_percent.clamp(0.0, 100.0));
+        return Some(DisplayMetric::Percent(rate.used_percent.clamp(0.0, 100.0)));
     }
 
     // Cursor tray percent comes from the API's individualUsage.plan.totalPercentUsed
     // field. The menu bar title later rounds this to a whole number (e.g. 66.3 -> 66%).
     if let Some(percent) = numeric_extra_value(provider, "plan_total_percent_used") {
-        return Some(percent.clamp(0.0, 100.0));
+        return Some(DisplayMetric::Percent(percent.clamp(0.0, 100.0)));
     }
 
     if let Some(credit) = provider.credit_usage.as_ref() {
         if let Some(limit) = credit.limit {
             if limit > 0.0 {
                 let percent = (credit.used / limit) * 100.0;
-                return Some(percent.clamp(0.0, 100.0));
+                return Some(DisplayMetric::Percent(percent.clamp(0.0, 100.0)));
             }
         }
     }
@@ -254,11 +296,28 @@ fn compute_provider_used_percent(provider: &TrayProviderSummary) -> Option<f64> 
     if let (Some(used), Some(limit)) = (team_used, team_limit) {
         if limit > 0.0 {
             let percent = (used / limit) * 100.0;
-            return Some(percent.clamp(0.0, 100.0));
+            return Some(DisplayMetric::Percent(percent.clamp(0.0, 100.0)));
         }
     }
 
     None
+}
+
+fn format_spend_for_title(amount: f64, currency: &str) -> String {
+    let symbol = if currency.eq_ignore_ascii_case("USD") {
+        "$"
+    } else {
+        // Fall back to currency code prefix for non-USD.
+        currency
+    };
+    // Keep menu-bar title compact: drop cents above $10, single-decimal below.
+    if amount >= 10.0 {
+        format!("{}{}", symbol, amount.round() as i64)
+    } else if amount >= 1.0 {
+        format!("{}{:.1}", symbol, amount)
+    } else {
+        format!("{}{:.2}", symbol, amount)
+    }
 }
 
 fn pick_display_provider_id(
@@ -322,29 +381,42 @@ fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
             .iter()
             .find(|provider| provider.provider_id == *provider_id)
     });
-    let display_used_percent = display_provider
-        .and_then(compute_provider_used_percent)
+
+    // For uncapped Enterprise we never borrow a percentage from a different
+    // provider — % is meaningless on this plan. Use the spend metric or
+    // nothing at all so the icon stands alone.
+    let displayed_is_uncapped_enterprise = display_provider
+        .map(is_uncapped_enterprise)
+        .unwrap_or(false);
+    let display_metric = display_provider
+        .and_then(compute_provider_display_metric)
         .or_else(|| {
-            summary
-                .worst_rate_limit
-                .as_ref()
-                .map(|rate| rate.used_percent.clamp(0.0, 100.0))
+            if displayed_is_uncapped_enterprise {
+                None
+            } else {
+                summary
+                    .worst_rate_limit
+                    .as_ref()
+                    .map(|rate| DisplayMetric::Percent(rate.used_percent.clamp(0.0, 100.0)))
+            }
         });
 
     if let Some(tray) = app.tray_by_id("main-tray") {
-        if let Some(used_percent) = display_used_percent {
-            let rounded_percent = used_percent.round() as u32;
-            // Keep title as pure percentage because provider identity is conveyed
-            // by the tray icon. Rendering both icon + unicode symbol causes a
-            // duplicate-looking icon in the menu bar.
-            let title = format!("{}%", rounded_percent);
-            let _ = tray.set_title(Some(&title));
+        let title = match display_metric {
+            Some(DisplayMetric::Percent(p)) => Some(format!("{}%", p.round() as u32)),
+            Some(DisplayMetric::Spend { amount, currency }) => {
+                Some(format_spend_for_title(amount, &currency))
+            }
+            None => None,
+        };
+        if let Some(ref t) = title {
+            let _ = tray.set_title(Some(t.as_str()));
         } else {
             let _ = tray.set_title(Option::<&str>::None);
         }
 
-        if let Some(provider_id) = display_provider_id {
-            if let Some(icon) = load_provider_tray_icon(&provider_id) {
+        if let Some(ref provider_id) = display_provider_id {
+            if let Some(icon) = load_provider_tray_icon(provider_id) {
                 let _ = tray.set_icon(Some(icon));
             } else {
                 let _ = tray.set_icon(Option::<Image<'_>>::None);
@@ -410,9 +482,13 @@ fn build_tray_summary() -> TraySummary {
     let connected_count = providers.iter().filter(|p| p.connected).count() as u32;
 
     // Pick one representative rate per provider (respects Claude session-first
-    // logic), then find the worst across all providers.
+    // logic), then find the worst across all providers. Skip uncapped Enterprise
+    // accounts: their "rate limit" is a $-spend ledger with no cap, so
+    // remaining_percent is meaningless and would otherwise pin worst_rate_limit
+    // to 0% / 100% from a borrowed window.
     let worst_rate_limit = providers
         .iter()
+        .filter(|p| !is_uncapped_enterprise(p))
         .filter_map(|p| pick_primary_provider_rate(p))
         .min_by(|a, b| {
             a.remaining_percent

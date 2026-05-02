@@ -38,3 +38,7 @@ src-tauri/target/
 
 # Local state
 .agentharbor/
+
+# macOS installer artifacts (never commit)
+*.dmg
+rw.*.dmg

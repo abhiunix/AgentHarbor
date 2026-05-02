@@ -1032,16 +1032,25 @@ function ClaudeAnalyticsV2Inner() {
                 <span className="text-text-muted block mb-0.5">Plan</span>
                 <div className="flex items-center gap-1.5">
                   {(() => {
-                    // Derive plan from org raven_type or rate_limit_tier
+                    // Prefer the Rust-side plan classifier (handles Enterprise);
+                    // fall back to legacy heuristics for older payloads.
+                    const orgType = String(primaryOrg?.organization?.organization_type ?? (overview.extra as any)?.organization_type ?? "").toLowerCase();
                     const ravenType = primaryOrg?.organization?.raven_type;
-                    const tier = primaryOrg?.organization?.rate_limit_tier ?? (overview.extra as any)?.rate_limit_tier ?? "";
+                    const tier = String(primaryOrg?.organization?.rate_limit_tier ?? (overview.extra as any)?.rate_limit_tier ?? "").toLowerCase();
                     const planStr = overview.plan;
                     let label = "Free";
                     let color = "bg-[#2a2b36] text-text-muted";
-                    if (ravenType === "team") { label = "Team"; color = "bg-emerald-500/20 text-emerald-400"; }
-                    else if (tier.includes("max")) { label = "Max"; color = "bg-purple-500/20 text-purple-400"; }
-                    else if (tier.includes("pro")) { label = "Pro"; color = "bg-blue-500/20 text-blue-400"; }
-                    else if (planStr) { label = planStr; color = "bg-blue-500/20 text-blue-400"; }
+                    if (orgType.includes("enterprise") || planStr === "Enterprise") {
+                      label = "Enterprise"; color = "bg-amber-500/20 text-amber-400";
+                    } else if (orgType.includes("team") || ravenType === "team") {
+                      label = "Team"; color = "bg-emerald-500/20 text-emerald-400";
+                    } else if (orgType.includes("max") || tier.includes("max")) {
+                      label = "Max"; color = "bg-purple-500/20 text-purple-400";
+                    } else if (orgType.includes("pro") || tier.includes("pro")) {
+                      label = "Pro"; color = "bg-blue-500/20 text-blue-400";
+                    } else if (planStr) {
+                      label = planStr; color = "bg-blue-500/20 text-blue-400";
+                    }
                     return <Badge text={label.toUpperCase()} color={color} />;
                   })()}
                   {primaryOrg?.seat_tier && <Badge text={String(primaryOrg.seat_tier).replace(/_/g, " ")} color="bg-[#2a2b36] text-text-muted" />}
@@ -1125,11 +1134,53 @@ function ClaudeAnalyticsV2Inner() {
         )}
 
         {/* ── Section 2: Your Usage Limits (API required) ──────────────── */}
-        {!isLocalOnly && overview.rate_limits.length > 0 && (
+        {/* Enterprise has no 5h/7d windows: rate_limits is empty but credit_usage carries the spend ledger. */}
+        {(() => {
+          const isEnterprise = (overview.extra as any)?.is_enterprise === true
+            || String((overview.extra as any)?.organization_type ?? "").toLowerCase().includes("enterprise")
+            || overview.plan === "Enterprise";
+          if (isLocalOnly) return null;
+          if (!isEnterprise && overview.rate_limits.length === 0) return null;
+          if (isEnterprise && !overview.credit_usage) return null;
+          return (
           <Section title="Your Usage Limits">
             <div className="space-y-4">
-              {/* Session limits */}
-              {overview.rate_limits.filter(rl => rl.label.toLowerCase().includes("session") || rl.label.toLowerCase().includes("5h")).length > 0 && (
+              {/* Enterprise: monthly $-spend ledger (no session/weekly windows on this plan) */}
+              {isEnterprise && overview.credit_usage && (
+                <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-semibold text-text-primary">Monthly Spend</h4>
+                    <Badge text="ENTERPRISE · USAGE-BASED" color="bg-amber-500/20 text-amber-400" />
+                  </div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-text-muted">Used this month</span>
+                    <span className="text-text-primary font-semibold">
+                      {formatUsd(overview.credit_usage.used)}
+                      {overview.credit_usage.limit != null
+                        ? <span className="text-text-muted"> / {formatUsd(overview.credit_usage.limit)}</span>
+                        : <span className="text-text-muted"> · no cap</span>}
+                    </span>
+                  </div>
+                  {overview.credit_usage.limit != null && overview.credit_usage.limit > 0 ? (
+                    <div className="h-2.5 bg-[#0e0f13] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-amber-500 rounded-full transition-all"
+                        style={{ width: `${Math.min((overview.credit_usage.used / overview.credit_usage.limit) * 100, 100)}%` }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-2.5 bg-purple-500/20 rounded-full overflow-hidden">
+                      <div className="h-full bg-purple-500/70 rounded-full w-full" />
+                    </div>
+                  )}
+                  <div className="text-[10px] text-text-muted mt-1.5">
+                    Enterprise plans don't expose 5h or 7-day windows — usage is reported as a monthly $-denominated ledger.
+                  </div>
+                </div>
+              )}
+
+              {/* Session limits (Pro/Max only) */}
+              {!isEnterprise && overview.rate_limits.filter(rl => rl.label.toLowerCase().includes("session") || rl.label.toLowerCase().includes("5h")).length > 0 && (
                 <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
                   <h4 className="text-xs font-semibold text-text-primary mb-3">Current Session</h4>
                   {overview.rate_limits
@@ -1163,7 +1214,7 @@ function ClaudeAnalyticsV2Inner() {
               )}
 
               {/* Weekly limits */}
-              {overview.rate_limits.filter(rl => !rl.label.toLowerCase().includes("session") && !rl.label.toLowerCase().includes("5h")).length > 0 && (
+              {!isEnterprise && overview.rate_limits.filter(rl => !rl.label.toLowerCase().includes("session") && !rl.label.toLowerCase().includes("5h")).length > 0 && (
                 <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
                   <h4 className="text-xs font-semibold text-text-primary mb-3">Weekly Limits</h4>
                   <div className="space-y-3">
@@ -1200,8 +1251,8 @@ function ClaudeAnalyticsV2Inner() {
                 </div>
               )}
 
-              {/* Extra usage credits */}
-              {overview.credit_usage && (
+              {/* Extra usage credits (Pro/Max overage meter — Enterprise rendered above) */}
+              {!isEnterprise && overview.credit_usage && (
                 <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-xs font-semibold text-text-primary">Extra Usage Credits</h4>
@@ -1227,7 +1278,8 @@ function ClaudeAnalyticsV2Inner() {
               )}
             </div>
           </Section>
-        )}
+          );
+        })()}
 
         {/* Local-only banner */}
         {isLocalOnly && (
