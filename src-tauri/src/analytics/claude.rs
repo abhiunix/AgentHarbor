@@ -52,6 +52,7 @@ struct ExtraUsage {
     monthly_limit: Option<f64>,
     used_credits: Option<f64>,
     utilization: Option<f64>,
+    currency: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -81,6 +82,7 @@ struct ProfileOrg {
     uuid: Option<String>,
     name: Option<String>,
     organization_type: Option<String>,
+    seat_tier: Option<String>,
     billing_type: Option<String>,
     rate_limit_tier: Option<String>,
     has_extra_usage_enabled: Option<bool>,
@@ -497,6 +499,90 @@ pub fn claude_exchange_oauth_code(auth_code: String) -> Result<String, String> {
     Ok("Sign in successful".into())
 }
 
+// ── Plan Classification ─────────────────────────────────────────────────────
+
+/// Canonical plan tier derived from `/api/oauth/profile`.
+/// `Enterprise` accounts have no 5h/7d windows — usage is reported via
+/// `extra_usage` as a $-denominated monthly ledger (cap may be null).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlanTier {
+    Free,
+    Pro,
+    Max,
+    Team,
+    Enterprise,
+    Unknown,
+}
+
+impl PlanTier {
+    fn label(self) -> Option<&'static str> {
+        match self {
+            PlanTier::Free => Some("Free"),
+            PlanTier::Pro => Some("Pro"),
+            PlanTier::Max => Some("Max"),
+            PlanTier::Team => Some("Team"),
+            PlanTier::Enterprise => Some("Enterprise"),
+            PlanTier::Unknown => None,
+        }
+    }
+
+    fn is_enterprise(self) -> bool {
+        matches!(self, PlanTier::Enterprise)
+    }
+}
+
+/// Classify the plan using `organization_type` as the primary signal,
+/// `seat_tier` and `rate_limit_tier` as confirmations/fallbacks.
+/// Designed to keep working for legacy (Pro/Max) accounts even after
+/// the Enterprise plan rolled out.
+fn classify_plan(org: Option<&ProfileOrg>) -> PlanTier {
+    let org = match org {
+        Some(o) => o,
+        None => return PlanTier::Unknown,
+    };
+
+    // Primary signal: organization_type
+    if let Some(t) = org.organization_type.as_deref() {
+        let t = t.to_ascii_lowercase();
+        if t.contains("enterprise") {
+            return PlanTier::Enterprise;
+        }
+        if t.contains("team") {
+            return PlanTier::Team;
+        }
+        if t.contains("max") {
+            return PlanTier::Max;
+        }
+        if t.contains("pro") {
+            return PlanTier::Pro;
+        }
+        if t.contains("free") {
+            return PlanTier::Free;
+        }
+    }
+
+    // Confirmation: seat_tier
+    if let Some(s) = org.seat_tier.as_deref() {
+        let s = s.to_ascii_lowercase();
+        if s.contains("enterprise") {
+            return PlanTier::Enterprise;
+        }
+    }
+
+    // Fallback: rate_limit_tier (legacy heuristic)
+    if let Some(t) = org.rate_limit_tier.as_deref() {
+        let t = t.to_ascii_lowercase();
+        if t.contains("max") {
+            return PlanTier::Max;
+        }
+        if t.contains("pro") {
+            return PlanTier::Pro;
+        }
+    }
+
+    PlanTier::Unknown
+}
+
 // ── Rate Limit Parsing ──────────────────────────────────────────────────────
 
 fn parse_window(
@@ -639,22 +725,36 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         }
     }
 
-    // Build credit usage
+    // Classify plan once — drives credit/extra rendering and downstream UI.
+    let plan_tier = classify_plan(profile.as_ref().and_then(|p| p.organization.as_ref()));
+
+    // Build credit usage.
+    //   * Pro/Max: extra_usage is the on-demand overage meter (cents). Only
+    //     surface it when explicitly enabled by the user.
+    //   * Enterprise: extra_usage is the *primary* spend ledger. `monthly_limit`
+    //     may be null (uncapped) and amounts are already denominated in dollars
+    //     (`used_credits` represents whole dollars × 100, same units as Pro/Max).
+    //     Surface it even when `is_enabled` isn't reported, so the UI has data.
     let credit_usage = usage.as_ref().and_then(|u| {
         let extra = u.extra_usage.as_ref()?;
-        if !extra.is_enabled.unwrap_or(false) { return None; }
+        let enabled = extra.is_enabled.unwrap_or(false);
+        if !enabled && !plan_tier.is_enterprise() {
+            return None;
+        }
+        let used_dollars = extra.used_credits.unwrap_or(0.0) / 100.0;
+        let limit_dollars = extra.monthly_limit.map(|l| l / 100.0);
+        let remaining = match limit_dollars {
+            Some(limit) => (limit - used_dollars).max(0.0),
+            None => 0.0,
+        };
         Some(CreditUsage {
             provider_id: "claude-code".into(),
-            used: extra.used_credits.unwrap_or(0.0) / 100.0,
-            limit: extra.monthly_limit.map(|l| l / 100.0),
-            remaining: {
-                let limit = extra.monthly_limit.unwrap_or(0.0) / 100.0;
-                let used = extra.used_credits.unwrap_or(0.0) / 100.0;
-                (limit - used).max(0.0)
-            },
-            currency: "USD".into(),
+            used: used_dollars,
+            limit: limit_dollars,
+            remaining,
+            currency: extra.currency.clone().unwrap_or_else(|| "USD".into()),
             billing_cycle_end: None,
-            plan_name: None,
+            plan_name: plan_tier.label().map(String::from),
         })
     });
 
@@ -663,14 +763,9 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
     let (email, plan, org_name) = if let Some(ref p) = profile {
         let email = p.account.as_ref().and_then(|a| a.email.clone());
         let org = p.organization.as_ref();
-        let plan = org.and_then(|o| {
-            if let Some(ref tier) = o.rate_limit_tier {
-                if tier.contains("max") { Some("Max".to_string()) }
-                else if tier.contains("pro") { Some("Pro".to_string()) }
-                else { Some(tier.clone()) }
-            } else {
-                o.organization_type.clone()
-            }
+        let plan = plan_tier.label().map(String::from).or_else(|| {
+            org.and_then(|o| o.rate_limit_tier.clone())
+                .or_else(|| org.and_then(|o| o.organization_type.clone()))
         });
         let org_name = org.and_then(|o| o.name.clone());
         let sub_status = org.and_then(|o| o.subscription_status.clone());
@@ -688,6 +783,44 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         }
         if let Some(ref tier) = org.and_then(|o| o.rate_limit_tier.clone()) {
             extra.insert("rate_limit_tier".into(), serde_json::Value::String(tier.clone()));
+        }
+        if let Some(ref otype) = org.and_then(|o| o.organization_type.clone()) {
+            extra.insert("organization_type".into(), serde_json::Value::String(otype.clone()));
+        }
+        if let Some(ref seat) = org.and_then(|o| o.seat_tier.clone()) {
+            extra.insert("seat_tier".into(), serde_json::Value::String(seat.clone()));
+        }
+        if let Some(ref billing) = org.and_then(|o| o.billing_type.clone()) {
+            extra.insert("billing_type".into(), serde_json::Value::String(billing.clone()));
+        }
+        if let Some(eu_enabled) = org.and_then(|o| o.has_extra_usage_enabled) {
+            extra.insert("has_extra_usage_enabled".into(), serde_json::Value::Bool(eu_enabled));
+        }
+
+        // Enterprise-specific spend signals (used by tray / analytics page UI).
+        if plan_tier.is_enterprise() {
+            extra.insert("is_enterprise".into(), serde_json::Value::Bool(true));
+            if let Some(ref u) = usage {
+                if let Some(ref eu) = u.extra_usage {
+                    let used = eu.used_credits.unwrap_or(0.0) / 100.0;
+                    extra.insert(
+                        "enterprise_used_usd".into(),
+                        serde_json::json!(used),
+                    );
+                    if let Some(limit) = eu.monthly_limit {
+                        extra.insert(
+                            "enterprise_limit_usd".into(),
+                            serde_json::json!(limit / 100.0),
+                        );
+                    }
+                    if let Some(currency) = eu.currency.clone() {
+                        extra.insert(
+                            "enterprise_currency".into(),
+                            serde_json::Value::String(currency),
+                        );
+                    }
+                }
+            }
         }
 
         (email, plan, org_name)

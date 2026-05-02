@@ -60,19 +60,41 @@ const TAB_STORAGE_KEY = "agentharbor-tray-active-tab";
 
 // ── TrayHealthBar ────────────────────────────────────────────────────────────
 
+function formatEnterpriseSpend(amount: number, currency: string): string {
+  const symbol = currency === "USD" ? "$" : `${currency} `;
+  if (amount >= 10) return `${symbol}${Math.round(amount)}`;
+  if (amount >= 1) return `${symbol}${amount.toFixed(1)}`;
+  return `${symbol}${amount.toFixed(2)}`;
+}
+
 function TrayHealthBar({
   summary,
+  activeProviderId,
   onShowApp,
 }: {
   summary: TraySummary;
+  activeProviderId: string;
   onShowApp: () => void;
 }) {
-  const worstRemaining = summary.worst_rate_limit?.remaining_percent ?? 100;
-  const isWarning = worstRemaining < 30;
+  const activeProvider = summary.providers.find(
+    (p) => p.provider_id === activeProviderId
+  );
+  const isUncappedEnterprise =
+    activeProvider?.provider_id === "claude-code" &&
+    (activeProvider?.extra as Record<string, unknown> | undefined)?.is_enterprise === true &&
+    (activeProvider?.credit_usage?.limit == null);
+
+  // Warning is scoped to the ACTIVE PROVIDER's own rate limits only.
+  // Using the global worst_rate_limit bleeds Gemini's "Pro" quota label
+  // onto the Codex/Cursor tab, which is confusing.
+  const activeProviderWorstRL = activeProvider?.rate_limits
+    .filter((rl) => rl.remaining_percent < 30)
+    .sort((a, b) => a.remaining_percent - b.remaining_percent)[0] ?? null;
+  const isWarning = !isUncappedEnterprise && activeProviderWorstRL != null;
 
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b border-[#2a2b36]">
-      {/* Left: connection dots */}
+      {/* Left: connection dots + active agent count */}
       <div className="flex items-center gap-1.5 text-xs text-[#9394a1]">
         <div className="flex items-center gap-1">
           {PROVIDER_TABS.map((tab) => {
@@ -96,12 +118,20 @@ function TrayHealthBar({
         </span>
       </div>
 
-      {/* Right: rate limit warning or Show AgentHarbor button */}
+      {/* Right: Enterprise spend, active-provider rate limit warning, or button */}
       <div className="text-xs">
-        {isWarning && summary.worst_rate_limit ? (
+        {isUncappedEnterprise && activeProvider?.credit_usage ? (
+          <span className="text-amber-400">
+            Enterprise ·{" "}
+            {formatEnterpriseSpend(
+              activeProvider.credit_usage.used,
+              activeProvider.credit_usage.currency
+            )}
+          </span>
+        ) : isWarning && activeProviderWorstRL ? (
           <span className="text-yellow-400">
-            {summary.worst_rate_limit.label}:{" "}
-            {summary.worst_rate_limit.remaining_percent.toFixed(0)}%
+            {activeProviderWorstRL.label}:{" "}
+            {activeProviderWorstRL.remaining_percent.toFixed(0)}%
           </span>
         ) : (
           <button
@@ -411,7 +441,13 @@ export function TrayPopover() {
     <div className="w-full h-screen bg-transparent overflow-hidden">
       <div className="w-full h-full flex flex-col bg-[#0e0f13] text-[#e8e9ed] overflow-hidden rounded-xl">
         {/* Health bar */}
-        {summary && <TrayHealthBar summary={summary} onShowApp={handleShowApp} />}
+        {summary && (
+          <TrayHealthBar
+            summary={summary}
+            activeProviderId={activeTab}
+            onShowApp={handleShowApp}
+          />
+        )}
 
         {/* Provider tabs */}
         <div className="flex items-center gap-0.5 px-2 pt-2 pb-1">
