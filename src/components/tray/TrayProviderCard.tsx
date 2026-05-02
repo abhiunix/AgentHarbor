@@ -359,6 +359,51 @@ function TokenWindowRow({ label, stats }: {
   );
 }
 
+function EnterpriseSpendBar({
+  used,
+  limit,
+  currency,
+}: {
+  used: number;
+  limit: number | null;
+  currency: string;
+}) {
+  const cur = currency || "USD";
+  const hasCap = limit != null && limit > 0;
+  const pct = hasCap ? Math.min(100, Math.max(0, (used / (limit as number)) * 100)) : 0;
+
+  return (
+    <div className="mb-2">
+      <div className="flex items-center justify-between text-[11px] mb-0.5">
+        <span className="text-[#e8e9ed]">
+          Monthly spend
+          <span className="text-[9px] text-[#9394a1] ml-2">Enterprise · usage-based</span>
+        </span>
+        <span className="text-[#e8e9ed] font-mono">
+          {formatCurrency(used, cur)}
+          {hasCap ? (
+            <span className="text-[#9394a1]"> / {formatCurrency(limit as number, cur)}</span>
+          ) : (
+            <span className="text-[#9394a1]"> · no cap</span>
+          )}
+        </span>
+      </div>
+      {hasCap ? (
+        <div className="h-1.5 rounded-full bg-[#0e0f13] overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-300 ${barColor(100 - pct)}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      ) : (
+        <div className="h-1.5 rounded-full bg-purple-500/40 overflow-hidden">
+          <div className="h-full rounded-full bg-purple-500/80 w-full" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClaudeCard({ provider }: { provider: TrayProviderSummary }) {
   const ex = provider.extra;
   const statsToday = getWindowStats(ex, "start_today");
@@ -366,21 +411,35 @@ function ClaudeCard({ provider }: { provider: TrayProviderSummary }) {
   const statsAll = getWindowStats(ex, "all_time");
 
   const hasAnyData = (statsToday.tokens ?? 0) > 0 || (statsWeek.tokens ?? 0) > 0 || (statsAll.tokens ?? 0) > 0;
+  const isEnterprise = (ex.is_enterprise as boolean | undefined) === true;
+  const cu = provider.credit_usage;
 
   return (
     <div>
-      {provider.rate_limits.map((rl, i) => (
+      {/* Enterprise plans have no 5h/7d windows — show $-spend instead. */}
+      {isEnterprise && cu && (
+        <EnterpriseSpendBar
+          used={cu.used}
+          limit={cu.limit}
+          currency={cu.currency}
+        />
+      )}
+
+      {/* Pro/Max session + weekly bars */}
+      {!isEnterprise && provider.rate_limits.map((rl, i) => (
         <RateLimitBar key={i} rl={rl} />
       ))}
-      {provider.credit_usage && (
+
+      {/* Pro/Max overage meter (only when extra_usage explicitly enabled) */}
+      {!isEnterprise && cu && (
         <div className="mt-2 pt-2 border-t border-[#2a2b36]">
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-[#9394a1]">Credits</span>
             <span className="text-[#e8e9ed] font-mono">
-              {formatCurrency(provider.credit_usage.used, provider.credit_usage.currency)}
-              {provider.credit_usage.limit != null && (
+              {formatCurrency(cu.used, cu.currency)}
+              {cu.limit != null && (
                 <span className="text-[#9394a1]">
-                  {" "}/ {formatCurrency(provider.credit_usage.limit, provider.credit_usage.currency)}
+                  {" "}/ {formatCurrency(cu.limit, cu.currency)}
                 </span>
               )}
             </span>
@@ -859,9 +918,11 @@ export function TrayProviderCard({
             </span>
             {provider.plan && (
               <span className={`text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap ${
-                provider.plan.toLowerCase().includes("max")
-                  ? "bg-purple-500/20 text-purple-400"
-                  : "bg-[#2a2b36] text-[#9394a1]"
+                provider.plan.toLowerCase().includes("enterprise")
+                  ? "bg-amber-500/20 text-amber-400"
+                  : provider.plan.toLowerCase().includes("max")
+                    ? "bg-purple-500/20 text-purple-400"
+                    : "bg-[#2a2b36] text-[#9394a1]"
               }`}>
                 {provider.plan}
               </span>
