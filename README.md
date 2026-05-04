@@ -1,84 +1,107 @@
 # AgentHarbor
 
-A macOS desktop app for managing AI coding agent configurations across Claude Code, Cursor, Windsurf, Gemini CLI, and Codex.
+A macOS desktop app for managing AI coding-agent configurations across **Claude Code**, **Cursor**, **Codex (OpenAI)**, **Gemini CLI**, and **Windsurf** — with live analytics, deploy/undo workflow, presets, drift detection, and limit-state notifications.
+
+Built with Tauri v2 (Rust + React).
+
+## Installation
+
+> macOS 13+, Apple Silicon. Signed with Apple Developer ID and notarized.
+
+1. **Download the latest DMG:** [**AgentHarbor — latest release**](https://github.com/abhiunix/AgentHarbor/releases/latest)
+   - Pick `AgentHarbor_<version>_aarch64.dmg`.
+2. Open the DMG and drag **AgentHarbor.app** into **Applications**.
+3. Launch from Spotlight or `/Applications`.
+
+If macOS ever flags it as "damaged" (only happens when the quarantine attribute survives an unusual download path):
+
+```bash
+xattr -cr /Applications/AgentHarbor.app
+```
+
+The full first-run walkthrough lives in [`docs/getting-started.md`](docs/getting-started.md).
 
 ## Features
 
-- **Unified Analytics Dashboard** — Rate limits, token usage, cost tracking, and session stats across all providers
-- **System Tray** — Real-time provider status with 4 tabs (Claude Code, Cursor, Codex, Gemini) and background refresh
-- **Deploy Capabilities** — MCP servers, skills, rules, hooks, and agents to multiple IDEs simultaneously
-- **Cost Engine** — Token deduplication and tiered pricing matching CodexBar's calculation logic
-- **Gemini CLI Analytics** — Quota monitoring (Pro/Flash/Flash Lite), telemetry file parsing
-- **Claude /stats Metrics** — Favorite model, streaks, active days, peak hour
-- **Private Repo Support** — GITHUB_TOKEN from Secrets Manager for importing skills from private repos
-- **macOS Keychain** — Secure credential storage with auto token refresh
-- **Signed & Notarized** — Gatekeeper-approved distribution
+- **Tray analytics** — connection dots, per-provider rate limits, monthly spend, and a smart menu-bar metric:
+  - Claude Pro/Max → active **Session (5h)** %
+  - Claude Enterprise → total **$ spend** (capped or uncapped)
+  - Cursor → total **$ spend** = included + bonus + on-demand
+  - Codex → **Primary (5h)** %
+  - Gemini → **Pro → Flash → Flash Lite** (first tier with quota)
+- **Limit-state ladder** — `Unauthenticated`, `ApiDisabled` (`out_of_credits`, `trial_expired`, …), `BillablePaused`, `SubscriptionIssue`, `RateLimited` (with friendly retry-after copy), `Reached`, `Approaching`, `Healthy` — surfaced in the tray, the analytics page, and as native notifications.
+- **Deploy wizard** — multi-adapter, syntax-highlighted diffs, per-file `Replace`/`Merge`/`Append` strategy, automatic backups, and an **Undo Deploy** button.
+- **Presets** — bundle capabilities for one-click deploys; bundled `Full-Stack Web` / `Data Science` examples plus your own.
+- **Drift detection** — file hashes per managed file; side-by-side diff with **Accept** or **Restore** when something changed externally.
+- **Cost engine** — per-model API-equivalent costs for Claude (Opus/Sonnet/Haiku) and Codex (GPT-5/4/3.5), plus token-deduplicated session totals.
+- **Native macOS** — Keychain integration, system tray with click-through popover, optional menu-bar mode, native notifications.
+- **Auto-update** — Tauri updater verifies signatures from `.signing/.TAURI_SIGNING_PRIVATE_KEY`; users get a prompt when new releases land.
 
-## Supported Providers
+## Supported providers
 
-| Provider | Analytics | Rate Limits | Cost Tracking | Deploy |
-|----------|-----------|-------------|---------------|--------|
-| Claude Code | Full | Session/Weekly/Sonnet | Tiered pricing | MCP, Skills, Rules, Hooks, Agents |
-| Cursor | Full | Usage/Credits | Subscription tracking | MCP, Rules, Agents |
-| Codex (OpenAI) | Full | Primary/Weekly | Per-model costs | MCP, Skills |
-| Gemini CLI | Quota | Pro/Flash/Flash Lite | N/A (quota-based) | Skills, Hooks, Agents |
-| Windsurf | Config | N/A | N/A | MCP, Rules |
+| Provider | Analytics | Rate limits / spend | Deploy targets |
+|---|---|---|---|
+| Claude Code | Full (Pro/Max/Enterprise) | Session 5h, Weekly, Sonnet/Opus, monthly $ | MCP, skills, rules, hooks, agents |
+| Cursor | Full | Plan included + bonus + on-demand $, team OD | MCP, rules, agents |
+| Codex (OpenAI) | Full | Primary 5h, Weekly 7d, per-model $ | MCP, skills |
+| Gemini CLI | Quota | Pro / Flash / Flash Lite | Skills, hooks, agents |
+| Windsurf | Config | – | MCP, rules |
 
-## Tech Stack
+## Documentation
+
+- [Getting Started](docs/getting-started.md)
+- [Analytics & Tray](docs/analytics.md)
+- [Deploying Capabilities & Agents](docs/deploying-capabilities.md)
+- [Build & Release](docs/build-and-release.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Regression Checklist](docs/regression-checklist.md)
+- [Changelog](CHANGELOG.md)
+
+## Tech stack
 
 | Layer | Technology |
-|-------|------------|
+|---|---|
 | Framework | Tauri v2 |
-| Backend | Rust |
+| Backend | Rust (`reqwest`, `serde`, `keyring`, `chrono`) |
 | Frontend | React + TypeScript + Vite |
 | Styling | Tailwind CSS v3 (dark theme) |
 | State | Zustand |
-| Build Target | macOS (universal binary) |
+| Build target | macOS aarch64 |
 
-## Getting Started
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18+)
-- [Rust](https://rustup.rs/)
-- [Tauri CLI](https://tauri.app/start/): `cargo install tauri-cli`
-
-### Development
+## Development
 
 ```bash
 npm install
-npm run tauri dev
+npm run tauri dev          # dev with hot reload
+npm run test:regression    # tsc + vite build + cargo test
 ```
 
-### Production Build
+For signed/notarized release builds, see [`docs/build-and-release.md`](docs/build-and-release.md).
 
-```bash
-npm run tauri build
-```
-
-The signed `.app` will be at `src-tauri/target/release/bundle/macos/AgentHarbor.app`.
-
-## Project Structure
+## Project layout
 
 ```
 agentharbor/
-├── src/                    # React frontend
-│   ├── components/         # UI components (tray, registry, deploy, settings)
-│   ├── pages/              # Route pages (analytics, config, etc.)
-│   ├── stores/             # Zustand state stores
-│   ├── lib/                # Utilities, Tauri bindings, types
-│   └── hooks/              # Custom React hooks
-├── src-tauri/              # Rust backend
+├── src/                    React frontend
+│   ├── components/         UI (tray, registry, deploy, settings, analytics)
+│   ├── pages/              Route pages
+│   ├── stores/             Zustand state
+│   ├── lib/                Tauri IPC, types, utilities
+│   └── hooks/              Custom hooks
+├── src-tauri/              Rust backend
 │   ├── src/
-│   │   ├── analytics/      # Provider analytics (Claude, Cursor, Codex, Gemini)
-│   │   ├── commands/       # Tauri IPC commands
-│   │   ├── adapters/       # IDE adapter implementations
-│   │   ├── registry/       # Capability registry loader & sync
-│   │   ├── utils/          # File I/O, keychain, paths
-│   │   ├── tray.rs         # System tray with popover
-│   │   └── lib.rs          # App setup & command registration
-│   └── tauri.conf.json     # Tauri configuration
-└── registry/               # Bundled capability definitions
+│   │   ├── analytics/      Per-provider analytics + tray commands
+│   │   ├── adapters/       Adapter implementations (Claude/Cursor/Windsurf/…)
+│   │   ├── commands/       Tauri IPC commands
+│   │   ├── registry/       Capability registry loader & validator
+│   │   ├── utils/          File I/O, keychain, paths, drift, manifest, backup
+│   │   ├── tray.rs         System tray
+│   │   └── lib.rs          App setup & command registration
+│   └── tauri.conf.json
+├── registry/               Bundled capability/agent definitions
+├── docs/                   User & contributor docs
+├── scripts/                bump-build, clear-quarantine, tauri-wrapper
+└── public/                 Static assets served by Vite
 ```
 
 ## License
