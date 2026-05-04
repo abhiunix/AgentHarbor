@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Wrapper so "npm run tauri build" on macOS clears quarantine on the built app before creating the DMG.
+# Wrapper so "npm run tauri build" on macOS clears quarantine on the built
+# AgentHarbor.app before creating the DMG. Only useful for unsigned local
+# builds; signed/notarized release builds (see docs/build-and-release.md)
+# don't need this and run `npx tauri build` directly.
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
