@@ -104,6 +104,7 @@ pub fn fetch_copilot_analytics() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(), fetched_at: now,
             };
         }
@@ -113,7 +114,8 @@ pub fn fetch_copilot_analytics() -> ProviderAnalytics {
         "https://api.github.com/copilot_internal/user",
         &token,
         Some(copilot_headers()),
-    );
+    )
+    .map_err(String::from);
 
     match resp {
         Ok(data) => {
@@ -178,6 +180,7 @@ pub fn fetch_copilot_analytics() -> ProviderAnalytics {
                 rate_limits,
                 credit_usage: None,
                 token_counts: None,
+                limit_state: None,
                 extra,
                 fetched_at: now,
             }
@@ -194,6 +197,7 @@ pub fn fetch_copilot_analytics() -> ProviderAnalytics {
                 error: Some(e),
             },
             rate_limits: vec![], credit_usage: None, token_counts: None,
+            limit_state: None,
             extra: HashMap::new(), fetched_at: now,
         },
     }

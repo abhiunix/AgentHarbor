@@ -536,6 +536,7 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
                     error: if has_local { None } else { Some(e) },
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra, fetched_at: now,
             };
         }
@@ -554,10 +555,24 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
         "https://chatgpt.com/backend-api/wham/usage",
         &token,
         Some(extra_headers),
-    );
+    )
+    .map_err(String::from);
 
     match resp {
         Ok(wham) => {
+            let codex_limit_state = wham.rate_limit.as_ref().and_then(|rl| {
+                if rl.limit_reached == Some(true) || rl.allowed == Some(false) {
+                    Some(LimitState::Reached {
+                        scope: LimitScope::Custom("wham_primary".into()),
+                        used_pct: 100.0,
+                        cap: None,
+                        resets_at: None,
+                    })
+                } else {
+                    None
+                }
+            });
+
             let mut rate_limits = Vec::new();
             if let Some(ref rl) = wham.rate_limit {
                 if let Some(w) = parse_wham_window(&rl.primary_window, "Primary (5h)") {
@@ -617,6 +632,7 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
                 rate_limits,
                 credit_usage,
                 token_counts: None,
+                limit_state: codex_limit_state,
                 extra,
                 fetched_at: now,
             }
@@ -638,6 +654,7 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra, fetched_at: now,
             }
         }

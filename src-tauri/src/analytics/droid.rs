@@ -66,6 +66,7 @@ pub fn fetch_droid_analytics() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(), fetched_at: now,
             };
         }
@@ -85,7 +86,8 @@ pub fn fetch_droid_analytics() -> ProviderAnalytics {
         &token,
         &body,
         None,
-    );
+    )
+    .map_err(String::from);
 
     match usage {
         Ok(data) => {
@@ -156,6 +158,7 @@ pub fn fetch_droid_analytics() -> ProviderAnalytics {
                 rate_limits,
                 credit_usage: None,
                 token_counts: None,
+                limit_state: None,
                 extra,
                 fetched_at: now,
             }
@@ -174,6 +177,7 @@ pub fn fetch_droid_analytics() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(), fetched_at: now,
             }
         }

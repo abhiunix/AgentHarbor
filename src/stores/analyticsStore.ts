@@ -46,6 +46,38 @@ export interface ProviderStatus {
   error: string | null;
 }
 
+/** Mirrors Rust `analytics::types::LimitState` (tag = kind, snake_case). */
+export type LimitState =
+  | { kind: "healthy" }
+  | {
+      kind: "approaching";
+      worst_pct: number;
+      label: string;
+      resets_at: string | null;
+      scope: string;
+    }
+  | {
+      kind: "reached";
+      scope: string;
+      used_pct: number;
+      cap: number | null;
+      resets_at: string | null;
+    }
+  | {
+      kind: "api_disabled";
+      reason: string;
+      until: string | null;
+      org_name: string;
+    }
+  | { kind: "subscription_issue"; status: string; org_name: string }
+  | { kind: "billable_paused"; until: string; org_name: string }
+  | {
+      kind: "rate_limited";
+      retry_after_secs: number | null;
+      message: string;
+    }
+  | { kind: "unauthenticated"; message: string };
+
 export interface ProviderAnalytics {
   provider_id: string;
   provider_name: string;
@@ -53,6 +85,7 @@ export interface ProviderAnalytics {
   rate_limits: RateLimitWindow[];
   credit_usage: CreditUsage | null;
   token_counts: TokenCounts | null;
+  limit_state?: LimitState | null;
   extra: Record<string, unknown>;
   fetched_at: string;
 }

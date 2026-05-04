@@ -1,6 +1,11 @@
 const fs = require("fs");
 const path = require("path");
 
+// Set SKIP_VERSION_BUMP=1 when cutting a fixed semver release (tauri build uses npm run build).
+if (process.env.SKIP_VERSION_BUMP === "1") {
+  process.exit(0);
+}
+
 const root = path.join(__dirname, "..");
 
 const tauriConfPath = path.join(root, "src-tauri", "tauri.conf.json");

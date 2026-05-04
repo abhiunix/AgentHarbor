@@ -353,6 +353,7 @@ fn fetch_cursor_analytics_uncached() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(), fetched_at: now,
             };
         }
@@ -480,6 +481,7 @@ fn fetch_cursor_analytics_uncached() -> ProviderAnalytics {
         rate_limits: vec![],
         credit_usage,
         token_counts: None,
+        limit_state: None,
         extra,
         fetched_at: now,
     }

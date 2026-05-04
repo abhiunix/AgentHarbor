@@ -8,6 +8,10 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
   PieChart, Pie, Cell, AreaChart, Area,
 } from "recharts";
+import {
+  LimitStateBanner,
+  type LimitState,
+} from "../components/analytics/LimitStateBanner";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -107,6 +111,7 @@ interface Overview {
   current_streak: number;
   most_active_weekday: string | null;
   peak_hour: number | null;
+  limit_state?: LimitState | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -120,6 +125,22 @@ function formatNum(n: number | null | undefined): string {
 }
 
 function formatUsd(n: number): string { return `$${n.toFixed(2)}`; }
+
+/** Strong highlight for the rate-limit row that matches derived `limit_state`. */
+function rateLimitRowExhausted(overview: Overview, rl: RateLimitWindow): boolean {
+  const ls = overview.limit_state;
+  if (!ls || ls.kind === "healthy") return false;
+  if (ls.kind === "reached") {
+    return rl.used_percent >= 99 || rl.remaining_percent <= 1;
+  }
+  if (ls.kind === "approaching") {
+    return (
+      rl.label === ls.label ||
+      (rl.used_percent >= ls.worst_pct - 0.5 && rl.used_percent <= ls.worst_pct + 0.5)
+    );
+  }
+  return false;
+}
 
 /** Numeric values from `overview.extra` (serde_json can deserialize as number). */
 function extraNum(v: unknown): number | undefined {
@@ -893,6 +914,11 @@ function ClaudeAnalyticsV2Inner() {
 
   const isLocalOnly = authState === "local-only";
 
+  // Top-level "Reconnect" banner — visible regardless of section gating
+  // when the stored token is no longer accepted by Anthropic.
+  const showUnauthBanner =
+    overview.limit_state?.kind === "unauthenticated" && !isLocalOnly;
+
   // ── Derived data ────────────────────────────────────────────────────
 
   const trayFromExtra =
@@ -929,6 +955,13 @@ function ClaudeAnalyticsV2Inner() {
       )}
 
       <div className="px-6 py-6">
+        {showUnauthBanner && (
+          <LimitStateBanner
+            limitState={overview.limit_state}
+            variant="full"
+            onReconnect={() => setAuthState("not-connected")}
+          />
+        )}
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -1078,7 +1111,7 @@ function ClaudeAnalyticsV2Inner() {
               </div>
             </div>
 
-            <div className="border-t border-[#2a2b36] mt-3 pt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+            <div className="border-t border-[#2a2b36] mt-3 pt-3 grid grid-cols-2 md:grid-cols-5 gap-4 text-xs">
               <div>
                 <span className="text-text-muted block mb-0.5">Rate Limit Tier</span>
                 <div className="text-text-primary font-medium text-[10px] font-mono">
@@ -1098,6 +1131,29 @@ function ClaudeAnalyticsV2Inner() {
                     <Badge text="DISABLED" color="bg-[#2a2b36] text-text-muted" />
                   )}
                 </div>
+              </div>
+              <div>
+                <span className="text-text-muted block mb-0.5">Usage this cycle</span>
+                {overview.credit_usage ? (
+                  <div className="text-text-primary font-semibold">
+                    {formatUsd(overview.credit_usage.used)}
+                    {overview.credit_usage.limit != null ? (
+                      <>
+                        <span className="text-text-muted font-normal"> / {formatUsd(overview.credit_usage.limit)}</span>
+                        <div className="text-[10px] text-text-muted font-normal mt-0.5">
+                          {(() => {
+                            const pct = (overview.credit_usage.used / overview.credit_usage.limit) * 100;
+                            return pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`;
+                          })()}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-text-muted font-normal text-[10px] block mt-0.5">No cap</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-text-muted">-</span>
+                )}
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">API-Equiv. Value</span>
@@ -1143,6 +1199,17 @@ function ClaudeAnalyticsV2Inner() {
           if (!isEnterprise && overview.rate_limits.length === 0) return null;
           if (isEnterprise && !overview.credit_usage) return null;
           return (
+          <>
+          {overview.limit_state &&
+            overview.limit_state.kind !== "healthy" &&
+            overview.limit_state.kind !== "unauthenticated" && (
+              <div className="mb-4">
+                <LimitStateBanner
+                  limitState={overview.limit_state}
+                  variant="full"
+                />
+              </div>
+            )}
           <Section title="Your Usage Limits">
             <div className="space-y-4">
               {/* Enterprise: monthly $-spend ledger (no session/weekly windows on this plan) */}
@@ -1194,16 +1261,28 @@ function ClaudeAnalyticsV2Inner() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden flex">
-                            <div
-                              className="h-full rounded-l-full transition-all duration-700 bg-red-500"
-                              style={{ width: `${Math.min(rl.used_percent, 100)}%` }}
-                            />
-                            <div
-                              className="h-full rounded-r-full transition-all duration-700 bg-emerald-500"
-                              style={{ width: `${Math.max(100 - rl.used_percent, 0)}%` }}
-                            />
-                          </div>
+                          {rateLimitRowExhausted(overview, rl) ? (
+                            <div className="relative flex-1 h-2.5 rounded-full overflow-hidden bg-red-600">
+                              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <span className="text-[8px] font-bold text-white tracking-wider drop-shadow-sm">
+                                  {resetCountdown(rl.resets_at, rl.window_seconds)
+                                    ? `RESET · ${resetCountdown(rl.resets_at, rl.window_seconds).toUpperCase()}`
+                                    : "LIMIT REACHED"}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden flex">
+                              <div
+                                className="h-full rounded-l-full transition-all duration-700 bg-red-500"
+                                style={{ width: `${Math.min(rl.used_percent, 100)}%` }}
+                              />
+                              <div
+                                className="h-full rounded-r-full transition-all duration-700 bg-emerald-500"
+                                style={{ width: `${Math.max(100 - rl.used_percent, 0)}%` }}
+                              />
+                            </div>
+                          )}
                           <span className="text-red-400 font-semibold text-xs whitespace-nowrap">
                             {rl.used_percent.toFixed(0)}% Used
                           </span>
@@ -1231,16 +1310,28 @@ function ClaudeAnalyticsV2Inner() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden flex">
-                              <div
-                                className="h-full rounded-l-full transition-all duration-700 bg-red-500"
-                                style={{ width: `${Math.min(rl.used_percent, 100)}%` }}
-                              />
-                              <div
-                                className="h-full rounded-r-full transition-all duration-700 bg-emerald-500"
-                                style={{ width: `${Math.max(100 - rl.used_percent, 0)}%` }}
-                              />
-                            </div>
+                            {rateLimitRowExhausted(overview, rl) ? (
+                              <div className="relative flex-1 h-2.5 rounded-full overflow-hidden bg-red-600">
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                  <span className="text-[8px] font-bold text-white tracking-wider drop-shadow-sm">
+                                    {formatResetDateLabel(rl)
+                                      ? `RESET · ${formatResetDateLabel(rl).toUpperCase()}`
+                                      : "LIMIT REACHED"}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden flex">
+                                <div
+                                  className="h-full rounded-l-full transition-all duration-700 bg-red-500"
+                                  style={{ width: `${Math.min(rl.used_percent, 100)}%` }}
+                                />
+                                <div
+                                  className="h-full rounded-r-full transition-all duration-700 bg-emerald-500"
+                                  style={{ width: `${Math.max(100 - rl.used_percent, 0)}%` }}
+                                />
+                              </div>
+                            )}
                             <span className="text-red-400 font-semibold text-xs whitespace-nowrap">
                               {rl.used_percent.toFixed(0)}% Used
                             </span>
@@ -1278,6 +1369,7 @@ function ClaudeAnalyticsV2Inner() {
               )}
             </div>
           </Section>
+          </>
           );
         })()}
 

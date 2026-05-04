@@ -522,6 +522,28 @@ export function AppSettings() {
             className="w-20 px-3 py-1.5 bg-app-bg border border-border rounded text-sm text-text-primary text-center focus:outline-none focus:border-accent-blue"
           />
         </SettingRow>
+        <SettingRow
+          label="Internal usage buckets"
+          description="Show experimental Anthropic usage windows (omelette, tangelo, …) on Claude analytics — for debugging"
+        >
+          <Toggle
+            checked={settings.analytics?.show_internal_usage_buckets ?? false}
+            onChange={(checked) =>
+              handleAnalyticsChange({ show_internal_usage_buckets: checked })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          label="Limit notifications"
+          description="macOS notifications when you approach or hit usage limits (Claude, Codex, …)"
+        >
+          <Toggle
+            checked={settings.analytics?.limit_notifications_enabled ?? true}
+            onChange={(checked) =>
+              handleAnalyticsChange({ limit_notifications_enabled: checked })
+            }
+          />
+        </SettingRow>
       </SectionCard>
 
       <AdapterVisibilityCard />

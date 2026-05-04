@@ -2,6 +2,7 @@ import { getAdapterIconImg } from "../../lib/adapterPlugins";
 import { emitTo } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { LimitStateBanner, type LimitState } from "../analytics/LimitStateBanner";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,7 @@ export interface TrayProviderSummary {
   error: string | null;
   extra: Record<string, unknown>;
   fetched_at: string;
+  limit_state?: LimitState | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -371,6 +373,9 @@ function EnterpriseSpendBar({
   const cur = currency || "USD";
   const hasCap = limit != null && limit > 0;
   const pct = hasCap ? Math.min(100, Math.max(0, (used / (limit as number)) * 100)) : 0;
+  // Render small percentages with one decimal so they don't all collapse to "0%"
+  // (e.g. $10 of $3000 = 0.33%, not 0%).
+  const pctLabel = pct >= 10 ? `${pct.toFixed(0)}%` : `${pct.toFixed(1)}%`;
 
   return (
     <div className="mb-2">
@@ -382,7 +387,10 @@ function EnterpriseSpendBar({
         <span className="text-[#e8e9ed] font-mono">
           {formatCurrency(used, cur)}
           {hasCap ? (
-            <span className="text-[#9394a1]"> / {formatCurrency(limit as number, cur)}</span>
+            <>
+              <span className="text-[#9394a1]"> / {formatCurrency(limit as number, cur)}</span>
+              <span className="text-[#9394a1] ml-1.5">· {pctLabel}</span>
+            </>
           ) : (
             <span className="text-[#9394a1]"> · no cap</span>
           )}
@@ -610,7 +618,20 @@ function CursorCard({ provider }: { provider: TrayProviderSummary }) {
             </span>
             <span className="text-[#e8e9ed] font-mono">
               {formatCurrency(teamOdUsed ?? 0, "USD")}
-              {teamOdLimit != null && <span className="text-[#9394a1]"> / {formatCurrency(teamOdLimit, "USD")}</span>}
+              {teamOdLimit != null && (
+                <>
+                  <span className="text-[#9394a1]"> / {formatCurrency(teamOdLimit, "USD")}</span>
+                  {teamOdLimit > 0 && (
+                    <span className="text-[#9394a1] ml-1.5">
+                      ·{" "}
+                      {(() => {
+                        const p = ((teamOdUsed ?? 0) / teamOdLimit) * 100;
+                        return p >= 10 ? `${p.toFixed(0)}%` : `${p.toFixed(1)}%`;
+                      })()}
+                    </span>
+                  )}
+                </>
+              )}
             </span>
           </div>
           {teamOdLimit != null && teamOdLimit > 0 && (
@@ -941,6 +962,15 @@ export function TrayProviderCard({
           </span>
         )}
       </div>
+
+      {provider.limit_state ? (
+        <div className="mb-2">
+          <LimitStateBanner
+            limitState={provider.limit_state}
+            variant="compact"
+          />
+        </div>
+      ) : null}
 
       {/* Provider-specific content */}
       {renderContent()}

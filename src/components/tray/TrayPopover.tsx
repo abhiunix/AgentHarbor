@@ -9,6 +9,10 @@ import {
   type RateLimitWindow,
   type TrayProviderSummary,
 } from "./TrayProviderCard";
+import {
+  limitStateIsDanger,
+  limitStateIsWarning,
+} from "../analytics/LimitStateBanner";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +62,31 @@ const PROVIDER_TABS: ProviderTabConfig[] = [
 
 const TAB_STORAGE_KEY = "agentharbor-tray-active-tab";
 
+/** Gemini: show Pro if it has quota, else Flash, else Flash Lite (CodexBar-style). */
+const GEMINI_TIER_PRIORITY = ["Pro", "Flash", "Flash Lite"] as const;
+
+function pickGeminiHighlightLimit(
+  rateLimits: RateLimitWindow[]
+): RateLimitWindow | null {
+  if (rateLimits.length === 0) return null;
+  const byLabel = new Map<string, RateLimitWindow>();
+  for (const rl of rateLimits) {
+    byLabel.set(rl.label, rl);
+  }
+  const REMAINING_EPS = 0.05;
+  for (const tier of GEMINI_TIER_PRIORITY) {
+    const rl = byLabel.get(tier);
+    if (rl != null && rl.remaining_percent > REMAINING_EPS) {
+      return rl;
+    }
+  }
+  for (const tier of GEMINI_TIER_PRIORITY) {
+    const rl = byLabel.get(tier);
+    if (rl != null) return rl;
+  }
+  return null;
+}
+
 // ── TrayHealthBar ────────────────────────────────────────────────────────────
 
 function formatEnterpriseSpend(amount: number, currency: string): string {
@@ -87,10 +116,22 @@ function TrayHealthBar({
   // Warning is scoped to the ACTIVE PROVIDER's own rate limits only.
   // Using the global worst_rate_limit bleeds Gemini's "Pro" quota label
   // onto the Codex/Cursor tab, which is confusing.
+  const activeLimit = activeProvider?.limit_state ?? null;
+  const lsDanger = limitStateIsDanger(activeLimit ?? undefined);
+  const lsWarn = limitStateIsWarning(activeLimit ?? undefined);
+
   const activeProviderWorstRL = activeProvider?.rate_limits
     .filter((rl) => rl.remaining_percent < 30)
     .sort((a, b) => a.remaining_percent - b.remaining_percent)[0] ?? null;
-  const isWarning = !isUncappedEnterprise && activeProviderWorstRL != null;
+
+  const geminiHighlightLimit =
+    activeProviderId === "gemini" && activeProvider
+      ? pickGeminiHighlightLimit(activeProvider.rate_limits)
+      : null;
+
+  const isWarning =
+    !isUncappedEnterprise &&
+    (lsWarn || (!lsDanger && activeProviderWorstRL != null));
 
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b border-[#2a2b36]">
@@ -128,10 +169,27 @@ function TrayHealthBar({
               activeProvider.credit_usage.currency
             )}
           </span>
+        ) : lsDanger ? (
+          <span className="text-red-400 font-medium">Limit / billing issue</span>
+        ) : geminiHighlightLimit ? (
+          <span
+            className={
+              geminiHighlightLimit.remaining_percent < 30
+                ? lsWarn
+                  ? "text-amber-400 font-medium"
+                  : "text-yellow-400"
+                : "text-[#9394a1]"
+            }
+          >
+            {`${geminiHighlightLimit.label}: ${geminiHighlightLimit.remaining_percent.toFixed(0)}%`}
+          </span>
         ) : isWarning && activeProviderWorstRL ? (
-          <span className="text-yellow-400">
-            {activeProviderWorstRL.label}:{" "}
-            {activeProviderWorstRL.remaining_percent.toFixed(0)}%
+          <span
+            className={lsWarn ? "text-amber-400 font-medium" : "text-yellow-400"}
+          >
+            {lsWarn && activeLimit?.kind === "approaching"
+              ? `${activeLimit.label} · ${activeLimit.worst_pct.toFixed(0)}%`
+              : `${activeProviderWorstRL.label}: ${activeProviderWorstRL.remaining_percent.toFixed(0)}%`}
           </span>
         ) : (
           <button
