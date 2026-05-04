@@ -63,6 +63,7 @@ pub fn fetch_augment_analytics() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(), fetched_at: now,
             };
         }
@@ -145,6 +146,7 @@ pub fn fetch_augment_analytics() -> ProviderAnalytics {
         rate_limits,
         credit_usage,
         token_counts: None,
+        limit_state: None,
         extra,
         fetched_at: now,
     }

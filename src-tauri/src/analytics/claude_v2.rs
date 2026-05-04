@@ -2,6 +2,7 @@
 //! Combines: OAuth API (rate limits/profile) + local JSONL + stats-cache + metadata.
 
 use crate::analytics::claude;
+use crate::analytics::types::LimitState;
 use crate::analytics::cost_engine;
 use crate::commands::claude_history;
 use crate::commands::claude_metadata;
@@ -108,6 +109,10 @@ pub struct ClaudeV2Overview {
     pub rate_limits: Vec<crate::analytics::types::RateLimitWindow>,
     pub credit_usage: Option<crate::analytics::types::CreditUsage>,
     pub extra: HashMap<String, serde_json::Value>,
+
+    /// Derived limit / billing health (same as `ProviderAnalytics.limit_state`).
+    #[serde(default)]
+    pub limit_state: Option<LimitState>,
 
     // Account & Billing (from /api/oauth/account)
     pub account_info: Option<serde_json::Value>,
@@ -687,6 +692,8 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
         rate_limits: analytics.rate_limits,
         credit_usage: analytics.credit_usage,
         extra: analytics.extra,
+
+        limit_state: analytics.limit_state,
 
         account_info,
 

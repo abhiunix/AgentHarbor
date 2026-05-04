@@ -1,11 +1,15 @@
 //! Tauri commands for the unified analytics system.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
 use std::thread;
 use std::time::Duration;
 use tauri::{image::Image, AppHandle, Emitter, Wry};
+use tauri_plugin_notification::NotificationExt;
 
 use crate::analytics::types::*;
 use crate::analytics::{
@@ -13,6 +17,8 @@ use crate::analytics::{
     openrouter, kimi, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
     token_store,
 };
+use crate::commands::config::load_settings;
+use crate::utils::paths::app_data_dir;
 
 // ── Tray background refresh infrastructure ──────────────────────────────────
 
@@ -38,6 +44,309 @@ const CLAUDE_CODE_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/c
 const CURSOR_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/cursor.png");
 const CODEX_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/codex.png");
 const GEMINI_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/gemini.png");
+const CLAUDE_CODE_TRAY_ICON_ACTIVE_PNG: &[u8] =
+    include_bytes!("../../icons/providers/claude-code-active.png");
+const CURSOR_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/cursor-active.png");
+const CODEX_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/codex-active.png");
+const GEMINI_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/gemini-active.png");
+
+// ── Limit-state notification helpers ────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Default)]
+struct LimitNotificationPersist {
+    #[serde(default)]
+    providers: HashMap<String, serde_json::Value>,
+}
+
+fn limit_state_persist_path() -> PathBuf {
+    app_data_dir().join("limit-state.json")
+}
+
+fn load_limit_notification_persist() -> LimitNotificationPersist {
+    let path = limit_state_persist_path();
+    if !path.exists() {
+        return LimitNotificationPersist::default();
+    }
+    match fs::read_to_string(&path) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        Err(_) => LimitNotificationPersist::default(),
+    }
+}
+
+fn save_limit_notification_persist(p: &LimitNotificationPersist) {
+    let path = limit_state_persist_path();
+    if let Ok(json) = serde_json::to_string_pretty(p) {
+        let _ = crate::utils::paths::atomic_write_str(&path, &json);
+    }
+}
+
+fn format_limit_countdown(iso: Option<&String>) -> String {
+    let Some(s) = iso else { return "soon".to_string() };
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        let dt = dt.with_timezone(&chrono::Utc);
+        let diff = (dt - chrono::Utc::now()).num_seconds();
+        if diff <= 0 {
+            return "now".to_string();
+        }
+        let h = diff / 3600;
+        let m = (diff % 3600) / 60;
+        if h > 0 {
+            format!("{}h {}m", h, m)
+        } else {
+            format!("{}m", m)
+        }
+    } else {
+        "soon".to_string()
+    }
+}
+
+fn format_retry_after(seconds: u64) -> String {
+    if seconds <= 60 {
+        format!("{}s", seconds.max(1))
+    } else if seconds < 3600 {
+        format!("{}m", (seconds + 30) / 60)
+    } else {
+        let h = seconds / 3600;
+        let m = (seconds % 3600 + 30) / 60;
+        if m > 0 {
+            format!("{}h {}m", h, m)
+        } else {
+            format!("{}h", h)
+        }
+    }
+}
+
+fn describe_api_disabled(reason: &str, org_name: &str) -> (String, String) {
+    let norm = reason.trim().to_ascii_lowercase();
+    let org_trim = org_name.trim();
+    let org = if org_trim.is_empty() { "Your organization" } else { org_trim };
+    match norm.as_str() {
+        "out_of_credits" => (
+            format!("{} has reached its monthly usage limit", org),
+            "Top up credits or ask an admin for /extra-usage to keep going.".into(),
+        ),
+        "trial_expired" => (
+            format!("{}'s Claude Code trial has ended", org),
+            "Add a payment method to keep using Claude Code.".into(),
+        ),
+        "payment_failed" | "payment_required" => (
+            format!("{} — payment couldn't be processed", org),
+            "Update your card to resume API access.".into(),
+        ),
+        "usage_policy_violation" => (
+            format!("{}'s API access is paused for review", org),
+            "Anthropic flagged recent usage. Contact support to restore access.".into(),
+        ),
+        "manual_disable" | "admin_disabled" => (
+            format!("{} — API access turned off by an admin", org),
+            "Ask an admin in your org to re-enable Claude Code access.".into(),
+        ),
+        "subscription_canceled" | "subscription_expired" => (
+            format!("{}'s Claude subscription is inactive", org),
+            "Re-activate billing in the Anthropic console.".into(),
+        ),
+        _ => {
+            let friendly = reason
+                .replace('_', " ")
+                .split_whitespace()
+                .map(|w| {
+                    let mut c = w.chars();
+                    match c.next() {
+                        Some(first) => first.to_uppercase().chain(c).collect::<String>(),
+                        None => String::new(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            (
+                format!("{} — API access paused", org),
+                if friendly.is_empty() {
+                    "Open Anthropic billing for details.".into()
+                } else {
+                    friendly
+                },
+            )
+        }
+    }
+}
+
+fn limit_notification_for_transition(
+    provider_label: &str,
+    prev: Option<&LimitState>,
+    new: &LimitState,
+) -> Option<(String, String)> {
+    use LimitState::*;
+    match new {
+        Reached { resets_at, .. } => {
+            let from_ok = matches!(prev, None | Some(Healthy) | Some(Approaching { .. }));
+            if !from_ok {
+                return None;
+            }
+            let countdown = format_limit_countdown(resets_at.as_ref());
+            Some((
+                format!("{} limit reached", provider_label),
+                format!("Session or weekly limit reached — resets in {}", countdown),
+            ))
+        }
+        ApiDisabled { reason, org_name, .. } => {
+            if matches!(prev, Some(ApiDisabled { .. })) {
+                return None;
+            }
+            let (title, body) = describe_api_disabled(reason, org_name);
+            Some((title, body))
+        }
+        SubscriptionIssue { status, org_name } => {
+            if matches!(prev, Some(SubscriptionIssue { .. })) {
+                return None;
+            }
+            let pretty_status = status.replace('_', " ");
+            Some((
+                "Claude subscription issue".into(),
+                format!(
+                    "{}'s subscription is {} — update billing in console.",
+                    org_name, pretty_status
+                ),
+            ))
+        }
+        BillablePaused { until, org_name } => {
+            if matches!(prev, Some(BillablePaused { .. })) {
+                return None;
+            }
+            Some((
+                "Billing paused".into(),
+                format!("{} — billing paused until {}.", org_name, until),
+            ))
+        }
+        RateLimited { retry_after_secs, .. } => {
+            if matches!(prev, Some(RateLimited { .. })) {
+                return None;
+            }
+            let when = retry_after_secs
+                .map(|s| format!("retry in {}", format_retry_after(s)))
+                .unwrap_or_else(|| "Anthropic is throttling requests".into());
+            Some((
+                format!("{} rate limited", provider_label),
+                format!("Slow down — {}.", when),
+            ))
+        }
+        Unauthenticated { .. } => {
+            if matches!(prev, Some(Unauthenticated { .. })) {
+                return None;
+            }
+            Some((
+                format!("{} needs to reconnect", provider_label),
+                "Stored credentials are no longer valid. Sign in again to keep tracking usage."
+                    .into(),
+            ))
+        }
+        Approaching { worst_pct, label, resets_at, .. } => match prev {
+            Some(Healthy) if *worst_pct >= 80.0 => {
+                let countdown = format_limit_countdown(resets_at.as_ref());
+                Some((
+                    format!("{} usage high", provider_label),
+                    format!("{} at {:.0}% — resets in {}", label, worst_pct, countdown),
+                ))
+            }
+            _ => None,
+        },
+        Healthy => None,
+    }
+}
+
+fn limit_notification_first_fetch(
+    provider_label: &str,
+    new: &LimitState,
+) -> Option<(String, String)> {
+    use LimitState::*;
+    match new {
+        ApiDisabled { reason, org_name, .. } => {
+            let (title, body) = describe_api_disabled(reason, org_name);
+            Some((title, body))
+        }
+        SubscriptionIssue { status, org_name } => {
+            let pretty_status = status.replace('_', " ");
+            Some((
+                "Claude subscription issue".into(),
+                format!(
+                    "{}'s subscription is {} — update billing in console.",
+                    org_name, pretty_status
+                ),
+            ))
+        }
+        BillablePaused { until, org_name } => Some((
+            "Billing paused".into(),
+            format!("{} — billing paused until {}.", org_name, until),
+        )),
+        RateLimited { retry_after_secs, .. } => {
+            let when = retry_after_secs
+                .map(|s| format!("retry in {}", format_retry_after(s)))
+                .unwrap_or_else(|| "Anthropic is throttling requests".into());
+            Some((
+                format!("{} rate limited", provider_label),
+                format!("Slow down — {}.", when),
+            ))
+        }
+        Unauthenticated { .. } => Some((
+            format!("{} needs to reconnect", provider_label),
+            "Stored credentials are no longer valid. Sign in again to keep tracking usage.".into(),
+        )),
+        Reached { resets_at, .. } => {
+            let countdown = format_limit_countdown(resets_at.as_ref());
+            Some((
+                format!("{} limit reached", provider_label),
+                format!("Usage limit reached — resets in {}", countdown),
+            ))
+        }
+        Approaching { worst_pct, label, resets_at, .. } if *worst_pct >= 80.0 => {
+            let countdown = format_limit_countdown(resets_at.as_ref());
+            Some((
+                format!("{} usage high", provider_label),
+                format!("{} at {:.0}% — resets in {}", label, worst_pct, countdown),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn maybe_emit_limit_notifications(app: &AppHandle<Wry>, summary: &TraySummary) {
+    let settings = load_settings();
+    if !settings.analytics.limit_notifications_enabled {
+        return;
+    }
+
+    let mut persist = load_limit_notification_persist();
+    let snapshot_before = persist.providers.clone();
+
+    for p in &summary.providers {
+        if !p.connected {
+            persist.providers.remove(&p.provider_id);
+            continue;
+        }
+        let prev_json = persist.providers.get(&p.provider_id);
+        let prev_ls: Option<LimitState> = prev_json
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        if let Some(ref nls) = p.limit_state {
+            let msg = if prev_json.is_none() {
+                limit_notification_first_fetch(&p.provider_name, nls)
+            } else {
+                limit_notification_for_transition(&p.provider_name, prev_ls.as_ref(), nls)
+            };
+            if let Some((title, body)) = msg {
+                let _ = app.notification().builder().title(title).body(body).show();
+            }
+            if let Ok(v) = serde_json::to_value(nls) {
+                persist.providers.insert(p.provider_id.clone(), v);
+            }
+        } else {
+            persist.providers.remove(&p.provider_id);
+        }
+    }
+
+    if persist.providers != snapshot_before {
+        save_limit_notification_persist(&persist);
+    }
+}
 
 // ── Provider status ─────────────────────────────────────────────────────────
 
@@ -111,6 +420,7 @@ pub fn get_all_provider_analytics() -> Vec<ProviderAnalytics> {
                         rate_limits: vec![],
                         credit_usage: None,
                         token_counts: None,
+                        limit_state: None,
                         extra: std::collections::HashMap::new(),
                         fetched_at: chrono::Utc::now().to_rfc3339(),
                     }
@@ -124,6 +434,7 @@ pub fn get_all_provider_analytics() -> Vec<ProviderAnalytics> {
                     rate_limits: vec![],
                     credit_usage: None,
                     token_counts: None,
+                    limit_state: None,
                     extra: std::collections::HashMap::new(),
                     fetched_at: chrono::Utc::now().to_rfc3339(),
                 }
@@ -148,6 +459,8 @@ pub struct TrayProviderSummary {
     pub error: Option<String>,
     pub extra: std::collections::HashMap<String, serde_json::Value>,
     pub fetched_at: String,
+    #[serde(default)]
+    pub limit_state: Option<LimitState>,
 }
 
 /// Aggregated tray summary across all primary providers.
@@ -169,30 +482,61 @@ fn is_primary_rate_window(label: &str) -> bool {
 enum DisplayMetric {
     /// Capped usage — rendered as "X%".
     Percent(f64),
-    /// Uncapped Enterprise spend — rendered as "$X" (rounded dollars).
+    /// Enterprise spend — rendered as "$X" (rounded dollars). Used for both
+    /// uncapped Enterprise (no meaningful %) AND capped Enterprise (the user
+    /// asked us to surface the dollar figure in the menu bar; the popover
+    /// continues to show the percentage in the bar).
     Spend { amount: f64, currency: String },
+}
+
+/// Claude Code on an Enterprise plan (capped or uncapped).
+fn is_enterprise_provider(provider: &TrayProviderSummary) -> bool {
+    if provider.provider_id != "claude-code" {
+        return false;
+    }
+    provider
+        .extra
+        .get("is_enterprise")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 /// True for Claude Code accounts on Enterprise plan with no monthly cap set.
 /// Such providers have no meaningful percentage to display.
 fn is_uncapped_enterprise(provider: &TrayProviderSummary) -> bool {
-    if provider.provider_id != "claude-code" {
+    if !is_enterprise_provider(provider) {
         return false;
     }
-    let is_ent = provider
-        .extra
-        .get("is_enterprise")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    if !is_ent {
-        return false;
-    }
-    let no_cap = provider
+    provider
         .credit_usage
         .as_ref()
         .map(|c| c.limit.is_none())
-        .unwrap_or(true);
-    no_cap
+        .unwrap_or(true)
+}
+
+/// Gemini CLI exposes three tier buckets (labels "Pro", "Flash", "Flash Lite").
+/// Prefer showing the first tier in priority order that still has quota left; if
+/// Pro is exhausted, fall through to Flash, then Flash Lite. If all are
+/// exhausted, surface Pro so the title matches the highest-priority tier.
+fn pick_gemini_display_rate(provider: &TrayProviderSummary) -> Option<RateLimitWindow> {
+    if provider.provider_id != "gemini" {
+        return None;
+    }
+    const ORDER: &[&str] = &["Pro", "Flash", "Flash Lite"];
+    let mut by_label: std::collections::HashMap<String, RateLimitWindow> =
+        std::collections::HashMap::new();
+    for rl in &provider.rate_limits {
+        by_label.insert(rl.label.clone(), rl.clone());
+    }
+    const EPS: f64 = 0.05;
+    for tier in ORDER {
+        if let Some(rl) = by_label.get(*tier) {
+            if rl.remaining_percent > EPS {
+                return Some(rl.clone());
+            }
+        }
+    }
+    ORDER.iter().find_map(|t| by_label.get(*t).cloned())
 }
 
 fn pick_primary_provider_rate(provider: &TrayProviderSummary) -> Option<RateLimitWindow> {
@@ -222,6 +566,33 @@ fn pick_primary_provider_rate(provider: &TrayProviderSummary) -> Option<RateLimi
         // Neither found, return session anyway (shows 0%)
         if session.is_some() {
             return session;
+        }
+    }
+
+    // Codex (WHAM): prefer Primary (5h) for menu-bar % so it matches the first
+    // bar in the popover — same precedence as Claude session vs weekly. Using
+    // "most constrained" across 5h + weekly would pick Weekly (lower remaining).
+    if provider.provider_id == "codex" {
+        let primary = provider
+            .rate_limits
+            .iter()
+            .find(|rl| rl.label.contains("5h"))
+            .cloned();
+        if let Some(ref p) = primary {
+            if p.used_percent > 0.0 {
+                return primary;
+            }
+        }
+        let weekly = provider
+            .rate_limits
+            .iter()
+            .find(|rl| rl.label.contains("Weekly"))
+            .cloned();
+        if weekly.is_some() {
+            return weekly;
+        }
+        if primary.is_some() {
+            return primary;
         }
     }
 
@@ -260,8 +631,11 @@ fn numeric_extra_value(
 }
 
 fn compute_provider_display_metric(provider: &TrayProviderSummary) -> Option<DisplayMetric> {
-    // Claude Enterprise without a cap: percentage is meaningless — show $-spend.
-    if is_uncapped_enterprise(provider) {
+    // Claude Enterprise — show $-spend in the menu bar regardless of whether
+    // a monthly cap is set. (Capped: low single-digit percentages would just
+    // render as "0%". Uncapped: percentage is undefined.) The popover keeps
+    // showing the percentage inside the spend bar.
+    if is_enterprise_provider(provider) {
         if let Some(credit) = provider.credit_usage.as_ref() {
             return Some(DisplayMetric::Spend {
                 amount: credit.used,
@@ -271,12 +645,38 @@ fn compute_provider_display_metric(provider: &TrayProviderSummary) -> Option<Dis
         return None;
     }
 
+    // Cursor menu bar: show user's total spend (included + bonus + on-demand),
+    // same formula as the tray popover. Must run before pick_primary_provider_rate
+    // so dollars win over session/week percentage windows.
+    if provider.provider_id == "cursor" {
+        let included = numeric_extra_value(provider, "plan_included_usd").unwrap_or(0.0);
+        let bonus = numeric_extra_value(provider, "plan_bonus_usd").unwrap_or(0.0);
+        let on_demand = numeric_extra_value(provider, "on_demand_used_usd").unwrap_or(0.0);
+        let total_spent = included + bonus + on_demand;
+        if total_spent > 0.0 {
+            return Some(DisplayMetric::Spend {
+                amount: total_spent,
+                currency: provider
+                    .credit_usage
+                    .as_ref()
+                    .map(|c| c.currency.clone())
+                    .unwrap_or_else(|| "USD".into()),
+            });
+        }
+    }
+
+    // Gemini menu bar: follow Pro → Flash → Flash Lite, using the first tier
+    // that still has remaining quota (not the globally most-drained bucket).
+    if let Some(rate) = pick_gemini_display_rate(provider) {
+        return Some(DisplayMetric::Percent(rate.used_percent.clamp(0.0, 100.0)));
+    }
+
     if let Some(rate) = pick_primary_provider_rate(provider) {
         return Some(DisplayMetric::Percent(rate.used_percent.clamp(0.0, 100.0)));
     }
 
-    // Cursor tray percent comes from the API's individualUsage.plan.totalPercentUsed
-    // field. The menu bar title later rounds this to a whole number (e.g. 66.3 -> 66%).
+    // Cursor fallback: API's individualUsage.plan.totalPercentUsed (menu bar rounds
+    // to a whole number, e.g. 66.3 -> 66%) when spend components are missing/zero.
     if let Some(percent) = numeric_extra_value(provider, "plan_total_percent_used") {
         return Some(DisplayMetric::Percent(percent.clamp(0.0, 100.0)));
     }
@@ -324,6 +724,8 @@ fn pick_display_provider_id(
     summary: &TraySummary,
     active_provider_id: Option<&str>,
 ) -> Option<String> {
+    // The user's selected tab always wins — switching tabs should switch the
+    // tray icon immediately, even when another provider is in danger.
     if let Some(provider_id) = active_provider_id {
         if summary
             .providers
@@ -331,6 +733,20 @@ fn pick_display_provider_id(
             .any(|p| p.provider_id == provider_id && p.connected)
         {
             return Some(provider_id.to_string());
+        }
+    }
+
+    // No / stale tab selection: prefer a provider in a danger state so the
+    // menu bar surfaces the truly-blocked one instead of falling back to %.
+    for id in PRIMARY_PROVIDER_IDS {
+        if let Some(p) = summary.providers.iter().find(|p| p.provider_id == *id) {
+            if p.connected {
+                if let Some(ref ls) = p.limit_state {
+                    if ls.is_danger() {
+                        return Some(p.provider_id.clone());
+                    }
+                }
+            }
         }
     }
 
@@ -345,7 +761,16 @@ fn pick_display_provider_id(
         .map(|p| p.provider_id.clone())
 }
 
-fn icon_bytes_for_provider(provider_id: &str) -> &'static [u8] {
+fn icon_bytes_for_provider(provider_id: &str, danger: bool) -> &'static [u8] {
+    if danger {
+        return match provider_id {
+            "claude-code" => CLAUDE_CODE_TRAY_ICON_ACTIVE_PNG,
+            "cursor" => CURSOR_TRAY_ICON_ACTIVE_PNG,
+            "codex" => CODEX_TRAY_ICON_ACTIVE_PNG,
+            "gemini" => GEMINI_TRAY_ICON_ACTIVE_PNG,
+            _ => &[],
+        };
+    }
     match provider_id {
         "claude-code" => CLAUDE_CODE_TRAY_ICON_PNG,
         "cursor" => CURSOR_TRAY_ICON_PNG,
@@ -355,8 +780,8 @@ fn icon_bytes_for_provider(provider_id: &str) -> &'static [u8] {
     }
 }
 
-fn load_provider_tray_icon(provider_id: &str) -> Option<Image<'static>> {
-    let icon_bytes = icon_bytes_for_provider(provider_id);
+fn load_provider_tray_icon(provider_id: &str, danger: bool) -> Option<Image<'static>> {
+    let icon_bytes = icon_bytes_for_provider(provider_id, danger);
     if icon_bytes.is_empty() {
         return None;
     }
@@ -401,11 +826,26 @@ fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
             }
         });
 
+    let danger_icon = display_provider
+        .and_then(|p| p.limit_state.as_ref())
+        .map(|ls| ls.is_danger())
+        .unwrap_or(false);
+
     if let Some(tray) = app.tray_by_id("main-tray") {
         let title = match display_metric {
-            Some(DisplayMetric::Percent(p)) => Some(format!("{}%", p.round() as u32)),
+            Some(DisplayMetric::Percent(p)) => {
+                let mut s = format!("{}%", p.round() as u32);
+                if danger_icon {
+                    s.push('!');
+                }
+                Some(s)
+            }
             Some(DisplayMetric::Spend { amount, currency }) => {
-                Some(format_spend_for_title(amount, &currency))
+                let mut s = format_spend_for_title(amount, &currency);
+                if danger_icon {
+                    s.push('!');
+                }
+                Some(s)
             }
             None => None,
         };
@@ -416,7 +856,7 @@ fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
         }
 
         if let Some(ref provider_id) = display_provider_id {
-            if let Some(icon) = load_provider_tray_icon(provider_id) {
+            if let Some(icon) = load_provider_tray_icon(provider_id, danger_icon) {
                 let _ = tray.set_icon(Some(icon));
             } else {
                 let _ = tray.set_icon(Option::<Image<'_>>::None);
@@ -451,6 +891,7 @@ fn build_tray_summary() -> TraySummary {
         rate_limits: vec![],
         credit_usage: None,
         token_counts: None,
+        limit_state: None,
         extra: std::collections::HashMap::new(),
         fetched_at: chrono::Utc::now().to_rfc3339(),
     };
@@ -476,6 +917,7 @@ fn build_tray_summary() -> TraySummary {
             error: p.status.error,
             extra: p.extra,
             fetched_at: p.fetched_at,
+            limit_state: p.limit_state,
         })
         .collect();
 
@@ -515,6 +957,7 @@ fn refresh_and_emit() {
 
     if let Ok(guard) = TRAY_APP_HANDLE.lock() {
         if let Some(ref app) = *guard {
+            maybe_emit_limit_notifications(app, &summary);
             let _ = app.emit("tray-data-updated", &summary);
             update_tray_indicator(app, &summary);
         }

@@ -2,26 +2,44 @@
 //! Auth: 3-tier — silent auto-detect → user sign-in → keychain import
 //! API: api.anthropic.com/api/oauth/usage + /api/oauth/profile + /api/oauth/account
 
+use crate::analytics::claude_account;
 use crate::analytics::http;
+use crate::analytics::http::HttpCallError;
 use crate::analytics::token_store;
 use crate::analytics::types::*;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-// ── In-memory cache (300s TTL) ──────────────────────────────────────────────
+// ── In-memory cache (300s TTL, shorter when limits are tight) ───────────────
 
 struct ClaudeCacheEntry {
     data: ProviderAnalytics,
     fetched_at: std::time::Instant,
 }
 
+struct AccountSnapshot {
+    raw: serde_json::Value,
+    fetched_at: std::time::Instant,
+}
+
 lazy_static::lazy_static! {
     static ref CLAUDE_CACHE: Mutex<Option<ClaudeCacheEntry>> = Mutex::new(None);
+    /// Last successful `/api/oauth/account` payload — reused as a fallback
+    /// when the endpoint starts 429-ing (Anthropic does this aggressively
+    /// once a token is `out_of_credits`). Without it we'd lose the friendlier
+    /// "monthly usage limit reached" state and just show "rate limited".
+    static ref LAST_ACCOUNT_CACHE: Mutex<Option<AccountSnapshot>> = Mutex::new(None);
 }
 
 const CLAUDE_CACHE_TTL_SECS: u64 = 300; // 5 minutes
+const CLAUDE_CACHE_TTL_SHORT_SECS: u64 = 60; // when approaching / reached limits
+/// Never serve Claude API-backed analytics older than this — limits how long
+/// we show a "healthy" snapshot after OAuth tokens are rotated or expired.
+const CLAUDE_CACHE_MAX_STALE_SECS: u64 = 90;
+const ACCOUNT_FALLBACK_TTL_SECS: u64 = 3600; // hold last-good account up to 1h
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -63,6 +81,14 @@ struct ClaudeUsageResponse {
     seven_day_opus: Option<UsageWindow>,
     seven_day_sonnet: Option<UsageWindow>,
     seven_day_cowork: Option<UsageWindow>,
+    #[serde(default)]
+    seven_day_omelette: Option<UsageWindow>,
+    #[serde(default)]
+    tangelo: Option<UsageWindow>,
+    #[serde(default)]
+    iguana_necktie: Option<UsageWindow>,
+    #[serde(default)]
+    omelette_promotional: Option<UsageWindow>,
     extra_usage: Option<ExtraUsage>,
 }
 
@@ -88,6 +114,10 @@ struct ProfileOrg {
     has_extra_usage_enabled: Option<bool>,
     subscription_status: Option<String>,
     subscription_created_at: Option<String>,
+    #[serde(default)]
+    claude_code_trial_ends_at: Option<String>,
+    #[serde(default)]
+    claude_code_trial_duration_days: Option<i64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -293,22 +323,32 @@ fn try_refresh_access_token() -> Option<String> {
 }
 
 /// Resolve token WITHOUT touching keychain. Used by analytics fetchers.
-/// Checks: stored token → credentials file → refresh token.
+/// **Order matters for parity with the Claude Code CLI:** the terminal tool
+/// reads `~/.claude/.credentials.json` first. If we preferred AgentHarbor's
+/// vault, a still-valid in-app token could make `/oauth/*` succeed while the
+/// CLI shows `401 Invalid authentication credentials` for the on-disk token.
+/// So: **credentials file → app vault → refresh.**
 fn resolve_access_token_silent() -> Result<(String, String), String> {
-    // 1. AgentHarbor's own stored token (saved from prior sign-in or keychain import)
-    if let Ok(Some(token)) = token_store::get_provider_token("claude-code", "access-token") {
-        if !token.is_empty() {
-            return Ok((token, "stored".into()));
-        }
-    }
-
-    // 2. ~/.claude/.credentials.json (plain file, no prompt)
+    // 1. ~/.claude/.credentials.json — same file the CLI uses
     if let Ok(creds) = read_auto_credentials() {
         if let Some(token) = creds.access_token {
             if !token.is_empty() {
                 let _ = token_store::store_provider_token("claude-code", "access-token", &token);
+                if let Some(ref rt) = creds.refresh_token {
+                    if !rt.is_empty() {
+                        let _ = token_store::store_provider_token("claude-code", "refresh-token", rt);
+                    }
+                }
                 return Ok((token, "credentials-file".into()));
             }
+        }
+    }
+
+    // 2. AgentHarbor's stored token (in-app sign-in / keychain import) when
+    //    there is no usable token in the Claude credentials file.
+    if let Ok(Some(token)) = token_store::get_provider_token("claude-code", "access-token") {
+        if !token.is_empty() {
+            return Ok((token, "stored".into()));
         }
     }
 
@@ -603,16 +643,260 @@ fn parse_window(
     })
 }
 
+// ── Limit state derivation ─────────────────────────────────────────────────
+
+fn label_to_scope(label: &str) -> LimitScope {
+    let l = label.to_lowercase();
+    if l.contains("session") || l.contains("5h") {
+        return LimitScope::Session5h;
+    }
+    if l.contains("opus") {
+        return LimitScope::WeeklyOpus;
+    }
+    if l.contains("sonnet") {
+        return LimitScope::WeeklySonnet;
+    }
+    if l.contains("oauth apps") {
+        return LimitScope::WeeklyOauthApps;
+    }
+    if l.contains("cowork") {
+        return LimitScope::WeeklyCowork;
+    }
+    if l.contains("weekly") || l.contains("7d") {
+        return LimitScope::WeeklyAll;
+    }
+    LimitScope::Custom(label.to_string())
+}
+
+fn iso_in_future(s: &str) -> bool {
+    DateTime::parse_from_rfc3339(s)
+        .map(|d| d.with_timezone(&Utc) > Utc::now())
+        .unwrap_or(false)
+}
+
+fn subscription_is_healthy(status: Option<&str>) -> bool {
+    match status.map(|s| s.to_lowercase()).as_deref() {
+        None | Some("active") | Some("trialing") => true,
+        _ => false,
+    }
+}
+
+/// Derive limit / billing health for tray + notifications.
+fn derive_claude_limit_state(
+    usage: &Option<ClaudeUsageResponse>,
+    profile: &Option<ClaudeProfileResponse>,
+    account: &Option<claude_account::AccountResponse>,
+    rate_limits: &[RateLimitWindow],
+    oauth_rate_limited: Option<(Option<u64>, String)>,
+    oauth_unauthorized: Option<String>,
+) -> LimitState {
+    // If every endpoint that returned an error did so with 401 and we have
+    // no usable usage / profile / account data, the stored OAuth token is
+    // invalid (the upstream tool likely rotated its credentials). Surface a
+    // dedicated "Reconnect" state instead of mislabeling the cascading 429
+    // on /usage as plain rate-limiting.
+    // `/api/oauth/account` may still deserialize from LAST_ACCOUNT_CACHE after
+    // real endpoints return 401 — do not require `account.is_none()` here.
+    if let Some(body) = oauth_unauthorized.as_ref() {
+        let no_live_usage_or_profile = usage.is_none() && profile.is_none();
+        if no_live_usage_or_profile {
+            let friendly = serde_json::from_str::<serde_json::Value>(body)
+                .ok()
+                .and_then(|v| {
+                    v.get("error")
+                        .and_then(|e| e.get("message"))
+                        .and_then(|m| m.as_str())
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| {
+                    "Stored Claude credentials are no longer valid.".to_string()
+                });
+            return LimitState::Unauthenticated { message: friendly };
+        }
+    }
+
+    let org = profile.as_ref().and_then(|p| p.organization.as_ref());
+    let org_uuid = org.and_then(|o| o.uuid.as_deref());
+    let org_display = org
+        .and_then(|o| o.name.clone())
+        .unwrap_or_else(|| "Organization".to_string());
+
+    // Anthropic occasionally leaves `api_disabled_reason: "out_of_credits"`
+    // set on a sibling/personal membership row even after the active org
+    // has been allocated headroom (e.g. an Enterprise admin sets a per-user
+    // cap). Cross-check against the live `extra_usage` data — if the user
+    // is clearly under their cap, the flag is stale and we should ignore it.
+    // Other api_disabled reasons (trial_expired, payment_failed, etc.) are
+    // unrelated to credits and remain authoritative.
+    let usage_clearly_within_cap = usage
+        .as_ref()
+        .and_then(|u| u.extra_usage.as_ref())
+        .map(|eu| {
+            if let Some(limit) = eu.monthly_limit.filter(|&l| l > 0.0) {
+                let used = eu.used_credits.unwrap_or(0.0);
+                used < limit * 0.99
+            } else if let Some(util) = eu.utilization {
+                let pct = if util > 1.0 { util } else { util * 100.0 };
+                pct < 99.0
+            } else {
+                false
+            }
+        })
+        .unwrap_or(false);
+
+    if let Some(acc) = account {
+        // Try matched org → parent org → any blocked membership (Enterprise
+        // tokens often expose api_disabled_reason on the parent / sibling
+        // membership row, not the active profile org).
+        let matched = claude_account::org_for_profile_uuid(acc, org_uuid);
+        let parent = matched.and_then(|m| claude_account::parent_org(acc, m));
+        let blocked = claude_account::first_blocked_org(acc);
+        let candidates: Vec<&claude_account::AccountOrg> = matched
+            .into_iter()
+            .chain(parent.into_iter())
+            .chain(blocked.into_iter())
+            .collect();
+
+        // Use the active profile org name in the user-facing message — even
+        // when the block flag lives on a sibling/parent membership row — so
+        // it matches what the user sees in the analytics header.
+        for cand in &candidates {
+            if let Some(ref reason) = cand.api_disabled_reason {
+                if reason.is_empty() {
+                    continue;
+                }
+                // Stale "out_of_credits" flag — see comment above.
+                if reason.eq_ignore_ascii_case("out_of_credits") && usage_clearly_within_cap {
+                    continue;
+                }
+                return LimitState::ApiDisabled {
+                    reason: reason.clone(),
+                    until: cand.api_disabled_until.clone(),
+                    org_name: org_display.clone(),
+                };
+            }
+        }
+        for cand in &candidates {
+            if let Some(ref pu) = cand.billable_usage_paused_until {
+                if iso_in_future(pu) {
+                    return LimitState::BillablePaused {
+                        until: pu.clone(),
+                        org_name: org_display.clone(),
+                    };
+                }
+            }
+        }
+    }
+
+    if let Some(o) = org {
+        if let Some(ref st) = o.subscription_status {
+            if !subscription_is_healthy(Some(st.as_str())) {
+                return LimitState::SubscriptionIssue {
+                    status: st.clone(),
+                    org_name: o.name.clone().unwrap_or_else(|| org_display.clone()),
+                };
+            }
+        }
+    }
+
+    if let Some((retry, msg)) = oauth_rate_limited {
+        return LimitState::RateLimited {
+            retry_after_secs: retry,
+            message: msg,
+        };
+    }
+
+    for rl in rate_limits {
+        if rl.used_percent >= 100.0 - 1e-6 {
+            return LimitState::Reached {
+                scope: label_to_scope(&rl.label),
+                used_pct: rl.used_percent.min(100.0),
+                cap: None,
+                resets_at: rl.resets_at.clone(),
+            };
+        }
+    }
+
+    if let Some(ref u) = usage {
+        if let Some(ref eu) = u.extra_usage {
+            if let Some(limit_cents) = eu.monthly_limit {
+                let limit_dollars = limit_cents / 100.0;
+                let used_dollars = eu.used_credits.unwrap_or(0.0) / 100.0;
+                if limit_dollars > 0.0 && used_dollars + 1e-6 >= limit_dollars {
+                    return LimitState::Reached {
+                        scope: LimitScope::MonthlySpend,
+                        used_pct: ((used_dollars / limit_dollars) * 100.0).min(100.0),
+                        cap: Some(limit_dollars),
+                        resets_at: None,
+                    };
+                }
+            }
+            // Enterprise plans report `monthly_limit: null` ("no cap") even
+            // when the org enforces an invisible spend ceiling and the API
+            // rejects calls. The server still surfaces utilization.
+            if let Some(util) = eu.utilization {
+                let pct = if util > 1.0 { util } else { util * 100.0 };
+                if pct >= 100.0 - 1e-6 {
+                    return LimitState::Reached {
+                        scope: LimitScope::MonthlySpend,
+                        used_pct: pct.min(100.0),
+                        cap: None,
+                        resets_at: None,
+                    };
+                }
+            }
+        }
+    }
+
+    let mut worst: Option<&RateLimitWindow> = None;
+    for rl in rate_limits {
+        if rl.used_percent >= 80.0 && rl.used_percent < 100.0 {
+            worst = Some(match worst {
+                None => rl,
+                Some(w) => {
+                    if rl.used_percent > w.used_percent {
+                        rl
+                    } else {
+                        w
+                    }
+                }
+            });
+        }
+    }
+    if let Some(w) = worst {
+        return LimitState::Approaching {
+            worst_pct: w.used_percent,
+            label: w.label.clone(),
+            resets_at: w.resets_at.clone(),
+            scope: label_to_scope(&w.label),
+        };
+    }
+
+    LimitState::Healthy
+}
+
 // ── Public API (uses silent resolution only) ────────────────────────────────
 
 /// Fetch Claude Code analytics (rate limits + profile).
 /// Uses silent token resolution — never triggers keychain prompt.
-/// Results are cached for 300s to avoid repeated API calls.
+/// Results are cached for 300s to avoid repeated API calls (60s when limits
+/// are tight, so the user sees recovery faster after reset).
 pub fn fetch_claude_analytics() -> ProviderAnalytics {
-    // Return cached data if still fresh
     if let Ok(guard) = CLAUDE_CACHE.lock() {
         if let Some(ref entry) = *guard {
-            if entry.fetched_at.elapsed().as_secs() < CLAUDE_CACHE_TTL_SECS {
+            let ttl_secs = if entry
+                .data
+                .limit_state
+                .as_ref()
+                .map(|s| s.prefers_fast_refresh())
+                .unwrap_or(false)
+            {
+                CLAUDE_CACHE_TTL_SHORT_SECS
+            } else {
+                CLAUDE_CACHE_TTL_SECS
+            };
+            let effective_ttl = ttl_secs.min(CLAUDE_CACHE_MAX_STALE_SECS);
+            if entry.fetched_at.elapsed().as_secs() < effective_ttl {
                 return entry.data.clone();
             }
         }
@@ -655,6 +939,7 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
                 rate_limits: vec![],
                 credit_usage: None,
                 token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(),
                 fetched_at: now,
             };
@@ -663,19 +948,45 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
 
     let extra_headers = http::headers(&[("anthropic-beta", "oauth-2025-04-20")]);
 
-    // Fetch usage + profile with the current token
+    // Fetch usage + profile with the current token. Capture both 429
+    // (rate-limited) and 401 (invalid creds) so derive_claude_limit_state
+    // can surface a "Reconnect" banner instead of mislabeling 401-driven
+    // 429s on /usage as plain rate limiting.
     let mut active_token = token;
-    let mut usage: Option<ClaudeUsageResponse> = http::authed_get(
+    let mut oauth429: Option<(Option<u64>, String)> = None;
+    let mut oauth401: Option<String> = None;
+
+    let mut usage: Option<ClaudeUsageResponse> = match http::authed_get(
         "https://api.anthropic.com/api/oauth/usage",
         &active_token,
         Some(extra_headers.clone()),
-    ).ok();
+    ) {
+        Ok(u) => Some(u),
+        Err(HttpCallError::RateLimited { retry_after_secs, body, .. }) => {
+            oauth429 = Some((retry_after_secs, body));
+            None
+        }
+        Err(HttpCallError::Unsuccessful { status: 401, body, .. }) => {
+            oauth401 = Some(body);
+            None
+        }
+        Err(_) => None,
+    };
 
-    let mut profile: Option<ClaudeProfileResponse> = http::authed_get(
+    let mut profile: Option<ClaudeProfileResponse> = match http::authed_get::<ClaudeProfileResponse>(
         "https://api.anthropic.com/api/oauth/profile",
         &active_token,
         Some(extra_headers.clone()),
-    ).ok();
+    ) {
+        Ok(p) => Some(p),
+        Err(HttpCallError::Unsuccessful { status: 401, body, .. }) => {
+            if oauth401.is_none() {
+                oauth401 = Some(body);
+            }
+            None
+        }
+        Err(_) => None,
+    };
 
     // If profile or usage is empty (token may be expired), try refreshing and retrying both
     let usage_empty = usage.is_none() || usage.as_ref().and_then(|u| u.five_hour.as_ref()).is_none();
@@ -684,23 +995,88 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         if let Some(new_token) = try_refresh_access_token() {
             active_token = new_token;
             let fresh_headers = http::headers(&[("anthropic-beta", "oauth-2025-04-20")]);
+            // Clear any previous 429/401 captures — a successful retry on
+            // the new token shouldn't flag the user as unauthenticated.
             if usage_empty {
-                usage = http::authed_get(
+                oauth429 = None;
+                oauth401 = None;
+                usage = match http::authed_get(
                     "https://api.anthropic.com/api/oauth/usage",
                     &active_token,
                     Some(fresh_headers.clone()),
-                ).ok();
+                ) {
+                    Ok(u) => Some(u),
+                    Err(HttpCallError::RateLimited { retry_after_secs, body, .. }) => {
+                        oauth429 = Some((retry_after_secs, body));
+                        None
+                    }
+                    Err(HttpCallError::Unsuccessful { status: 401, body, .. }) => {
+                        oauth401 = Some(body);
+                        None
+                    }
+                    Err(_) => None,
+                };
             }
             if profile_empty {
-                profile = http::authed_get(
+                profile = match http::authed_get::<ClaudeProfileResponse>(
                     "https://api.anthropic.com/api/oauth/profile",
                     &active_token,
                     Some(fresh_headers),
-                ).ok();
+                ) {
+                    Ok(p) => Some(p),
+                    Err(HttpCallError::Unsuccessful { status: 401, body, .. }) => {
+                        if oauth401.is_none() {
+                            oauth401 = Some(body);
+                        }
+                        None
+                    }
+                    Err(_) => None,
+                };
             }
         }
     }
-    let _ = active_token; // suppress unused warning
+
+    // Fetch /api/oauth/account; fall back to last successful snapshot when
+    // it 429s (Anthropic throttles the account endpoint aggressively once
+    // a token is out_of_credits).
+    let mut account_raw: Option<serde_json::Value> = match http::authed_get::<serde_json::Value>(
+        "https://api.anthropic.com/api/oauth/account",
+        &active_token,
+        Some(http::headers(&[("anthropic-beta", "oauth-2025-04-20")])),
+    ) {
+        Ok(v) => Some(v),
+        Err(HttpCallError::Unsuccessful { status: 401, body, .. }) => {
+            if oauth401.is_none() {
+                oauth401 = Some(body);
+            }
+            None
+        }
+        Err(_) => None,
+    };
+    if let Some(ref fresh) = account_raw {
+        if let Ok(mut guard) = LAST_ACCOUNT_CACHE.lock() {
+            *guard = Some(AccountSnapshot {
+                raw: fresh.clone(),
+                fetched_at: std::time::Instant::now(),
+            });
+        }
+    } else if oauth401.is_none() {
+        // Stale account JSON must not mask HTTP 401 on live OAuth calls.
+        if let Ok(guard) = LAST_ACCOUNT_CACHE.lock() {
+            if let Some(ref snap) = *guard {
+                if snap.fetched_at.elapsed().as_secs() < ACCOUNT_FALLBACK_TTL_SECS {
+                    account_raw = Some(snap.raw.clone());
+                }
+            }
+        }
+    }
+    let account: Option<claude_account::AccountResponse> = account_raw
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+    let show_internal = crate::commands::config::load_settings()
+        .analytics
+        .show_internal_usage_buckets;
 
     // Build rate limits
     let mut rate_limits = Vec::new();
@@ -722,6 +1098,30 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         }
         if let Some(w) = parse_window(&u.seven_day_cowork, "Cowork (7d)", Some(604800)) {
             rate_limits.push(w);
+        }
+        if show_internal {
+            if let Some(w) = parse_window(&u.seven_day_omelette, "Omelette (7d)", Some(604800)) {
+                rate_limits.push(w);
+            }
+            if let Some(w) = parse_window(&u.tangelo, "Tangelo", Some(604800)) {
+                rate_limits.push(w);
+            }
+            if let Some(w) = parse_window(&u.iguana_necktie, "Iguana Necktie", Some(604800)) {
+                rate_limits.push(w);
+            }
+            if let Some(w) = parse_window(&u.omelette_promotional, "Promotional", Some(18000)) {
+                rate_limits.push(w);
+            }
+        }
+    }
+
+    let had_oauth_401 = oauth401.is_some();
+    let limit_state =
+        derive_claude_limit_state(&usage, &profile, &account, &rate_limits, oauth429, oauth401);
+
+    if had_oauth_401 {
+        if let Ok(mut guard) = CLAUDE_CACHE.lock() {
+            *guard = None;
         }
     }
 
@@ -830,6 +1230,15 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         (None, plan, None)
     };
 
+    // Stash the raw `/api/oauth/account` payload so the analytics page and
+    // debug surfaces can see what the API actually returned.
+    if let Some(ref raw) = account_raw {
+        extra.insert("account_response".into(), raw.clone());
+        if let Some(memberships) = raw.get("memberships") {
+            extra.insert("account_memberships".into(), memberships.clone());
+        }
+    }
+
     // Enrich with today's local session stats
     enrich_with_today_stats(&mut extra);
 
@@ -849,6 +1258,7 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         rate_limits,
         credit_usage,
         token_counts: None,
+        limit_state: Some(limit_state),
         extra,
         fetched_at: now,
     }
@@ -1096,6 +1506,7 @@ pub fn fetch_claude_account() -> Result<serde_json::Value, String> {
         &token,
         Some(extra_headers),
     )
+    .map_err(String::from)
 }
 
 /// Check if credentials exist silently (without API calls or keychain).
@@ -1121,5 +1532,155 @@ pub fn check_connection() -> ProviderStatus {
             org_name: None,
             error: Some(e),
         },
+    }
+}
+
+#[cfg(test)]
+mod derive_limit_state_tests {
+    use super::*;
+    use crate::analytics::claude_account::AccountResponse;
+
+    fn rl(label: &str, used: f64, rem: f64) -> RateLimitWindow {
+        RateLimitWindow {
+            provider_id: "claude-code".into(),
+            label: label.into(),
+            used_percent: used,
+            remaining_percent: rem,
+            resets_at: None,
+            resets_in_seconds: None,
+            window_seconds: None,
+        }
+    }
+
+    #[test]
+    fn api_disabled_wins_over_usage() {
+        let profile: ClaudeProfileResponse = serde_json::from_value(serde_json::json!({
+            "organization": { "uuid": "org-1", "name": "Acme" }
+        }))
+        .unwrap();
+        let account: AccountResponse = serde_json::from_value(serde_json::json!({
+            "memberships": [{
+                "organization": {
+                    "uuid": "org-1",
+                    "name": "Acme",
+                    "api_disabled_reason": "out_of_credits"
+                }
+            }]
+        }))
+        .unwrap();
+        let limits = vec![rl("Session (5h)", 50.0, 50.0)];
+        let s = derive_claude_limit_state(
+            &None,
+            &Some(profile),
+            &Some(account),
+            &limits,
+            None,
+            None,
+        );
+        assert!(matches!(
+            s,
+            LimitState::ApiDisabled { ref reason, .. } if reason == "out_of_credits"
+        ));
+    }
+
+    #[test]
+    fn oauth_429_maps_to_rate_limited() {
+        let profile: ClaudeProfileResponse = serde_json::from_value(serde_json::json!({
+            "organization": { "uuid": "org-1", "name": "Acme", "subscription_status": "active" }
+        }))
+        .unwrap();
+        let s = derive_claude_limit_state(
+            &None,
+            &Some(profile),
+            &None,
+            &[],
+            Some((Some(120), "too many requests".into())),
+            None,
+        );
+        assert!(matches!(
+            s,
+            LimitState::RateLimited {
+                retry_after_secs: Some(120),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn reached_when_window_at_100() {
+        let profile: ClaudeProfileResponse = serde_json::from_value(serde_json::json!({
+            "organization": { "uuid": "org-1", "name": "Acme", "subscription_status": "active" }
+        }))
+        .unwrap();
+        let limits = vec![rl("Session (5h)", 100.0, 0.0)];
+        let s = derive_claude_limit_state(&None, &Some(profile), &None, &limits, None, None);
+        assert!(matches!(
+            s,
+            LimitState::Reached { used_pct, .. } if (used_pct - 100.0).abs() < 1e-5
+        ));
+    }
+
+    #[test]
+    fn approaching_over_80() {
+        let profile: ClaudeProfileResponse = serde_json::from_value(serde_json::json!({
+            "organization": { "uuid": "org-1", "name": "Acme", "subscription_status": "active" }
+        }))
+        .unwrap();
+        let limits = vec![rl("Weekly", 87.0, 13.0)];
+        let s = derive_claude_limit_state(&None, &Some(profile), &None, &limits, None, None);
+        assert!(matches!(
+            s,
+            LimitState::Approaching { worst_pct, .. } if (worst_pct - 87.0).abs() < 1e-5
+        ));
+    }
+
+    #[test]
+    fn subscription_past_due() {
+        let profile: ClaudeProfileResponse = serde_json::from_value(serde_json::json!({
+            "organization": {
+                "uuid": "org-1",
+                "name": "Acme",
+                "subscription_status": "past_due"
+            }
+        }))
+        .unwrap();
+        let s = derive_claude_limit_state(&None, &Some(profile), &None, &[], None, None);
+        assert!(matches!(
+            s,
+            LimitState::SubscriptionIssue { ref status, .. } if status == "past_due"
+        ));
+    }
+
+    #[test]
+    fn unauthenticated_when_all_endpoints_401() {
+        let body = r#"{"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}"#;
+        let s = derive_claude_limit_state(
+            &None,
+            &None,
+            &None,
+            &[],
+            Some((Some(60), "rate limited".into())),
+            Some(body.to_string()),
+        );
+        assert!(matches!(
+            s,
+            LimitState::Unauthenticated { ref message } if message.contains("Invalid authentication credentials")
+        ));
+    }
+
+    #[test]
+    fn unauthenticated_401_still_triggers_with_stale_account_snapshot() {
+        let body = r#"{"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}"#;
+        let account: claude_account::AccountResponse =
+            serde_json::from_value(serde_json::json!({ "memberships": [] })).unwrap();
+        let s = derive_claude_limit_state(
+            &None,
+            &None,
+            &Some(account),
+            &[],
+            None,
+            Some(body.to_string()),
+        );
+        assert!(matches!(s, LimitState::Unauthenticated { .. }));
     }
 }

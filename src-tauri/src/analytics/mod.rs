@@ -4,6 +4,7 @@ pub mod token_store;
 pub mod commands;
 
 pub mod claude;
+pub mod claude_account;
 pub mod claude_v2;
 pub mod claude_desktop;
 pub mod cost_engine;

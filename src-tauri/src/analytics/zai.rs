@@ -56,6 +56,7 @@ pub fn fetch_zai_analytics() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(), fetched_at: now,
             };
         }
@@ -65,7 +66,8 @@ pub fn fetch_zai_analytics() -> ProviderAnalytics {
         "https://api.z.ai/api/monitor/usage/quota/limit",
         &api_key,
         None,
-    );
+    )
+    .map_err(String::from);
 
     match resp {
         Ok(data) => {
@@ -127,6 +129,7 @@ pub fn fetch_zai_analytics() -> ProviderAnalytics {
                 rate_limits,
                 credit_usage: None,
                 token_counts: None,
+                limit_state: None,
                 extra,
                 fetched_at: now,
             }
@@ -143,6 +146,7 @@ pub fn fetch_zai_analytics() -> ProviderAnalytics {
                 error: Some(e),
             },
             rate_limits: vec![], credit_usage: None, token_counts: None,
+            limit_state: None,
             extra: HashMap::new(), fetched_at: now,
         },
     }

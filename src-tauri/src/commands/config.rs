@@ -77,12 +77,24 @@ pub struct SecretsInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsSettings {
     pub refresh_interval_minutes: u64,
+    /// Show Anthropic internal / experimental usage buckets (omelette, tangelo, …) in Claude analytics.
+    #[serde(default)]
+    pub show_internal_usage_buckets: bool,
+    /// Emit native macOS notifications when usage limits change state.
+    #[serde(default = "default_limit_notifications_enabled")]
+    pub limit_notifications_enabled: bool,
+}
+
+fn default_limit_notifications_enabled() -> bool {
+    true
 }
 
 impl Default for AnalyticsSettings {
     fn default() -> Self {
         Self {
             refresh_interval_minutes: 5,
+            show_internal_usage_buckets: false,
+            limit_notifications_enabled: true,
         }
     }
 }
@@ -101,7 +113,8 @@ fn get_settings_file_path() -> PathBuf {
     crate::utils::paths::app_data_dir().join("settings.json")
 }
 
-fn load_settings() -> AppSettings {
+/// Read settings from disk (used by analytics background tasks).
+pub(crate) fn load_settings() -> AppSettings {
     let path = get_settings_file_path();
     if !path.exists() {
         return AppSettings::default();

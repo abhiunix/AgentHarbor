@@ -69,6 +69,7 @@ pub fn fetch_kimi_analytics() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(), fetched_at: now,
             };
         }
@@ -80,7 +81,8 @@ pub fn fetch_kimi_analytics() -> ProviderAnalytics {
         &token,
         &body,
         None,
-    );
+    )
+    .map_err(String::from);
 
     match resp {
         Ok(data) => {
@@ -140,6 +142,7 @@ pub fn fetch_kimi_analytics() -> ProviderAnalytics {
                 rate_limits,
                 credit_usage,
                 token_counts: None,
+                limit_state: None,
                 extra,
                 fetched_at: now,
             }
@@ -156,6 +159,7 @@ pub fn fetch_kimi_analytics() -> ProviderAnalytics {
                 error: Some(e),
             },
             rate_limits: vec![], credit_usage: None, token_counts: None,
+            limit_state: None,
             extra: HashMap::new(), fetched_at: now,
         },
     }
@@ -181,6 +185,7 @@ pub fn fetch_kimi_k2_analytics() -> ProviderAnalytics {
                     error: Some(e),
                 },
                 rate_limits: vec![], credit_usage: None, token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(), fetched_at: now,
             };
         }
@@ -190,7 +195,8 @@ pub fn fetch_kimi_k2_analytics() -> ProviderAnalytics {
         "https://kimi-k2.ai/api/user/credits",
         &api_key,
         None,
-    );
+    )
+    .map_err(String::from);
 
     match resp {
         Ok(data) => {
@@ -224,6 +230,7 @@ pub fn fetch_kimi_k2_analytics() -> ProviderAnalytics {
                 rate_limits: vec![],
                 credit_usage,
                 token_counts: None,
+                limit_state: None,
                 extra: HashMap::new(),
                 fetched_at: now,
             }
@@ -240,6 +247,7 @@ pub fn fetch_kimi_k2_analytics() -> ProviderAnalytics {
                 error: Some(e),
             },
             rate_limits: vec![], credit_usage: None, token_counts: None,
+            limit_state: None,
             extra: HashMap::new(), fetched_at: now,
         },
     }

@@ -17,6 +17,10 @@ import { useAgentStore } from "./stores/agentStore";
 import { usePresetStore } from "./stores/presetStore";
 import { syncRegistryNow, getSettings, startRegistryPolling, getSyncStatus } from "./lib/tauri";
 import type { SyncConfig } from "./lib/tauri";
+import {
+  isPermissionGranted,
+  requestPermission,
+} from "@tauri-apps/plugin-notification";
 
 function AppInitializer({ children }: { children: React.ReactNode }) {
   const loadCapabilities = useRegistryStore((s) => s.loadCapabilities);
@@ -28,6 +32,26 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
     loadAgents();
     loadPresets();
   }, [loadCapabilities, loadAgents, loadPresets]);
+
+  // Ask once for notification permission when limit alerts are enabled (macOS).
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await getSettings();
+        if (settings.analytics?.limit_notifications_enabled === false) return;
+        let granted = await isPermissionGranted();
+        if (!granted) {
+          const result = await requestPermission();
+          granted = result === "granted";
+        }
+        if (!granted) {
+          console.info("Notification permission not granted — limit alerts may be silent.");
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
 
   // Start background registry polling on app load when auto-update is enabled
   useEffect(() => {

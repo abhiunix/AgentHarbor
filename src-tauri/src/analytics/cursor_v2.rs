@@ -417,7 +417,8 @@ fn _connection_status() -> CursorV2ConnectionStatus {
 
     let auth: Result<CursorAuthMe, String> = http::cookie_get(
         "https://cursor.com/api/auth/me", &cookie, None,
-    );
+    )
+    .map_err(String::from);
     let auth = auth.ok();
 
     let stripe: Option<CursorStripeInfo> = http::cookie_get(
@@ -586,7 +587,7 @@ fn _ai_commits(time_range: &str) -> Result<AnalyticsTimeseriesResponse, String> 
         "https://cursor.com/api/v2/analytics/team/ai-commits/timeseries?startDate={}&endDate={}&teamId={}",
         start, end, team_id
     );
-    http::cookie_get(&url, &cookie, None)
+    http::cookie_get(&url, &cookie, None).map_err(String::from)
 }
 
 fn _model_usage(time_range: &str) -> Result<ModelUsageResponse, String> {
@@ -598,7 +599,7 @@ fn _model_usage(time_range: &str) -> Result<ModelUsageResponse, String> {
         "https://cursor.com/api/v2/analytics/team/models?startDate={}&endDate={}&teamId={}",
         start, end, team_id
     );
-    http::cookie_get(&url, &cookie, None)
+    http::cookie_get(&url, &cookie, None).map_err(String::from)
 }
 
 fn _composer_tabs(time_range: &str) -> Result<serde_json::Value, String> {
@@ -633,6 +634,7 @@ fn _team_spend(page: u32, page_size: u32) -> Result<TeamSpendResponse, String> {
         &serde_json::json!({"teamId": team_id, "page": page, "pageSize": page_size, "sortBy": "spend", "sortDirection": "desc"}),
         Some(post_headers()),
     )
+    .map_err(String::from)
 }
 
 fn _request_breakdown(time_range: &str) -> Result<AnalyticsTimeseriesResponse, String> {
@@ -644,7 +646,7 @@ fn _request_breakdown(time_range: &str) -> Result<AnalyticsTimeseriesResponse, S
         "https://cursor.com/api/v2/analytics/team/usage?startDate={}&endDate={}&teamId={}",
         start, end, team_id
     );
-    http::cookie_get(&url, &cookie, None)
+    http::cookie_get(&url, &cookie, None).map_err(String::from)
 }
 
 // ── Tauri Commands (async — run blocking HTTP on background thread) ─────────

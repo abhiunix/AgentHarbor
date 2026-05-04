@@ -227,6 +227,10 @@ export interface SecretsInfo {
 
 export interface AnalyticsSettings {
   refresh_interval_minutes: number;
+  /** Show Anthropic internal usage buckets (omelette, tangelo, …) on Claude analytics */
+  show_internal_usage_buckets?: boolean;
+  /** Native macOS notifications when usage limits change state */
+  limit_notifications_enabled?: boolean;
 }
 
 export interface AppSettings {

@@ -1,6 +1,92 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Scope of a usage limit window (Claude Code OAuth usage API).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitScope {
+    Session5h,
+    WeeklyAll,
+    WeeklyOpus,
+    WeeklySonnet,
+    WeeklyOauthApps,
+    WeeklyCowork,
+    SevenDayOmelette,
+    Tangelo,
+    IguanaNecktie,
+    OmelettePromotional,
+    MonthlySpend,
+    /// Codex WHAM primary/secondary, etc.
+    Custom(String),
+}
+
+/// Derived limit / billing health for a provider (tray + notifications).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LimitState {
+    Healthy,
+    Approaching {
+        worst_pct: f64,
+        label: String,
+        resets_at: Option<String>,
+        scope: LimitScope,
+    },
+    Reached {
+        scope: LimitScope,
+        used_pct: f64,
+        cap: Option<f64>,
+        resets_at: Option<String>,
+    },
+    ApiDisabled {
+        reason: String,
+        until: Option<String>,
+        org_name: String,
+    },
+    SubscriptionIssue {
+        status: String,
+        org_name: String,
+    },
+    BillablePaused {
+        until: String,
+        org_name: String,
+    },
+    /// HTTP 429 or explicit rate-limit response without utilization.
+    RateLimited {
+        retry_after_secs: Option<u64>,
+        message: String,
+    },
+    /// Stored OAuth credentials are no longer accepted by the provider
+    /// (HTTP 401). User must reconnect — usually because the upstream tool
+    /// (e.g. Claude Code) rotated its token without updating ours.
+    Unauthenticated {
+        message: String,
+    },
+}
+
+impl LimitState {
+    /// Tray / menu bar should emphasize danger styling.
+    pub fn is_danger(&self) -> bool {
+        matches!(
+            self,
+            LimitState::Reached { .. }
+                | LimitState::ApiDisabled { .. }
+                | LimitState::SubscriptionIssue { .. }
+                | LimitState::BillablePaused { .. }
+                | LimitState::RateLimited { .. }
+                | LimitState::Unauthenticated { .. }
+        )
+    }
+
+    /// Shorter analytics cache TTL when user may be blocked soon or now.
+    pub fn prefers_fast_refresh(&self) -> bool {
+        match self {
+            LimitState::Healthy => false,
+            LimitState::Approaching { .. } | LimitState::Reached { .. } => true,
+            _ => true,
+        }
+    }
+}
+
 /// A single rate-limit window (session, weekly, per-model, etc.)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RateLimitWindow {
@@ -76,6 +162,9 @@ pub struct ProviderAnalytics {
     pub rate_limits: Vec<RateLimitWindow>,
     pub credit_usage: Option<CreditUsage>,
     pub token_counts: Option<TokenCounts>,
+    /// Derived limit / billing state (Claude, Codex, …).
+    #[serde(default)]
+    pub limit_state: Option<LimitState>,
     /// Provider-specific extra data
     pub extra: HashMap<String, serde_json::Value>,
     /// ISO8601 when this data was fetched
