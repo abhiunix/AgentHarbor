@@ -4,6 +4,11 @@ A macOS desktop app for managing AI coding-agent configurations across **Claude 
 
 Built with Tauri v2 (Rust + React).
 
+[![GitHub release](https://img.shields.io/github/v/release/abhiunix/AgentHarbor?label=latest&color=blue)](https://github.com/abhiunix/AgentHarbor/releases/latest)
+[![Total Downloads](https://img.shields.io/github/downloads/abhiunix/AgentHarbor/total?label=downloads&color=green)](https://github.com/abhiunix/AgentHarbor/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)](https://github.com/abhiunix/AgentHarbor/releases/latest)
+[![License](https://img.shields.io/github/license/abhiunix/AgentHarbor)](LICENSE)
+
 ## Installation
 
 > macOS 13+, Apple Silicon. Signed with Apple Developer ID and notarized.
