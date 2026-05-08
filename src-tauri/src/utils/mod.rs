@@ -8,3 +8,4 @@ pub mod manifest;
 pub mod paths;
 pub mod platform;
 pub mod project_inventory;
+pub mod rule_block;

@@ -611,6 +611,33 @@ export async function writeProjectMemory(projectPath: string, content: string): 
   return invoke<void>("write_project_memory", { projectPath, content });
 }
 
+export interface MemoryFileEntry {
+  name: string;
+  path: string;
+  size_bytes: number;
+  modified_at: number;
+}
+
+export async function listMemoryFiles(projectPath: string | null): Promise<MemoryFileEntry[]> {
+  return invoke<MemoryFileEntry[]>("list_memory_files", { projectPath });
+}
+
+export async function readMemoryFile(filePath: string): Promise<string> {
+  return invoke<string>("read_memory_file", { filePath });
+}
+
+export async function writeMemoryFile(filePath: string, content: string): Promise<void> {
+  return invoke<void>("write_memory_file", { filePath, content });
+}
+
+export async function createMemoryFile(projectPath: string | null, filename: string): Promise<MemoryFileEntry> {
+  return invoke<MemoryFileEntry>("create_memory_file", { projectPath, filename });
+}
+
+export async function deleteMemoryFile(filePath: string): Promise<void> {
+  return invoke<void>("delete_memory_file", { filePath });
+}
+
 export interface SecretInfo {
   key: string;
   has_value: boolean;

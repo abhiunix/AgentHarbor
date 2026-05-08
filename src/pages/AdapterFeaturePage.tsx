@@ -11,6 +11,9 @@ const AdapterGlobalConfigPage = lazy(() =>
 const MemoryPage = lazy(() =>
   import("./MemoryPage").then((m) => ({ default: m.MemoryPage }))
 );
+const InstructionsPage = lazy(() =>
+  import("./InstructionsPage").then((m) => ({ default: m.InstructionsPage }))
+);
 const PermissionsPage = lazy(() =>
   import("./PermissionsPage").then((m) => ({ default: m.PermissionsPage }))
 );
@@ -104,6 +107,7 @@ type LazyPage = React.LazyExoticComponent<React.ComponentType<unknown>>;
 const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
   "claude-code": {
     "global-config": AdapterGlobalConfigPage as LazyPage,
+    instructions: InstructionsPage as LazyPage,
     memory: MemoryPage as LazyPage,
     permissions: PermissionsPage as LazyPage,
     "analytics-v2": ClaudeAnalyticsV2Page as LazyPage,
