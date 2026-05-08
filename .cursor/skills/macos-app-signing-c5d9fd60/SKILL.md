@@ -1,20 +1,5 @@
 ---
 name: macos-app-signing
-description: "Sign and notarize macOS Tauri apps for Gatekeeper-approved distribution. Use when building release builds, creating DMGs, signing apps, notarizing with Apple, or when the user mentions code signing, notarization, Developer ID, or Gatekeeper."
-metadata:
-  author: abhiunix
-  version: 1.0.0
----
-
----
-name: macos-app-signing
-description: "Sign and notarize macOS Tauri apps for Gatekeeper-approved distribution. Use when building release builds, creating DMGs, signing apps, notarizing with Apple, or when the user mentions code signing, notarization, Developer ID, or Gatekeeper."
-user-invocable: true
-disable-model-invocation: false
----
-
----
-name: macos-app-signing
 description: Build, sign, and notarize the AgentHarbor macOS Tauri app for Gatekeeper-approved distribution. Use when building release builds, creating DMGs, signing apps, notarizing with Apple, running a signed build, or when the user mentions code signing, notarization, Developer ID, Gatekeeper, or release build.
 ---
 
@@ -34,31 +19,20 @@ All files live in `.signing/` at the workspace root:
 | File | Purpose |
 |------|---------|
 | `certificate.p12` | Developer ID Application certificate + private key (exported from Keychain Access) |
-| `AuthKey_***REDACTED_KEY_ID***.p8` | App Store Connect API key for Apple notarization |
+| `AuthKey_<KEY_ID>.p8` | App Store Connect API key for Apple notarization |
 | `APPLE_CERTIFICATE` | Base64-encoded `certificate.p12` (used for CI/GitHub Actions) |
+| `APPLE_SIGNING_IDENTITY` | Text file containing the exact codesign identity string |
+| `APPLE_API_ISSUER` | Text file containing the App Store Connect issuer UUID |
+| `APPLE_API_KEY` | Text file containing the App Store Connect key ID |
 | `.TAURI_SIGNING_PRIVATE_KEY` | Tauri updater signing key (signs update artifacts so the app can auto-update) |
 | `.TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the Tauri updater signing key |
 
 Never commit `.signing/` — it is in `.gitignore`.
 
-## Apple Developer Account
-
-| Field | Value |
-|-------|-------|
-| Account Name | Abhijeet Singh |
-| Team ID | ***REDACTED_TEAM_ID*** |
-| Signing Identity | `Developer ID Application: <YOUR_NAME> (<YOUR_TEAM_ID>)` |
-
-## App Store Connect API Key
-
-| Field | Value |
-|-------|-------|
-| Key ID | ***REDACTED_KEY_ID*** |
-| Issuer ID | ***REDACTED_ISSUER_ID*** |
-
-## Tauri Updater Key
-
-The updater public key is stored in `agentharbor/src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. The private key in `.signing/.TAURI_SIGNING_PRIVATE_KEY` must be provided at build time because `bundle.createUpdaterArtifacts` is `true` in `tauri.conf.json`.
+To look up the signing identity:
+```bash
+security find-identity -v -p codesigning
+```
 
 ## Local Signed Build — Full Command
 
@@ -67,10 +41,10 @@ Run this from the workspace root. This is the single command that builds, signs,
 ```bash
 cd agentharbor && \
 unset CI && \
-APPLE_SIGNING_IDENTITY="Developer ID Application: <YOUR_NAME> (<YOUR_TEAM_ID>)" \
-APPLE_API_ISSUER="***REDACTED_ISSUER_ID***" \
-APPLE_API_KEY="***REDACTED_KEY_ID***" \
-APPLE_API_KEY_PATH="$(cd .. && pwd)/.signing/AuthKey_***REDACTED_KEY_ID***.p8" \
+APPLE_SIGNING_IDENTITY="$(cat ../.signing/APPLE_SIGNING_IDENTITY)" \
+APPLE_API_ISSUER="$(cat ../.signing/APPLE_API_ISSUER)" \
+APPLE_API_KEY="$(cat ../.signing/APPLE_API_KEY)" \
+APPLE_API_KEY_PATH="$(cd .. && pwd)/.signing/AuthKey_$(cat ../.signing/APPLE_API_KEY).p8" \
 TAURI_SIGNING_PRIVATE_KEY="$(cat ../.signing/.TAURI_SIGNING_PRIVATE_KEY)" \
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ../.signing/.TAURI_SIGNING_PRIVATE_KEY_PASSWORD)" \
 npx tauri build
@@ -109,10 +83,8 @@ The Tauri built-in DMG bundling script sometimes fails with AppleScript/Finder e
 ```bash
 cd agentharbor
 
-# Ensure create-dmg is installed
 brew install create-dmg 2>/dev/null
 
-# Create the installer DMG with Applications shortcut and icon layout
 create-dmg \
   --volname "AgentHarbor Installer" \
   --window-pos 200 120 \
@@ -124,8 +96,7 @@ create-dmg \
   src-tauri/target/release/bundle/dmg/AgentHarbor_Installer.dmg \
   src-tauri/target/release/bundle/macos/AgentHarbor.app
 
-# Sign the DMG
-codesign --force --sign "Developer ID Application: <YOUR_NAME> (<YOUR_TEAM_ID>)" \
+codesign --force --sign "$(cat ../.signing/APPLE_SIGNING_IDENTITY)" \
   src-tauri/target/release/bundle/dmg/AgentHarbor_Installer.dmg
 ```
 
@@ -146,15 +117,12 @@ All paths relative to `agentharbor/`:
 After build, run these from `agentharbor/`:
 
 ```bash
-# Check code signature
 codesign -dv --verbose=2 src-tauri/target/release/bundle/macos/AgentHarbor.app 2>&1
-
-# Check Gatekeeper acceptance
 spctl -a -t exec -vv src-tauri/target/release/bundle/macos/AgentHarbor.app 2>&1
 ```
 
 Expected results:
-- `Authority=Developer ID Application: <YOUR_NAME> (<YOUR_TEAM_ID>)`
+- `Authority=Developer ID Application: …`
 - `Notarization Ticket=stapled`
 - `spctl`: `accepted` with `source=Notarized Developer ID`
 
@@ -162,25 +130,23 @@ Expected results:
 
 The release workflow at `.github/workflows/release.yml` needs these repository secrets (Settings > Secrets > Actions):
 
-| Secret Name | Value |
-|-------------|-------|
+| Secret Name | Source |
+|-------------|--------|
 | `APPLE_CERTIFICATE` | Contents of `.signing/APPLE_CERTIFICATE` |
 | `APPLE_CERTIFICATE_PASSWORD` | Password used when exporting the .p12 from Keychain Access |
-| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: <YOUR_NAME> (<YOUR_TEAM_ID>)` |
-| `APPLE_API_ISSUER` | `***REDACTED_ISSUER_ID***` |
-| `APPLE_API_KEY` | `***REDACTED_KEY_ID***` |
-| `APPLE_API_KEY_PATH` | Run: `base64 -i .signing/AuthKey_***REDACTED_KEY_ID***.p8 \| pbcopy` |
+| `APPLE_SIGNING_IDENTITY` | Contents of `.signing/APPLE_SIGNING_IDENTITY` |
+| `APPLE_API_ISSUER` | Contents of `.signing/APPLE_API_ISSUER` |
+| `APPLE_API_KEY` | Contents of `.signing/APPLE_API_KEY` |
+| `APPLE_API_KEY_CONTENT` | Contents of `.signing/AuthKey_<KEY_ID>.p8` |
 | `TAURI_SIGNING_PRIVATE_KEY` | Contents of `.signing/.TAURI_SIGNING_PRIVATE_KEY` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Contents of `.signing/.TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
-
-These must be passed as `env:` vars in the `tauri-apps/tauri-action` step of the workflow.
 
 ## Renewing Certificates
 
 **Developer ID certificate** (if expired/revoked):
 
 1. Xcode > Settings > Accounts > Manage Certificates > + > Developer ID Application
-2. Keychain Access > My Certificates > right-click "Developer ID Application: Abhijeet Singh" > Export as .p12
+2. Keychain Access > My Certificates > right-click the cert > Export as .p12
 3. Replace `.signing/certificate.p12`
 4. Run: `base64 -i .signing/certificate.p12 > .signing/APPLE_CERTIFICATE`
 5. Update `APPLE_CERTIFICATE` GitHub secret
@@ -189,8 +155,8 @@ These must be passed as `env:` vars in the `tauri-apps/tauri-action` step of the
 
 1. Go to appstoreconnect.apple.com/access/integrations/api
 2. Revoke old key, create new one, download `.p8` immediately
-3. Replace `.signing/AuthKey_*.p8`
-4. Update `APPLE_API_KEY` value and GitHub secrets if Key ID changed
+3. Replace `.signing/AuthKey_*.p8`, update `.signing/APPLE_API_KEY` with the new key ID
+4. Update GitHub secrets
 
 **Tauri updater key** (if lost):
 
