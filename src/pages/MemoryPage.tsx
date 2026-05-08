@@ -14,6 +14,11 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
+function formatTokens(bytes: number): string {
+  const t = Math.ceil(bytes / 4);
+  return t >= 1000 ? `~${(t / 1000).toFixed(1)}k tokens` : `~${t} tokens`;
+}
+
 function formatDate(unixSecs: number): string {
   if (!unixSecs) return "";
   return new Date(unixSecs * 1000).toLocaleDateString(undefined, {
@@ -182,6 +187,8 @@ export function MemoryPage() {
                   <p className="text-sm text-text-primary truncate pr-6">{file.name}</p>
                   <p className="text-xs text-text-muted mt-0.5">
                     {formatSize(file.size_bytes)}
+                    {" · "}
+                    <span className="text-text-muted/70">{formatTokens(file.size_bytes)}</span>
                     {file.modified_at ? ` · ${formatDate(file.modified_at)}` : ""}
                   </p>
                   <button
