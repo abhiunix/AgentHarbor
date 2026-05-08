@@ -96,22 +96,22 @@ jobs:
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
 
-          SIG=$(cat src-tauri/target/release/bundle/macos/AgentHarbor.app.tar.gz.sig)
+          SIG=$(cat src-tauri/target/release/bundle/macos/AgentHarbor_aarch64.app.tar.gz.sig)
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           cat > latest.json << ENDJSON
-          {
-            "version": "$VERSION",
-            "notes": "See https://github.com/abhiunix/AgentHarbor/releases/tag/${{ github.ref_name }} for details.",
-            "pub_date": "$PUB_DATE",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "$SIG",
-                "url": "https://github.com/abhiunix/AgentHarbor/releases/download/${{ github.ref_name }}/AgentHarbor.app.tar.gz"
-              }
-            }
-          }
-          ENDJSON
+{
+  "version": "$VERSION",
+  "notes": "See https://github.com/abhiunix/AgentHarbor/releases/tag/${{ github.ref_name }} for details.",
+  "pub_date": "$PUB_DATE",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "$SIG",
+      "url": "https://github.com/abhiunix/AgentHarbor/releases/download/${{ github.ref_name }}/AgentHarbor_aarch64.app.tar.gz"
+    }
+  }
+}
+ENDJSON
 
           gh release upload "${{ github.ref_name }}" latest.json --clobber
 
