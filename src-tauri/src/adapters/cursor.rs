@@ -1099,6 +1099,10 @@ mod tests {
             args: vec!["-y".to_string(), "@test/mcp".to_string()],
             url: String::new(),
             env: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -1115,6 +1119,10 @@ mod tests {
             scope: "project".to_string(),
             content: "# Test Rule\nAlways be helpful.".to_string(),
             env: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -1134,6 +1142,10 @@ mod tests {
             timeout_ms: 5000,
             env: std::collections::HashMap::new(),
             adapter_configs: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -1232,6 +1244,7 @@ mod tests {
         let entries: Vec<_> = fs::read_dir(&rules_dir)
             .unwrap()
             .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy() != "agentharbor-manifest.mdc")
             .collect();
         assert_eq!(entries.len(), 1);
 

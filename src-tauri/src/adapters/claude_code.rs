@@ -1425,6 +1425,10 @@ mod tests {
             args: vec!["-y".to_string(), "@test/mcp".to_string()],
             url: String::new(),
             env: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -1441,6 +1445,10 @@ mod tests {
             scope: "project".to_string(),
             content: "# Test Rule\nAlways be helpful.".to_string(),
             env: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -1466,6 +1474,10 @@ mod tests {
             agent: None,
             argument_hint: None,
             license: None,
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 

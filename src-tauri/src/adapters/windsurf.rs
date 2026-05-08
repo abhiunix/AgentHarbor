@@ -710,6 +710,10 @@ mod tests {
             args: vec!["-y".to_string(), "@test/mcp".to_string()],
             url: String::new(),
             env: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -726,6 +730,10 @@ mod tests {
             scope: "project".to_string(),
             content: "# Test Rule\nAlways be helpful.".to_string(),
             env: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -799,7 +807,7 @@ mod tests {
         let adapter = WindsurfAdapter::new();
         
         let paths = adapter.managed_paths(temp_dir.path());
-        assert_eq!(paths.len(), 3);
+        assert_eq!(paths.len(), 4);
         assert!(paths.iter().any(|p| p.to_string_lossy().contains("mcp_config.json")));
         assert!(paths.iter().any(|p| p.ends_with("rules")));
         assert!(paths.iter().any(|p| p.ends_with("skills")));

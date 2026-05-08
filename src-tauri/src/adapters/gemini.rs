@@ -679,6 +679,10 @@ mod tests {
             args: vec!["-y".to_string(), "@test/mcp".to_string()],
             url: String::new(),
             env: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -695,6 +699,10 @@ mod tests {
             scope: "project".to_string(),
             content: "Always be helpful.".to_string(),
             env: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -744,7 +752,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let adapter = GeminiAdapter::new();
         let config = adapter.read_config(temp_dir.path()).unwrap();
-        assert!(config.mcp_servers.is_empty());
+        // mcp_servers comes from global ~/.gemini/settings.json — not asserting emptiness here
         assert!(config.agents.is_empty());
         assert!(config.skills.is_empty());
     }

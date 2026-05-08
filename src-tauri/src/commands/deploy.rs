@@ -431,6 +431,10 @@ mod tests {
             always_allow: None,
             disabled_tools: None,
             tool_list: None,
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         });
 
         let env = collect_env_from_capabilities(&[mcp]);
@@ -468,6 +472,10 @@ mod tests {
             always_allow: None,
             disabled_tools: None,
             tool_list: None,
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         });
 
         let env = collect_env_from_capabilities(&[mcp]);
@@ -505,6 +513,10 @@ mod tests {
             always_allow: None,
             disabled_tools: None,
             tool_list: None,
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         });
 
         let env = collect_env_from_capabilities(&[mcp]);

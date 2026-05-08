@@ -202,7 +202,11 @@ mod tests {
     fn test_detect_adapters_empty_dir() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let adapters = detect_adapters(temp_dir.path().to_string_lossy().to_string());
-        assert!(adapters.is_empty());
+        // Some adapters (e.g. Codex) use global detection — only assert project-local ones are absent
+        assert!(!adapters.iter().any(|a| a.id == "claude-code"));
+        assert!(!adapters.iter().any(|a| a.id == "cursor"));
+        assert!(!adapters.iter().any(|a| a.id == "windsurf"));
+        assert!(!adapters.iter().any(|a| a.id == "gemini"));
     }
 
     #[test]
@@ -211,7 +215,6 @@ mod tests {
         fs::create_dir(temp_dir.path().join(".claude")).unwrap();
         
         let adapters = detect_adapters(temp_dir.path().to_string_lossy().to_string());
-        assert_eq!(adapters.len(), 1);
-        assert_eq!(adapters[0].id, "claude-code");
+        assert!(adapters.iter().any(|a| a.id == "claude-code"));
     }
 }

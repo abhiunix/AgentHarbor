@@ -145,6 +145,10 @@ mod tests {
             content: "content".to_string(),
             env: std::collections::HashMap::new(),
             compatible_agents: vec![],
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         });
         let result = save_custom_capability(Some("user/aaa".to_string()), rule);
         assert!(result.is_err());

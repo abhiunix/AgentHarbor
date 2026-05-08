@@ -155,6 +155,10 @@ mod tests {
             always_allow: None,
             disabled_tools: None,
             tool_list: None,
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         })
     }
 
@@ -205,6 +209,10 @@ mod tests {
             always_allow: None,
             disabled_tools: None,
             tool_list: None,
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         });
 
         let result = validate_capability(&mcp);
@@ -244,6 +252,10 @@ mod tests {
             content: "Rule content".to_string(),
             env: std::collections::HashMap::new(),
             compatible_agents: vec![],
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         });
 
         let result = validate_capability(&rule);
@@ -273,6 +285,10 @@ mod tests {
             agent: None,
             argument_hint: None,
             license: None,
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         });
 
         let result = validate_capability(&skill);
@@ -296,6 +312,10 @@ mod tests {
             env: std::collections::HashMap::new(),
             compatible_agents: vec![],
             adapter_configs: std::collections::HashMap::new(),
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
         });
 
         let result = validate_capability(&hook);
