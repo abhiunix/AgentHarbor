@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { useUpdateStore } from "../../stores/updateStore";
 import {
   getSettings,
   updateGeneralSettings,
@@ -91,6 +93,60 @@ function Toggle({
         }`}
       />
     </button>
+  );
+}
+
+function UpdatesCard() {
+  const { latestVersion, isAvailable, lastChecked, isChecking, checkError, checkForUpdate, clearSnooze } =
+    useUpdateStore();
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVersion().then(setCurrentVersion).catch(() => {});
+  }, []);
+
+  return (
+    <SectionCard title="Updates">
+      <SettingRow
+        label="Current version"
+        description="AgentHarbor installed on this machine"
+      >
+        <span className="text-sm font-mono text-text-muted">
+          {currentVersion ? `v${currentVersion}` : "—"}
+        </span>
+      </SettingRow>
+
+      <SettingRow
+        label="Status"
+        description={
+          lastChecked
+            ? `Last checked ${lastChecked.toLocaleTimeString()}`
+            : "Not yet checked"
+        }
+      >
+        {isAvailable ? (
+          <span className="text-sm font-medium text-accent-blue">
+            v{latestVersion} available
+          </span>
+        ) : (
+          <span className="text-sm text-accent-green">Up to date</span>
+        )}
+      </SettingRow>
+
+      {checkError && (
+        <p className="text-xs text-accent-red">{checkError}</p>
+      )}
+
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={() => { clearSnooze(); checkForUpdate(); }}
+          disabled={isChecking}
+          className="px-4 py-2 text-sm bg-white/5 border border-border rounded-lg text-text-primary hover:bg-white/10 transition-colors disabled:opacity-50"
+        >
+          {isChecking ? "Checking…" : "Check Now"}
+        </button>
+      </div>
+    </SectionCard>
   );
 }
 
@@ -359,6 +415,8 @@ export function AppSettings() {
           />
         </SettingRow>
       </SectionCard>
+
+      <UpdatesCard />
 
       <SectionCard title="Registry Sync">
         <SettingRow
