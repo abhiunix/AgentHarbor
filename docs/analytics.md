@@ -33,7 +33,7 @@ Per-provider cards include:
 `derive_claude_limit_state` (and equivalents for other providers) chooses the most actionable state, in this order:
 
 1. **Unauthenticated** — at least one core OAuth call returned 401 *and* we have no fresh `/usage` or `/profile` data. Reconnect required.
-2. **ApiDisabled** — `api_disabled_reason` set on the active org or its parent (e.g. `out_of_credits`, `trial_expired`). Stale `out_of_credits` flags are ignored when measured usage is well under the cap.
+2. **ApiDisabled** — `api_disabled_reason` set on the active org or its parent (e.g. `out_of_credits`, `trial_expired`). `out_of_credits` is only surfaced for **Enterprise** plans (which have a hard monthly spend cap); it is suppressed for Pro/Max/Team since those plans use time-windowed rate limits, not credit caps.
 3. **BillablePaused** — `billable_usage_paused_until` set in the future.
 4. **SubscriptionIssue** — `subscription_status` is anything other than `active` / `trialing`.
 5. **RateLimited** — HTTP 429 returned by `/usage` when no other state applies. The retry-after seconds are humanised (e.g. `1h 23m`).

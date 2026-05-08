@@ -113,4 +113,35 @@ Expect `Authority=Developer ID Application: …`, `Notarization Ticket=stapled`,
      "src-tauri/target/release/bundle/macos/AgentHarbor.app.tar.gz.sig"
    ```
 
-The Tauri updater fetches `latest.json` from `https://github.com/abhiunix/agentharbor/releases/latest/download/latest.json`. If you maintain that file by hand, update it after every release with the new version, notes, and `.sig`. Otherwise the GitHub Actions workflow at `.github/workflows/release.yml` (when triggered) handles uploads + `latest.json`.
+The Tauri updater fetches `latest.json` from `https://github.com/abhiunix/AgentHarbor/releases/latest/download/latest.json`. If you maintain that file by hand, update it after every release with the new version, notes, and `.sig`. Otherwise the GitHub Actions workflow at `.github/workflows/release.yml` handles build, sign, notarize, upload, and `latest.json` automatically when a `v*` tag is pushed.
+
+## GitHub Actions (CI / Release)
+
+Two workflows live in `.github/workflows/`:
+
+| Workflow | Trigger | Steps |
+|---|---|---|
+| `ci.yml` | Push to `main`, PRs | tsc, cargo clippy, cargo test, cargo build |
+| `release.yml` | Push of `v*` tag | Full signed build + notarize + upload DMG + `latest.json` |
+
+The release workflow requires eight repository secrets (set in **Settings → Secrets → Actions**):
+
+| Secret | Value |
+|---|---|
+| `APPLE_CERTIFICATE` | Base64 of `.signing/certificate.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | Password used when exporting the .p12 |
+| `APPLE_SIGNING_IDENTITY` | Exact identity string, e.g. `Developer ID Application: Name (TEAMID)` |
+| `APPLE_API_ISSUER` | App Store Connect API issuer UUID |
+| `APPLE_API_KEY` | App Store Connect API key ID |
+| `APPLE_API_KEY_CONTENT` | Contents of the `.p8` key file |
+| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key (minisign) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for that key |
+
+To cut a release via CI:
+
+```bash
+git tag v<version>
+git push origin v<version>
+```
+
+The workflow produces the DMG, `.tar.gz`, `.sig`, and `latest.json` and attaches them to the GitHub Release automatically.

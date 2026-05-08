@@ -70,6 +70,15 @@ See [Deploying Capabilities & Agents](./deploying-capabilities.md) for the full 
 
 Settings → **Analytics** → "Show limit-reached notifications". When enabled, AgentHarbor sends a native macOS notification on transitions like *Approaching → Reached*, *Healthy → ApiDisabled*, *RateLimited → Healthy*, etc. — once per transition, not every refresh.
 
+## 6. Auto-update
+
+AgentHarbor checks for new releases on launch and every 4 hours. When an update is available, a banner appears at the top of the window:
+
+- **Update Now** — downloads and installs the update, then relaunches the app.
+- **Later** — snoozes the banner for 24 hours.
+
+You can also check manually: Settings → **Updates** → **Check Now**. The Updates card shows the current version, latest available version, and the last time a check ran.
+
 ## Where things live
 
 | Path | What |

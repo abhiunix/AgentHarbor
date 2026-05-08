@@ -1,66 +1,115 @@
+<div align="center">
+
+<img src="src/assets/icon.png" alt="AgentHarbor" width="120" />
+
 # AgentHarbor
 
-A macOS desktop app for managing AI coding-agent configurations across **Claude Code**, **Cursor**, **Codex (OpenAI)**, **Gemini CLI**, and **Windsurf** — with live analytics, deploy/undo workflow, presets, drift detection, and limit-state notifications.
+**The macOS dock for your AI coding agents.**
 
-Built with Tauri v2 (Rust + React).
+Manage configurations, track usage, deploy capabilities, and keep every AI tool in sync — all from one native app.
 
 [![GitHub release](https://img.shields.io/github/v/release/abhiunix/AgentHarbor?label=latest&color=blue)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![Total Downloads](https://img.shields.io/github/downloads/abhiunix/AgentHarbor/total?label=downloads&color=green)](https://github.com/abhiunix/AgentHarbor/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![License](https://img.shields.io/github/license/abhiunix/AgentHarbor)](LICENSE)
 
+[**Download**](https://github.com/abhiunix/AgentHarbor/releases/latest) · [**Getting Started**](docs/getting-started.md) · [**Docs**](docs/) · [**Changelog**](CHANGELOG.md)
+
+</div>
+
+---
+
+## What is it?
+
+AgentHarbor is a native macOS tray app that sits quietly in your menu bar while you code. It shows you real-time rate limits, session usage, and monthly spend for every AI provider you use — without opening a browser or running CLI commands. When you want to deploy an MCP server, rule, skill, or sub-agent across Claude Code, Cursor, and Windsurf at once, a guided wizard handles the diffs, backups, and atomic writes for you.
+
+---
+
+## Features
+
+- **Live tray analytics** — menu-bar metric updates every ~120 s: session percentage, monthly spend, quota bars — whichever is most relevant for each provider.
+- **Limit-state ladder** — tracks `Unauthenticated → ApiDisabled → BillablePaused → SubscriptionIssue → RateLimited → Reached → Approaching → Healthy` and surfaces native macOS notifications on transitions.
+- **Deploy wizard** — syntax-highlighted split/unified diffs, per-file `Replace / Merge / Append` strategy, automatic backups before every write.
+- **Undo Deploy** — one click restores the pre-deploy snapshot from the backup store.
+- **Presets** — bundle any set of capabilities for one-click deploy; ships with `Full-Stack Web` and `Data Science` examples.
+- **Drift detection** — detects when a teammate or another tool changes a managed file and shows a side-by-side diff with Accept or Restore.
+- **Cost engine** — per-model API-equivalent costs for Claude (Opus / Sonnet / Haiku) and Codex (GPT-5 / 4 / 3.5), token-deduplicated across session windows.
+- **Secrets manager** — stores sensitive env vars in the macOS Keychain and injects them into MCP `env` blocks at deploy time.
+- **Auto-update** — Tauri updater checks GitHub Releases every 4 hours; in-app banner with one-click install and optional 24 h snooze.
+- **Native macOS** — Keychain integration, system tray popover with click-through, optional menu-bar-only mode, native notifications.
+
+---
+
+## Supported providers
+
+| Provider | Analytics | Rate limits / spend | Deploy targets |
+|---|---|---|---|
+| **Claude Code** | Full (Pro / Max / Enterprise) | Session 5h, Weekly, Sonnet/Opus, monthly $ | MCP, skills, rules, hooks, agents |
+| **Cursor** | Full | Plan included + bonus + on-demand $, team OD | MCP, rules, agents |
+| **Codex (OpenAI)** | Full | Primary 5h, Weekly 7d, per-model $ | MCP, skills |
+| **Gemini CLI** | Quota | Pro → Flash → Flash Lite tier waterfall | Skills, hooks, agents |
+| **Windsurf** | Config | — | MCP, rules |
+| JetBrains | *Coming soon* | | |
+| VS Code | *Coming soon* | | |
+| Amp | *Coming soon* | | |
+| Kiro | *Coming soon* | | |
+
+---
+
 ## Installation
 
-> macOS 13+, Apple Silicon. Signed with Apple Developer ID and notarized.
+> **macOS 13+ · Apple Silicon** · Signed with Apple Developer ID and notarized.
 
 1. **Download the latest DMG:** [**AgentHarbor — latest release**](https://github.com/abhiunix/AgentHarbor/releases/latest)
    - Pick `AgentHarbor_<version>_aarch64.dmg`.
 2. Open the DMG and drag **AgentHarbor.app** into **Applications**.
 3. Launch from Spotlight or `/Applications`.
 
-If macOS ever flags it as "damaged" (only happens when the quarantine attribute survives an unusual download path):
+If macOS flags it as "damaged" (rare, caused by quarantine attribute surviving an unusual download path):
 
 ```bash
 xattr -cr /Applications/AgentHarbor.app
 ```
 
-The full first-run walkthrough lives in [`docs/getting-started.md`](docs/getting-started.md).
+**Windows / Linux** — *Coming soon.*
 
-## Features
+---
 
-- **Tray analytics** — connection dots, per-provider rate limits, monthly spend, and a smart menu-bar metric:
-  - Claude Pro/Max → active **Session (5h)** %
-  - Claude Enterprise → total **$ spend** (capped or uncapped)
-  - Cursor → total **$ spend** = included + bonus + on-demand
-  - Codex → **Primary (5h)** %
-  - Gemini → **Pro → Flash → Flash Lite** (first tier with quota)
-- **Limit-state ladder** — `Unauthenticated`, `ApiDisabled` (`out_of_credits`, `trial_expired`, …), `BillablePaused`, `SubscriptionIssue`, `RateLimited` (with friendly retry-after copy), `Reached`, `Approaching`, `Healthy` — surfaced in the tray, the analytics page, and as native notifications.
-- **Deploy wizard** — multi-adapter, syntax-highlighted diffs, per-file `Replace`/`Merge`/`Append` strategy, automatic backups, and an **Undo Deploy** button.
-- **Presets** — bundle capabilities for one-click deploys; bundled `Full-Stack Web` / `Data Science` examples plus your own.
-- **Drift detection** — file hashes per managed file; side-by-side diff with **Accept** or **Restore** when something changed externally.
-- **Cost engine** — per-model API-equivalent costs for Claude (Opus/Sonnet/Haiku) and Codex (GPT-5/4/3.5), plus token-deduplicated session totals.
-- **Native macOS** — Keychain integration, system tray with click-through popover, optional menu-bar mode, native notifications.
-- **Auto-update** — Tauri updater verifies signatures from `.signing/.TAURI_SIGNING_PRIVATE_KEY`; users get a prompt when new releases land.
+## Tray metric quick reference
 
-## Supported providers
+| Provider | Menu-bar title | Source |
+|---|---|---|
+| Claude Code Pro/Max | `XX%` of active **Session (5h)**, fallback to Weekly | `/api/oauth/usage` |
+| Claude Code Enterprise | `$N` total spend this cycle | `/api/oauth/usage` extra_usage |
+| Cursor | `$N` total spend = included + bonus + on-demand | Cursor API |
+| Codex | `XX%` of **Primary (5h)** WHAM window | OpenAI `wham` |
+| Gemini CLI | `XX%` of highest-priority tier with quota remaining | Cloud Code Assist |
 
-| Provider | Analytics | Rate limits / spend | Deploy targets |
-|---|---|---|---|
-| Claude Code | Full (Pro/Max/Enterprise) | Session 5h, Weekly, Sonnet/Opus, monthly $ | MCP, skills, rules, hooks, agents |
-| Cursor | Full | Plan included + bonus + on-demand $, team OD | MCP, rules, agents |
-| Codex (OpenAI) | Full | Primary 5h, Weekly 7d, per-model $ | MCP, skills |
-| Gemini CLI | Quota | Pro / Flash / Flash Lite | Skills, hooks, agents |
-| Windsurf | Config | – | MCP, rules |
+The icon swaps to its red variant and appends `!` whenever the active provider is in any non-healthy state.
+
+---
 
 ## Documentation
 
-- [Getting Started](docs/getting-started.md)
-- [Analytics & Tray](docs/analytics.md)
-- [Deploying Capabilities & Agents](docs/deploying-capabilities.md)
-- [Build & Release](docs/build-and-release.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Regression Checklist](docs/regression-checklist.md)
-- [Changelog](CHANGELOG.md)
+| Document | Contents |
+|---|---|
+| [Getting Started](docs/getting-started.md) | Install, first launch, connect providers, first deploy |
+| [Analytics & Tray](docs/analytics.md) | Menu-bar metrics, tray popover, LimitState ladder, per-provider pages |
+| [Deploying Capabilities & Agents](docs/deploying-capabilities.md) | Deploy wizard, presets, backups, drift detection, removing capabilities |
+| [Build & Release](docs/build-and-release.md) | Local dev, signed builds, release checklist |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| [Regression Checklist](docs/regression-checklist.md) | QA checklist before every release |
+| [Changelog](CHANGELOG.md) | Full version history |
+
+---
+
+## Privacy
+
+AgentHarbor is **local-only**. The only outbound network calls it makes are to each provider's official API endpoints using **your** OAuth tokens. No telemetry, no analytics pings, no data leaves your machine.
+
+Local files (Claude project JSONLs, Gemini telemetry) are read with file-share-friendly opens and never copied off-disk.
+
+---
 
 ## Tech stack
 
@@ -68,22 +117,24 @@ The full first-run walkthrough lives in [`docs/getting-started.md`](docs/getting
 |---|---|
 | Framework | Tauri v2 |
 | Backend | Rust (`reqwest`, `serde`, `keyring`, `chrono`) |
-| Frontend | React + TypeScript + Vite |
+| Frontend | React 19 + TypeScript + Vite |
 | Styling | Tailwind CSS v3 (dark theme) |
 | State | Zustand |
 | Build target | macOS aarch64 |
+
+---
 
 ## Development
 
 ```bash
 npm install
-npm run tauri dev          # dev with hot reload
+npm run tauri dev          # hot reload dev
 npm run test:regression    # tsc + vite build + cargo test
 ```
 
 For signed/notarized release builds, see [`docs/build-and-release.md`](docs/build-and-release.md).
 
-## Project layout
+### Project layout
 
 ```
 agentharbor/
@@ -109,6 +160,18 @@ agentharbor/
 └── public/                 Static assets served by Vite
 ```
 
+---
+
+## Star History
+
+<div align="center">
+
+[![Star History Chart](https://api.star-history.com/svg?repos=abhiunix/AgentHarbor&type=Date)](https://star-history.com/#abhiunix/AgentHarbor&Date)
+
+</div>
+
+---
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
