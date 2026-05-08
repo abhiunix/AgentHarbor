@@ -140,13 +140,23 @@ export function MemoryPage() {
     ? `~/.claude/projects/${projectScope.replace(/\//g, "-")}/memory/`
     : "~/.claude/memory/";
 
+  const totalBytes = files.reduce((sum, f) => sum + f.size_bytes, 0);
+  const totalTokens = Math.ceil(totalBytes / 4);
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="p-6 border-b border-border flex items-center justify-between flex-wrap gap-3 shrink-0">
         <div>
           <h1 className="text-2xl font-semibold text-text-primary mb-1">Memory</h1>
-          <p className="text-xs text-text-secondary font-mono">{memoryDir}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-text-secondary font-mono">{memoryDir}</p>
+            {files.length > 0 && (
+              <span className="text-xs text-text-muted bg-app-card border border-border px-2 py-0.5 rounded font-mono">
+                ~{totalTokens.toLocaleString()} tokens total
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <ProjectScopeSelector value={projectScope} onChange={setProjectScope} />
