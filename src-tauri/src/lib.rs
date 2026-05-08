@@ -55,6 +55,8 @@ use commands::memory::{
     list_agent_memory, list_global_agent_memory, clear_agent_memory,
     clear_all_agent_memory, clear_all_global_memory,
     read_project_memory, write_project_memory,
+    list_memory_files, read_memory_file, write_memory_file,
+    create_memory_file, delete_memory_file,
 };
 use commands::secrets::{
     store_secret, get_secret, delete_secret, list_secrets, get_secrets_count,
@@ -261,6 +263,11 @@ pub fn run() {
             clear_all_global_memory,
             read_project_memory,
             write_project_memory,
+            list_memory_files,
+            read_memory_file,
+            write_memory_file,
+            create_memory_file,
+            delete_memory_file,
             store_secret,
             get_secret,
             delete_secret,
