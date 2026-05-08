@@ -402,10 +402,14 @@ function MultiAdapterPreview({
                 <div className="flex items-center gap-2 mb-2">
                   <div
                     className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: getAdapterColor(mad.adapterId) }}
+                    style={{ backgroundColor: mad.diffs.length === 0 ? "#555" : getAdapterColor(mad.adapterId) }}
                   />
-                  <span className="text-xs font-medium text-text-primary">{mad.adapterName}</span>
-                  <span className="text-xs text-text-muted">({mad.diffs.length} files)</span>
+                  <span className={`text-xs font-medium ${mad.diffs.length === 0 ? "text-text-muted" : "text-text-primary"}`}>{mad.adapterName}</span>
+                  {mad.diffs.length === 0 ? (
+                    <span className="text-xs text-text-muted italic">does not support</span>
+                  ) : (
+                    <span className="text-xs text-text-muted">({mad.diffs.length} files)</span>
+                  )}
                 </div>
                 <div className="space-y-1 pl-4">
                   {mad.diffs.map((diff) => {
