@@ -689,6 +689,7 @@ fn derive_claude_limit_state(
     rate_limits: &[RateLimitWindow],
     oauth_rate_limited: Option<(Option<u64>, String)>,
     oauth_unauthorized: Option<String>,
+    plan_tier: PlanTier,
 ) -> LimitState {
     // If every endpoint that returned an error did so with 401 and we have
     // no usable usage / profile / account data, the stored OAuth token is
@@ -765,8 +766,14 @@ fn derive_claude_limit_state(
                 if reason.is_empty() {
                     continue;
                 }
-                // Stale "out_of_credits" flag — see comment above.
-                if reason.eq_ignore_ascii_case("out_of_credits") && usage_clearly_within_cap {
+                // "out_of_credits" is only meaningful for Enterprise plans that
+                // have a monthly spend cap. Pro/Max/Team users get this flag set
+                // on sibling membership rows as a billing artefact, but they have
+                // no dollar cap — their limits are time-windowed rate limits, not
+                // credits. Suppress it for non-Enterprise plans entirely.
+                if reason.eq_ignore_ascii_case("out_of_credits")
+                    && (!plan_tier.is_enterprise() || usage_clearly_within_cap)
+                {
                     continue;
                 }
                 return LimitState::ApiDisabled {
@@ -1116,8 +1123,10 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
     }
 
     let had_oauth_401 = oauth401.is_some();
+    // Classify plan before deriving limit state so we can suppress plan-irrelevant flags.
+    let plan_tier = classify_plan(profile.as_ref().and_then(|p| p.organization.as_ref()));
     let limit_state =
-        derive_claude_limit_state(&usage, &profile, &account, &rate_limits, oauth429, oauth401);
+        derive_claude_limit_state(&usage, &profile, &account, &rate_limits, oauth429, oauth401, plan_tier);
 
     if had_oauth_401 {
         if let Ok(mut guard) = CLAUDE_CACHE.lock() {
@@ -1125,8 +1134,7 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         }
     }
 
-    // Classify plan once — drives credit/extra rendering and downstream UI.
-    let plan_tier = classify_plan(profile.as_ref().and_then(|p| p.organization.as_ref()));
+    // plan_tier already classified above (before derive_claude_limit_state).
 
     // Build credit usage.
     //   * Pro/Max: extra_usage is the on-demand overage meter (cents). Only
@@ -1569,6 +1577,7 @@ mod derive_limit_state_tests {
         }))
         .unwrap();
         let limits = vec![rl("Session (5h)", 50.0, 50.0)];
+        // out_of_credits is only surfaced for Enterprise plans
         let s = derive_claude_limit_state(
             &None,
             &Some(profile),
@@ -1576,6 +1585,7 @@ mod derive_limit_state_tests {
             &limits,
             None,
             None,
+            PlanTier::Enterprise,
         );
         assert!(matches!(
             s,
@@ -1596,6 +1606,7 @@ mod derive_limit_state_tests {
             &[],
             Some((Some(120), "too many requests".into())),
             None,
+            PlanTier::Pro,
         );
         assert!(matches!(
             s,
@@ -1613,7 +1624,7 @@ mod derive_limit_state_tests {
         }))
         .unwrap();
         let limits = vec![rl("Session (5h)", 100.0, 0.0)];
-        let s = derive_claude_limit_state(&None, &Some(profile), &None, &limits, None, None);
+        let s = derive_claude_limit_state(&None, &Some(profile), &None, &limits, None, None, PlanTier::Pro);
         assert!(matches!(
             s,
             LimitState::Reached { used_pct, .. } if (used_pct - 100.0).abs() < 1e-5
@@ -1627,7 +1638,7 @@ mod derive_limit_state_tests {
         }))
         .unwrap();
         let limits = vec![rl("Weekly", 87.0, 13.0)];
-        let s = derive_claude_limit_state(&None, &Some(profile), &None, &limits, None, None);
+        let s = derive_claude_limit_state(&None, &Some(profile), &None, &limits, None, None, PlanTier::Pro);
         assert!(matches!(
             s,
             LimitState::Approaching { worst_pct, .. } if (worst_pct - 87.0).abs() < 1e-5
@@ -1644,7 +1655,7 @@ mod derive_limit_state_tests {
             }
         }))
         .unwrap();
-        let s = derive_claude_limit_state(&None, &Some(profile), &None, &[], None, None);
+        let s = derive_claude_limit_state(&None, &Some(profile), &None, &[], None, None, PlanTier::Pro);
         assert!(matches!(
             s,
             LimitState::SubscriptionIssue { ref status, .. } if status == "past_due"
@@ -1661,6 +1672,7 @@ mod derive_limit_state_tests {
             &[],
             Some((Some(60), "rate limited".into())),
             Some(body.to_string()),
+            PlanTier::Unknown,
         );
         assert!(matches!(
             s,
@@ -1680,7 +1692,42 @@ mod derive_limit_state_tests {
             &[],
             None,
             Some(body.to_string()),
+            PlanTier::Unknown,
         );
         assert!(matches!(s, LimitState::Unauthenticated { .. }));
+    }
+
+    #[test]
+    fn out_of_credits_suppressed_for_pro_plan() {
+        let profile: ClaudeProfileResponse = serde_json::from_value(serde_json::json!({
+            "organization": { "uuid": "org-1", "name": "Acme Pro", "subscription_status": "active" }
+        }))
+        .unwrap();
+        let account: claude_account::AccountResponse = serde_json::from_value(serde_json::json!({
+            "memberships": [{
+                "organization": {
+                    "uuid": "org-1",
+                    "name": "Acme Pro",
+                    "api_disabled_reason": "out_of_credits"
+                }
+            }]
+        }))
+        .unwrap();
+        let limits = vec![rl("Session (5h)", 50.0, 50.0)];
+        // Pro plan — out_of_credits must be silenced
+        let s = derive_claude_limit_state(
+            &None,
+            &Some(profile),
+            &Some(account),
+            &limits,
+            None,
+            None,
+            PlanTier::Pro,
+        );
+        // Should fall through to Approaching (50% session usage), not ApiDisabled
+        assert!(
+            !matches!(s, LimitState::ApiDisabled { .. }),
+            "out_of_credits must not show for Pro plans, got: {s:?}"
+        );
     }
 }
