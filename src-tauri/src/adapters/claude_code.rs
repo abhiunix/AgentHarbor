@@ -330,15 +330,12 @@ impl ClaudeCodeAdapter {
         };
 
         for rule in rules {
-            let marker = format!("<!-- Rule: {} -->", rule.id);
-            if !content.contains(&marker) {
-                if !content.is_empty() && !content.ends_with('\n') {
-                    content.push('\n');
-                }
-                content.push_str(&format!("\n{}\n", marker));
-                content.push_str(&rule.content);
-                content.push_str("\n");
-            }
+            content = crate::utils::rule_block::inject_rule(
+                &content,
+                &rule.id.to_string(),
+                &rule.name,
+                &rule.content,
+            );
         }
 
         self.write_file_atomic(&claude_md_path, &content)?;
@@ -905,13 +902,12 @@ impl AgentAdapter for ClaudeCodeAdapter {
                 } else { String::new() };
 
                 for rule in &rules {
-                    let marker = format!("<!-- Rule: {} -->", rule.id);
-                    if !content.contains(&marker) {
-                        if !content.is_empty() && !content.ends_with('\n') { content.push('\n'); }
-                        content.push_str(&format!("\n{}\n", marker));
-                        content.push_str(&rule.content);
-                        content.push_str("\n");
-                    }
+                    content = crate::utils::rule_block::inject_rule(
+                        &content,
+                        &rule.id.to_string(),
+                        &rule.name,
+                        &rule.content,
+                    );
                 }
 
                 let current = if path.exists() {
@@ -1331,23 +1327,13 @@ impl AgentAdapter for ClaudeCodeAdapter {
                 }
             }
 
-            // Remove rules from CLAUDE.md by ID marker
+            // Remove rules from CLAUDE.md by ID
             let claude_md = self.claude_md_path(project_path);
             if claude_md.exists() {
                 if let Ok(content) = fs::read_to_string(&claude_md) {
                     let mut new_content = content.clone();
                     for id in capability_ids {
-                        let marker_start = format!("<!-- Rule: {} -->", id);
-                        let marker_end = format!("<!-- EndRule: {} -->", id);
-                        // Remove marker-delimited blocks if they exist
-                        if let Some(start_idx) = new_content.find(&marker_start) {
-                            if let Some(end_idx) = new_content.find(&marker_end) {
-                                let end = end_idx + marker_end.len();
-                                // Also remove trailing newline
-                                let end = if new_content.get(end..end+1) == Some("\n") { end + 1 } else { end };
-                                new_content = format!("{}{}", &new_content[..start_idx], &new_content[end..]);
-                            }
-                        }
+                        new_content = crate::utils::rule_block::remove_rule(&new_content, &id.to_string());
                     }
                     if new_content != content {
                         self.write_file_atomic(&claude_md, &new_content)?;
