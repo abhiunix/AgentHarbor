@@ -8,8 +8,44 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  lint-and-test:
     runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
-      - run: echo "CI works"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Type check frontend
+        run: npx tsc --noEmit
+
+      - name: Lint Rust
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+        continue-on-error: true
+
+      - name: Test Rust
+        run: cargo test
+        working-directory: src-tauri
+
+      - name: Build check
+        run: cargo build
+        working-directory: src-tauri
+        env:
+          SKIP_VERSION_BUMP: '1'
