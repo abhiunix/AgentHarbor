@@ -30,20 +30,22 @@ export function AppLayout() {
   });
 
   return (
-    <div className="flex h-screen bg-app-bg text-text-primary">
+    <div className="flex flex-col h-screen bg-app-bg text-text-primary">
       <UpdateBanner />
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header 
-          searchInputRef={searchInputRef}
-          showNewMenu={showNewMenu}
-          setShowNewMenu={setShowNewMenu}
-        />
-        <MainContent />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Header
+            searchInputRef={searchInputRef}
+            showNewMenu={showNewMenu}
+            setShowNewMenu={setShowNewMenu}
+          />
+          <MainContent />
+        </div>
       </div>
-      <ShortcutsHelp 
-        isOpen={showShortcutsHelp} 
-        onClose={() => setShowShortcutsHelp(false)} 
+      <ShortcutsHelp
+        isOpen={showShortcutsHelp}
+        onClose={() => setShowShortcutsHelp(false)}
       />
     </div>
   );

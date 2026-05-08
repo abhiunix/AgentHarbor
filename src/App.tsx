@@ -16,6 +16,7 @@ import { useRegistryStore } from "./stores/registryStore";
 import { useAgentStore } from "./stores/agentStore";
 import { usePresetStore } from "./stores/presetStore";
 import { syncRegistryNow, getSettings, startRegistryPolling, getSyncStatus } from "./lib/tauri";
+import { startUpdatePolling, stopUpdatePolling } from "./stores/updateStore";
 import type { SyncConfig } from "./lib/tauri";
 import {
   isPermissionGranted,
@@ -32,6 +33,11 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
     loadAgents();
     loadPresets();
   }, [loadCapabilities, loadAgents, loadPresets]);
+
+  useEffect(() => {
+    startUpdatePolling();
+    return () => stopUpdatePolling();
+  }, []);
 
   // Ask once for notification permission when limit alerts are enabled (macOS).
   useEffect(() => {
