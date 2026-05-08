@@ -225,7 +225,7 @@ function App() {
 
             {/* ── Legacy redirects (old flat routes → new adapter routes) ── */}
             <Route path="global" element={<Navigate to="/adapters/claude-code/global-config" replace />} />
-            <Route path="memory" element={<Navigate to="/adapters/claude-code/memory" replace />} />
+            <Route path="memory" element={<Navigate to="/adapters/claude-code/instructions" replace />} />
             <Route path="permissions" element={<Navigate to="/adapters/claude-code/permissions" replace />} />
             <Route path="extensions" element={<Navigate to="/adapters/gemini/extensions" replace />} />
             <Route path="usage" element={<Navigate to="/adapters/claude-code/usage" replace />} />
