@@ -65,12 +65,21 @@ export function InstructionsPage() {
     ? "~/.claude/CLAUDE.md"
     : `${projectScope}/CLAUDE.md`;
 
+  const tokenEstimate = Math.ceil(content.length / 4);
+
   return (
     <div className="h-full flex flex-col">
       <div className="p-6 border-b border-border flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-text-primary mb-1">Instructions</h1>
-          <DebugPath path={filePath} className="text-sm" />
+          <div className="flex items-center gap-2">
+            <DebugPath path={filePath} className="text-sm" />
+            {!loading && content.length > 0 && (
+              <span className="text-xs text-text-muted bg-app-card border border-border px-2 py-0.5 rounded font-mono">
+                ~{tokenEstimate.toLocaleString()} tokens
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <ProjectScopeSelector value={projectScope} onChange={setProjectScope} />
