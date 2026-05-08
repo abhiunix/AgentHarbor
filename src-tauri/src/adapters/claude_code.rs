@@ -137,6 +137,11 @@ impl ClaudeCodeAdapter {
         project_path.join("CLAUDE.md")
     }
 
+    fn global_claude_md_path() -> PathBuf {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        home.join(".claude").join("CLAUDE.md")
+    }
+
     fn skills_dir(&self, project_path: &Path) -> PathBuf {
         project_path.join(".claude").join("skills")
     }
@@ -305,6 +310,7 @@ impl ClaudeCodeAdapter {
         &self,
         project_path: &Path,
         capabilities: &[UniversalCapability],
+        is_global: bool,
     ) -> Result<Vec<PathBuf>, String> {
         let rules: Vec<_> = capabilities
             .iter()
@@ -321,7 +327,11 @@ impl ClaudeCodeAdapter {
             return Ok(vec![]);
         }
 
-        let claude_md_path = self.claude_md_path(project_path);
+        let claude_md_path = if is_global {
+            Self::global_claude_md_path()
+        } else {
+            self.claude_md_path(project_path)
+        };
         let mut content = if claude_md_path.exists() {
             fs::read_to_string(&claude_md_path)
                 .map_err(|e| format!("Failed to read CLAUDE.md: {}", e))?
@@ -896,7 +906,11 @@ impl AgentAdapter for ClaudeCodeAdapter {
             }).collect();
 
             if !rules.is_empty() {
-                let path = self.claude_md_path(project_path);
+                let path = if is_global {
+                    Self::global_claude_md_path()
+                } else {
+                    self.claude_md_path(project_path)
+                };
                 let mut content = if path.exists() {
                     fs::read_to_string(&path).unwrap_or_default()
                 } else { String::new() };
@@ -1253,7 +1267,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
             }
         }
 
-        let rule_files = self.deploy_rules(project_path, capabilities)?;
+        let rule_files = self.deploy_rules(project_path, capabilities, is_global)?;
         all_files.extend(rule_files);
 
         if !is_global {
@@ -1327,8 +1341,10 @@ impl AgentAdapter for ClaudeCodeAdapter {
                 }
             }
 
-            // Remove rules from CLAUDE.md by ID
-            let claude_md = self.claude_md_path(project_path);
+            // Remove rules from CLAUDE.md by ID (check both project and global paths)
+            let project_md = self.claude_md_path(project_path);
+            let global_md = Self::global_claude_md_path();
+            let claude_md = if project_md.exists() { project_md } else { global_md };
             if claude_md.exists() {
                 if let Ok(content) = fs::read_to_string(&claude_md) {
                     let mut new_content = content.clone();
