@@ -26,6 +26,11 @@ impl WindsurfAdapter {
         project_path.join(".windsurf").join("rules")
     }
 
+    fn global_rules_path() -> PathBuf {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        home.join(".codeium").join("windsurf").join("memories").join("global_rules.md")
+    }
+
     fn skills_dir(&self, project_path: &Path) -> PathBuf {
         project_path.join(".windsurf").join("skills")
     }
@@ -412,16 +417,40 @@ impl AgentAdapter for WindsurfAdapter {
             }
         }
 
-        // -- Rules: each as .md file (skipped in global deploy mode)
-        if !is_global {
-            for cap in capabilities {
-                if let UniversalCapability::Rule(rule) = cap {
+        // -- Rules: global → global_rules.md; project → .windsurf/rules/*.md
+        {
+            let rules: Vec<_> = capabilities.iter().filter_map(|c| {
+                if let UniversalCapability::Rule(r) = c { Some(r) } else { None }
+            }).collect();
+
+            if is_global && !rules.is_empty() {
+                let path = Self::global_rules_path();
+                let current = if path.exists() {
+                    Some(fs::read_to_string(&path).unwrap_or_default())
+                } else { None };
+                let mut proposed = current.clone().unwrap_or_default();
+                for rule in &rules {
+                    proposed = crate::utils::rule_block::inject_rule(
+                        &proposed,
+                        &rule.id.to_string(),
+                        &rule.name,
+                        &rule.content,
+                    );
+                }
+                diffs.push(ConfigDiffEntry {
+                    file_path: path,
+                    change_type: if current.is_some() { ChangeType::Modify } else { ChangeType::Add },
+                    current_content: current,
+                    proposed_content: proposed,
+                    merged_content: None,
+                });
+            } else if !is_global {
+                for rule in &rules {
                     let artifact = rule.id.artifact_name(&rule.name);
                     let path = self.rules_dir(project_path).join(format!("{}.md", artifact));
                     let current = if path.exists() {
                         Some(fs::read_to_string(&path).unwrap_or_default())
                     } else { None };
-
                     diffs.push(ConfigDiffEntry {
                         file_path: path,
                         change_type: if current.is_some() { ChangeType::Modify } else { ChangeType::Add },
@@ -535,6 +564,35 @@ impl AgentAdapter for WindsurfAdapter {
         let mcp_files = self.deploy_mcp_servers(capabilities)?;
         all_files.extend(mcp_files);
 
+        // Global rules → ~/.codeium/windsurf/memories/global_rules.md
+        if is_global {
+            let rules: Vec<_> = capabilities.iter().filter_map(|c| {
+                if let UniversalCapability::Rule(r) = c { Some(r) } else { None }
+            }).collect();
+            if !rules.is_empty() {
+                let path = Self::global_rules_path();
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| format!("Failed to create windsurf memories dir: {}", e))?;
+                }
+                let mut content = if path.exists() {
+                    fs::read_to_string(&path).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                for rule in rules {
+                    content = crate::utils::rule_block::inject_rule(
+                        &content,
+                        &rule.id.to_string(),
+                        &rule.name,
+                        &rule.content,
+                    );
+                }
+                self.write_file_atomic(&path, &content)?;
+                all_files.push(path);
+            }
+        }
+
         // Rules and skills are project-scoped; skip in global deploy mode
         if !is_global {
             let rule_files = self.deploy_rules(project_path, capabilities)?;
@@ -595,6 +653,23 @@ impl AgentAdapter for WindsurfAdapter {
             }
         }
 
+        // Remove rules from global_rules.md if present
+        if !capability_ids.is_empty() {
+            let global_rules = Self::global_rules_path();
+            if global_rules.exists() {
+                if let Ok(content) = fs::read_to_string(&global_rules) {
+                    let mut new_content = content.clone();
+                    for id in capability_ids {
+                        new_content = crate::utils::rule_block::remove_rule(&new_content, &id.to_string());
+                    }
+                    if new_content != content {
+                        let _ = self.write_file_atomic(&global_rules, &new_content);
+                        removed_files.push(global_rules);
+                    }
+                }
+            }
+        }
+
         let _ = crate::utils::manifest::rebuild_all_manifests(project_path);
 
         Ok(RemoveResult::success(removed_files))
@@ -603,6 +678,7 @@ impl AgentAdapter for WindsurfAdapter {
     fn managed_paths(&self, project_path: &Path) -> Vec<PathBuf> {
         vec![
             Self::global_mcp_path(),
+            Self::global_rules_path(),
             self.rules_dir(project_path),
             self.skills_dir(project_path),
         ]

@@ -17,6 +17,10 @@ impl CodexAdapter {
             .join(".codex")
     }
 
+    fn global_agents_md_path() -> PathBuf {
+        Self::codex_dir().join("AGENTS.md")
+    }
+
     fn skills_dir(&self) -> PathBuf {
         Self::codex_dir().join("skills")
     }
@@ -163,6 +167,33 @@ impl AgentAdapter for CodexAdapter {
     ) -> Result<Vec<ConfigDiffEntry>, String> {
         let mut entries = Vec::new();
 
+        // Rules → ~/.codex/AGENTS.md
+        let rules: Vec<_> = capabilities.iter().filter_map(|c| {
+            if let UniversalCapability::Rule(r) = c { Some(r) } else { None }
+        }).collect();
+        if !rules.is_empty() {
+            let path = Self::global_agents_md_path();
+            let current = if path.exists() {
+                Some(fs::read_to_string(&path).unwrap_or_default())
+            } else { None };
+            let mut proposed = current.clone().unwrap_or_default();
+            for rule in &rules {
+                proposed = crate::utils::rule_block::inject_rule(
+                    &proposed,
+                    &rule.id.to_string(),
+                    &rule.name,
+                    &rule.content,
+                );
+            }
+            entries.push(ConfigDiffEntry {
+                file_path: path,
+                change_type: if current.is_some() { ChangeType::Modify } else { ChangeType::Add },
+                current_content: current,
+                proposed_content: proposed,
+                merged_content: None,
+            });
+        }
+
         let skills: Vec<&Skill> = capabilities
             .iter()
             .filter_map(|c| match c {
@@ -217,6 +248,34 @@ impl AgentAdapter for CodexAdapter {
         let mut all_files = Vec::new();
         let mut all_errors = Vec::new();
 
+        // Rules → ~/.codex/AGENTS.md
+        let rules: Vec<_> = capabilities.iter().filter_map(|c| {
+            if let UniversalCapability::Rule(r) = c { Some(r) } else { None }
+        }).collect();
+        if !rules.is_empty() {
+            let path = Self::global_agents_md_path();
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let mut content = if path.exists() {
+                fs::read_to_string(&path).unwrap_or_default()
+            } else {
+                String::new()
+            };
+            for rule in rules {
+                content = crate::utils::rule_block::inject_rule(
+                    &content,
+                    &rule.id.to_string(),
+                    &rule.name,
+                    &rule.content,
+                );
+            }
+            match crate::utils::paths::atomic_write_str(&path, &content) {
+                Ok(()) => all_files.push(path),
+                Err(e) => all_errors.push(e),
+            }
+        }
+
         match self.deploy_skills(capabilities) {
             Ok(files) => all_files.extend(files),
             Err(e) => all_errors.push(e),
@@ -248,6 +307,21 @@ impl AgentAdapter for CodexAdapter {
             if skill_folder.exists() {
                 fs::remove_dir_all(&skill_folder).ok();
                 removed.push(skill_folder);
+            }
+        }
+
+        // Remove rules from ~/.codex/AGENTS.md
+        let agents_md = Self::global_agents_md_path();
+        if agents_md.exists() {
+            if let Ok(content) = fs::read_to_string(&agents_md) {
+                let mut new_content = content.clone();
+                for id in capability_ids {
+                    new_content = crate::utils::rule_block::remove_rule(&new_content, &id.to_string());
+                }
+                if new_content != content {
+                    let _ = crate::utils::paths::atomic_write_str(&agents_md, &new_content);
+                    removed.push(agents_md);
+                }
             }
         }
 
