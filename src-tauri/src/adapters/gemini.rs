@@ -25,6 +25,11 @@ impl GeminiAdapter {
         project_path.join("GEMINI.md")
     }
 
+    fn global_gemini_md_path() -> PathBuf {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        home.join(".gemini").join("GEMINI.md")
+    }
+
     fn skills_dir(project_path: &Path) -> PathBuf {
         project_path.join(".gemini").join("skills")
     }
@@ -116,6 +121,7 @@ impl GeminiAdapter {
     fn deploy_rules(
         project_path: &Path,
         capabilities: &[UniversalCapability],
+        is_global: bool,
     ) -> Result<Vec<PathBuf>, String> {
         let rules: Vec<_> = capabilities
             .iter()
@@ -132,8 +138,12 @@ impl GeminiAdapter {
             return Ok(vec![]);
         }
 
-        // Append rules to GEMINI.md
-        let gemini_md = Self::gemini_md_path(project_path);
+        let gemini_md = if is_global {
+            Self::global_gemini_md_path()
+        } else {
+            Self::gemini_md_path(project_path)
+        };
+
         let mut content = if gemini_md.exists() {
             fs::read_to_string(&gemini_md).unwrap_or_default()
         } else {
@@ -141,12 +151,12 @@ impl GeminiAdapter {
         };
 
         for rule in rules {
-            if !content.contains(&rule.content) {
-                if !content.is_empty() && !content.ends_with('\n') {
-                    content.push('\n');
-                }
-                content.push_str(&format!("\n## {}\n\n{}\n", rule.name, rule.content));
-            }
+            content = crate::utils::rule_block::inject_rule(
+                &content,
+                &rule.id.to_string(),
+                &rule.name,
+                &rule.content,
+            );
         }
 
         Self::write_file_atomic(&gemini_md, &content)?;
@@ -359,8 +369,12 @@ impl AgentAdapter for GeminiAdapter {
         project_path: &Path,
         capabilities: &[UniversalCapability],
         agents: &[AgentDefinition],
-        _options: Option<&Value>,
+        options: Option<&Value>,
     ) -> Result<Vec<ConfigDiffEntry>, String> {
+        let is_global = options
+            .and_then(|o| o.get("global"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let mut diffs = vec![];
 
         // MCP diff
@@ -411,7 +425,7 @@ impl AgentAdapter for GeminiAdapter {
             });
         }
 
-        // Rules diff (appended to GEMINI.md)
+        // Rules diff (written to GEMINI.md using structured rule block)
         let rules: Vec<_> = capabilities
             .iter()
             .filter_map(|c| {
@@ -420,7 +434,11 @@ impl AgentAdapter for GeminiAdapter {
             .collect();
 
         if !rules.is_empty() {
-            let gemini_md = Self::gemini_md_path(project_path);
+            let gemini_md = if is_global {
+                Self::global_gemini_md_path()
+            } else {
+                Self::gemini_md_path(project_path)
+            };
             let current = if gemini_md.exists() {
                 Some(fs::read_to_string(&gemini_md).unwrap_or_default())
             } else {
@@ -428,12 +446,12 @@ impl AgentAdapter for GeminiAdapter {
             };
             let mut proposed = current.clone().unwrap_or_default();
             for rule in &rules {
-                if !proposed.contains(&rule.content) {
-                    if !proposed.is_empty() && !proposed.ends_with('\n') {
-                        proposed.push('\n');
-                    }
-                    proposed.push_str(&format!("\n## {}\n\n{}\n", rule.name, rule.content));
-                }
+                proposed = crate::utils::rule_block::inject_rule(
+                    &proposed,
+                    &rule.id.to_string(),
+                    &rule.name,
+                    &rule.content,
+                );
             }
             diffs.push(ConfigDiffEntry {
                 file_path: gemini_md,
@@ -513,14 +531,18 @@ impl AgentAdapter for GeminiAdapter {
         capabilities: &[UniversalCapability],
         agents: &[AgentDefinition],
         _strategy: DeployStrategy,
-        _options: Option<&Value>,
+        options: Option<&Value>,
     ) -> Result<DeployResult, String> {
+        let is_global = options
+            .and_then(|o| o.get("global"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let mut all_files = vec![];
 
         let mcp_files = Self::deploy_mcp_servers(capabilities)?;
         all_files.extend(mcp_files);
 
-        let rule_files = Self::deploy_rules(project_path, capabilities)?;
+        let rule_files = Self::deploy_rules(project_path, capabilities, is_global)?;
         all_files.extend(rule_files);
 
         let agent_files = Self::deploy_agents(project_path, agents)?;
@@ -563,6 +585,26 @@ impl AgentAdapter for GeminiAdapter {
         agent_ids: &[CompositeId],
     ) -> Result<RemoveResult, String> {
         let mut removed_files = vec![];
+
+        // Remove rules from GEMINI.md (check both project and global paths)
+        if !capability_ids.is_empty() {
+            let project_md = Self::gemini_md_path(project_path);
+            let global_md = Self::global_gemini_md_path();
+            for md_path in [&project_md, &global_md] {
+                if md_path.exists() {
+                    if let Ok(content) = fs::read_to_string(md_path) {
+                        let mut new_content = content.clone();
+                        for id in capability_ids {
+                            new_content = crate::utils::rule_block::remove_rule(&new_content, &id.to_string());
+                        }
+                        if new_content != content {
+                            let _ = Self::write_file_atomic(md_path, &new_content);
+                            removed_files.push(md_path.clone());
+                        }
+                    }
+                }
+            }
+        }
 
         // Remove MCP servers from settings
         if !capability_ids.is_empty() {
