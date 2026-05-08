@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useRegistryStore, useCapabilityCounts, useNewItemsCount } from "../../stores/registryStore";
 import { useAgentCounts } from "../../stores/agentStore";
@@ -158,6 +159,11 @@ export function Sidebar() {
   const agentCounts = useAgentCounts();
   const { presets } = usePresetStore();
   const newItemsCount = useNewItemsCount();
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   const isRegistryView = location.pathname === "/" || location.pathname === "/registry";
   const isAgentsView = location.pathname === "/agents";
@@ -295,7 +301,7 @@ export function Sidebar() {
           onClick={() => navigate("/settings")}
         />
         <div className="px-3 py-1.5 text-sm text-text-secondary">
-          Version {__APP_VERSION__}
+          Version {appVersion ?? "…"}
         </div>
       </div>
     </aside>

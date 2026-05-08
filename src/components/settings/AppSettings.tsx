@@ -416,8 +416,6 @@ export function AppSettings() {
         </SettingRow>
       </SectionCard>
 
-      <UpdatesCard />
-
       <SectionCard title="Registry Sync">
         <SettingRow
           label="GitHub Repository"
@@ -651,6 +649,8 @@ export function AppSettings() {
       </SectionCard>
 
       <DebugModeCard />
+
+      <UpdatesCard />
 
       {importExportMode && (
         <ImportExportModal
