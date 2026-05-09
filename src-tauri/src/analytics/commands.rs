@@ -855,6 +855,18 @@ fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
             let _ = tray.set_title(Option::<&str>::None);
         }
 
+        // Tooltip: shown on hover on Windows/Linux, harmless on macOS.
+        let tooltip = match (display_provider, title.as_deref()) {
+            (Some(p), Some(t)) => Some(format!("{} \u{00B7} {}", p.provider_name, t)),
+            (Some(p), None)    => Some(p.provider_name.clone()),
+            (None, Some(t))    => Some(t.to_string()),
+            (None, None)       => None,
+        };
+        match tooltip {
+            Some(ref s) => { let _ = tray.set_tooltip(Some(s.as_str())); }
+            None        => { let _ = tray.set_tooltip(Option::<&str>::None); }
+        }
+
         if let Some(ref provider_id) = display_provider_id {
             if let Some(icon) = load_provider_tray_icon(provider_id, danger_icon) {
                 let _ = tray.set_icon(Some(icon));

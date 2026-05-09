@@ -10,7 +10,7 @@ Manage configurations, track usage, deploy capabilities, and keep every AI tool 
 
 [![GitHub release](https://img.shields.io/github/v/release/abhiunix/AgentHarbor?label=latest&color=blue)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![Total Downloads](https://img.shields.io/github/downloads/abhiunix/AgentHarbor/total?label=downloads&color=green)](https://github.com/abhiunix/AgentHarbor/releases)
-[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)](https://github.com/abhiunix/AgentHarbor/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%7C%20Windows%2010%2B-lightgrey)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![License](https://img.shields.io/github/license/abhiunix/AgentHarbor)](LICENSE)
 
 [**Download**](https://github.com/abhiunix/AgentHarbor/releases/latest) · [**Getting Started**](docs/getting-started.md) · [**Docs**](docs/) · [**Changelog**](CHANGELOG.md)
@@ -21,7 +21,7 @@ Manage configurations, track usage, deploy capabilities, and keep every AI tool 
 
 ## What is it?
 
-AgentHarbor is a native macOS tray app that sits quietly in your menu bar while you code. It shows you real-time rate limits, session usage, and monthly spend for every AI provider you use — without opening a browser or running CLI commands. When you want to deploy an MCP server, rule, skill, or sub-agent across Claude Code, Cursor, and Windsurf at once, a guided wizard handles the diffs, backups, and atomic writes for you.
+AgentHarbor is a native tray app for macOS and Windows that sits quietly in your menu bar / system tray while you code. It shows you real-time rate limits, session usage, and monthly spend for every AI provider you use — without opening a browser or running CLI commands. When you want to deploy an MCP server, rule, skill, or sub-agent across Claude Code, Cursor, and Windsurf at once, a guided wizard handles the diffs, backups, and atomic writes for you.
 
 ---
 
@@ -71,7 +71,16 @@ If macOS flags it as "damaged" (rare, caused by quarantine attribute surviving a
 xattr -cr /Applications/AgentHarbor.app
 ```
 
-**Windows / Linux** — *Coming soon.*
+### Windows 10/11 · x64
+
+1. Download `AgentHarbor_<version>_x64-setup.exe` (NSIS, friendlier wizard) or `AgentHarbor_<version>_x64_en-US.msi` (MSI, enterprise-deployable) from the [**latest release**](https://github.com/abhiunix/AgentHarbor/releases/latest).
+2. Run the installer — it adds a Start menu shortcut (search **AgentHarbor**) and registers under *Settings → Apps → Installed apps*. Per-user install, no admin required.
+
+> **First-run note:** the Windows installer is currently **unsigned**, so Windows SmartScreen will show *"Windows protected your PC"*. Click **More info → Run anyway**. A code-signing cert is on the roadmap.
+
+On Windows the tray popover anchors above the system tray (clamped to the monitor). The tray icon shows the active provider's logo; hover reveals the current spend (`Provider · $X.YZ`) in the tooltip — Windows tray icons can't show inline text the way macOS NSStatusItem can, so the spend lives in the hover tooltip.
+
+**Linux** — *Coming soon.*
 
 ---
 
