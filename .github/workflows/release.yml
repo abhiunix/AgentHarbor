@@ -92,28 +92,30 @@ jobs:
       - name: Generate and upload latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-
+          VERSION="${TAG#v}"
           SIG=$(cat src-tauri/target/release/bundle/macos/AgentHarbor_aarch64.app.tar.gz.sig)
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          cat > latest.json << ENDJSON
-{
-  "version": "$VERSION",
-  "notes": "See https://github.com/abhiunix/AgentHarbor/releases/tag/${{ github.ref_name }} for details.",
-  "pub_date": "$PUB_DATE",
-  "platforms": {
-    "darwin-aarch64": {
-      "signature": "$SIG",
-      "url": "https://github.com/abhiunix/AgentHarbor/releases/download/${{ github.ref_name }}/AgentHarbor_aarch64.app.tar.gz"
-    }
-  }
-}
-ENDJSON
+          jq -n \
+            --arg version "$VERSION" \
+            --arg sig "$SIG" \
+            --arg tag "$TAG" \
+            --arg pub_date "$PUB_DATE" \
+            '{
+              version: $version,
+              notes: ("See https://github.com/abhiunix/AgentHarbor/releases/tag/" + $tag + " for details."),
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": {
+                  signature: $sig,
+                  url: ("https://github.com/abhiunix/AgentHarbor/releases/download/" + $tag + "/AgentHarbor_aarch64.app.tar.gz")
+                }
+              }
+            }' > latest.json
 
-          gh release upload "${{ github.ref_name }}" latest.json --clobber
+          gh release upload "$TAG" latest.json --clobber
 
       - name: Cleanup secrets
         if: always()
