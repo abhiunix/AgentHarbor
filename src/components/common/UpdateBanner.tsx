@@ -16,7 +16,10 @@ export function UpdateBanner() {
     setError(null);
     try {
       const update = await check();
-      if (!update?.available) return;
+      if (!update?.available) {
+        setInstalling(false);
+        return;
+      }
 
       let downloaded = 0;
       let total = 0;
@@ -31,8 +34,9 @@ export function UpdateBanner() {
       });
 
       await relaunch();
-    } catch {
-      setError("Update failed. Try again.");
+    } catch (e) {
+      console.error("[updater] download/install failed:", e);
+      setError(`Update failed: ${e}`);
       setInstalling(false);
     }
   };
