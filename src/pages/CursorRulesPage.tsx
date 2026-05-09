@@ -86,9 +86,13 @@ function RulesTab({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
-  const [ruleContent, setRuleContent] = useState<Record<string, string>>({});
+  const [ruleDetails, setRuleDetails] = useState<Record<string, CursorRuleDetail>>({});
   const [loadingContent, setLoadingContent] = useState<string | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [editingRule, setEditingRule] = useState<string | null>(null);
+
+  const resolvedPath = isGlobal ? null : projectPath;
 
   const load = useCallback(async () => {
     if (!isGlobal && !projectPath) {
@@ -117,21 +121,25 @@ function RulesTab({
     const key = rule.name;
     if (expandedRule === key) {
       setExpandedRule(null);
+      setConfirmDelete(null);
+      setEditingRule(null);
       return;
     }
     setExpandedRule(key);
-    if (!ruleContent[key]) {
+    setConfirmDelete(null);
+    setEditingRule(null);
+    if (!ruleDetails[key]) {
       setLoadingContent(key);
       try {
         const detail = await invoke<CursorRuleDetail>("read_cursor_rule", {
-          projectPath: isGlobal ? null : projectPath,
+          projectPath: resolvedPath,
           ruleName: rule.name,
         });
-        setRuleContent((prev) => ({ ...prev, [key]: detail.content }));
+        setRuleDetails((prev) => ({ ...prev, [key]: detail }));
       } catch (e) {
-        setRuleContent((prev) => ({
+        setRuleDetails((prev) => ({
           ...prev,
-          [key]: `Error loading rule: ${e}`,
+          [key]: { ...rule, content: `Error loading rule: ${e}` },
         }));
       } finally {
         setLoadingContent(null);
@@ -139,14 +147,14 @@ function RulesTab({
     }
   };
 
-  const handleDelete = async (ruleName: string) => {
-    if (!window.confirm(`Delete rule "${ruleName}"?`)) return;
+  const handleConfirmDelete = async (ruleName: string) => {
     try {
       await invoke("delete_cursor_rule", {
-        projectPath: isGlobal ? null : projectPath,
+        projectPath: resolvedPath,
         ruleName,
       });
       setExpandedRule(null);
+      setConfirmDelete(null);
       await load();
     } catch (e) {
       setError(String(e));
@@ -192,8 +200,8 @@ function RulesTab({
       </div>
 
       {showNewForm && (
-        <NewRuleForm
-          projectPath={isGlobal ? null : projectPath}
+        <RuleForm
+          projectPath={resolvedPath}
           onClose={() => setShowNewForm(false)}
           onSaved={() => {
             setShowNewForm(false);
@@ -213,8 +221,10 @@ function RulesTab({
 
       {rules.map((rule) => {
         const isExpanded = expandedRule === rule.name;
-        const content = ruleContent[rule.name];
+        const detail = ruleDetails[rule.name];
         const isLoadingThis = loadingContent === rule.name;
+        const isConfirming = confirmDelete === rule.name;
+        const isEditing = editingRule === rule.name;
 
         return (
           <div
@@ -262,20 +272,66 @@ function RulesTab({
             {isExpanded && (
               <div className="border-t border-border px-4 py-3">
                 {isLoadingThis ? (
-                  <p className="text-text-secondary text-sm">
-                    Loading content...
-                  </p>
-                ) : content != null ? (
+                  <p className="text-text-secondary text-sm">Loading content...</p>
+                ) : isEditing && detail ? (
+                  <RuleForm
+                    projectPath={resolvedPath}
+                    initialValues={{
+                      name: detail.name,
+                      description: detail.description,
+                      globs: detail.globs,
+                      alwaysApply: detail.always_apply,
+                      content: detail.content,
+                      originalName: detail.name,
+                    }}
+                    onClose={() => setEditingRule(null)}
+                    onSaved={async () => {
+                      setEditingRule(null);
+                      setRuleDetails((prev) => {
+                        const next = { ...prev };
+                        delete next[rule.name];
+                        return next;
+                      });
+                      await load();
+                    }}
+                  />
+                ) : detail != null ? (
                   <>
                     <pre className="text-xs text-text-primary font-mono whitespace-pre-wrap break-words max-h-96 overflow-y-auto bg-[#13141a] rounded p-3 mb-3">
-                      {content}
+                      {detail.content}
                     </pre>
-                    <button
-                      onClick={() => handleDelete(rule.name)}
-                      className="px-3 py-1.5 text-sm rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors"
-                    >
-                      Delete Rule
-                    </button>
+                    {isConfirming ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-text-secondary">Delete "{rule.name}"?</span>
+                        <button
+                          onClick={() => handleConfirmDelete(rule.name)}
+                          className="px-3 py-1.5 text-sm rounded bg-red-600 text-white hover:bg-red-500 transition-colors"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(null)}
+                          className="px-3 py-1.5 text-sm rounded bg-[#2a2b36] text-text-secondary hover:text-text-primary transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setEditingRule(rule.name)}
+                          className="px-3 py-1.5 text-sm rounded bg-[#2a2b36] text-text-secondary hover:text-text-primary transition-colors"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(rule.name)}
+                          className="px-3 py-1.5 text-sm rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors"
+                        >
+                          Delete Rule
+                        </button>
+                      </div>
+                    )}
                   </>
                 ) : null}
               </div>
@@ -287,20 +343,32 @@ function RulesTab({
   );
 }
 
-function NewRuleForm({
+interface RuleFormValues {
+  name: string;
+  description: string;
+  globs: string;
+  alwaysApply: boolean;
+  content: string;
+  originalName?: string;
+}
+
+function RuleForm({
   projectPath,
+  initialValues,
   onClose,
   onSaved,
 }: {
   projectPath: string | null;
+  initialValues?: RuleFormValues;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [globs, setGlobs] = useState("");
-  const [alwaysApply, setAlwaysApply] = useState(false);
-  const [content, setContent] = useState("");
+  const isEdit = !!initialValues;
+  const [name, setName] = useState(initialValues?.name ?? "");
+  const [description, setDescription] = useState(initialValues?.description ?? "");
+  const [globs, setGlobs] = useState(initialValues?.globs ?? "");
+  const [alwaysApply, setAlwaysApply] = useState(initialValues?.alwaysApply ?? false);
+  const [content, setContent] = useState(initialValues?.content ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -317,6 +385,12 @@ function NewRuleForm({
         alwaysApply,
         content,
       });
+      if (isEdit && initialValues!.originalName && initialValues!.originalName !== name.trim()) {
+        await invoke("delete_cursor_rule", {
+          projectPath,
+          ruleName: initialValues!.originalName,
+        });
+      }
       onSaved();
     } catch (e) {
       setError(String(e));
@@ -328,13 +402,22 @@ function NewRuleForm({
   return (
     <div className="bg-app-card border border-border rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-text-primary">New Rule</h3>
-        <button
-          onClick={onClose}
-          className="text-text-muted hover:text-text-primary text-sm"
-        >
-          Cancel
-        </button>
+        <h3 className="text-sm font-semibold text-text-primary">{isEdit ? "Edit Rule" : "New Rule"}</h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving || !name.trim()}
+            className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {saving ? "Saving..." : "Save Rule"}
+          </button>
+          <button
+            onClick={onClose}
+            className="text-text-muted hover:text-text-primary text-sm"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -410,13 +493,6 @@ function NewRuleForm({
         />
       </div>
 
-      <button
-        onClick={handleSave}
-        disabled={saving || !name.trim()}
-        className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {saving ? "Saving..." : "Save Rule"}
-      </button>
     </div>
   );
 }

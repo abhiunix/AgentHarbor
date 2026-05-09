@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use dirs;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +82,21 @@ fn generate_mdc_content(description: &str, globs: &str, always_apply: bool, cont
 }
 
 /// List all .mdc rule files from the given rules directory.
+fn cursor_rules_dir(project_path: Option<String>) -> Result<PathBuf, String> {
+    match project_path {
+        Some(p) => {
+            if p.contains("..") {
+                return Err("Invalid project path".to_string());
+            }
+            Ok(PathBuf::from(&p).join(".cursor").join("rules"))
+        }
+        None => {
+            let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+            Ok(home.join(".cursor").join("rules"))
+        }
+    }
+}
+
 fn list_rules_in_dir(rules_dir: &PathBuf) -> Vec<CursorRule> {
     let mut rules = Vec::new();
 
@@ -138,14 +154,11 @@ pub fn list_cursor_rules(project_path: String) -> Result<Vec<CursorRule>, String
 }
 
 #[tauri::command]
-pub fn read_cursor_rule(project_path: String, rule_name: String) -> Result<CursorRuleDetail, String> {
-    if project_path.contains("..") || rule_name.contains("..") {
+pub fn read_cursor_rule(project_path: Option<String>, rule_name: String) -> Result<CursorRuleDetail, String> {
+    if rule_name.contains("..") {
         return Err("Invalid path".to_string());
     }
-    let file_path = PathBuf::from(&project_path)
-        .join(".cursor")
-        .join("rules")
-        .join(format!("{}.mdc", rule_name));
+    let file_path = cursor_rules_dir(project_path)?.join(format!("{}.mdc", rule_name));
 
     if !file_path.is_file() {
         return Err(format!("Rule '{}' not found", rule_name));
@@ -168,18 +181,18 @@ pub fn read_cursor_rule(project_path: String, rule_name: String) -> Result<Curso
 
 #[tauri::command]
 pub fn write_cursor_rule(
-    project_path: String,
+    project_path: Option<String>,
     rule_name: String,
     description: String,
     globs: String,
     always_apply: bool,
     content: String,
 ) -> Result<(), String> {
-    if project_path.contains("..") || rule_name.contains("..") {
+    if rule_name.contains("..") {
         return Err("Invalid path".to_string());
     }
 
-    let rules_dir = PathBuf::from(&project_path).join(".cursor").join("rules");
+    let rules_dir = cursor_rules_dir(project_path)?;
     fs::create_dir_all(&rules_dir)
         .map_err(|e| format!("Failed to create rules directory: {}", e))?;
 
@@ -193,15 +206,12 @@ pub fn write_cursor_rule(
 }
 
 #[tauri::command]
-pub fn delete_cursor_rule(project_path: String, rule_name: String) -> Result<(), String> {
-    if project_path.contains("..") || rule_name.contains("..") {
+pub fn delete_cursor_rule(project_path: Option<String>, rule_name: String) -> Result<(), String> {
+    if rule_name.contains("..") {
         return Err("Invalid path".to_string());
     }
 
-    let file_path = PathBuf::from(&project_path)
-        .join(".cursor")
-        .join("rules")
-        .join(format!("{}.mdc", rule_name));
+    let file_path = cursor_rules_dir(project_path)?.join(format!("{}.mdc", rule_name));
 
     if !file_path.exists() {
         return Err(format!("Rule '{}' not found", rule_name));
@@ -331,7 +341,7 @@ mod tests {
 
         // Write a rule
         write_cursor_rule(
-            project_path.clone(),
+            Some(project_path.clone()),
             "test-rule".to_string(),
             "Test description".to_string(),
             "**/*.rs".to_string(),
@@ -341,7 +351,7 @@ mod tests {
         .unwrap();
 
         // Read it back
-        let detail = read_cursor_rule(project_path.clone(), "test-rule".to_string()).unwrap();
+        let detail = read_cursor_rule(Some(project_path.clone()), "test-rule".to_string()).unwrap();
         assert_eq!(detail.name, "test-rule");
         assert_eq!(detail.description, "Test description");
         assert_eq!(detail.globs, "**/*.rs");
@@ -354,7 +364,7 @@ mod tests {
         assert_eq!(rules[0].name, "test-rule");
 
         // Delete
-        delete_cursor_rule(project_path.clone(), "test-rule".to_string()).unwrap();
+        delete_cursor_rule(Some(project_path.clone()), "test-rule".to_string()).unwrap();
         let rules = list_cursor_rules(project_path.clone()).unwrap();
         assert!(rules.is_empty());
 
@@ -365,15 +375,15 @@ mod tests {
     #[test]
     fn test_path_traversal_rejected() {
         assert!(list_cursor_rules("../etc".to_string()).is_err());
-        assert!(read_cursor_rule("/tmp".to_string(), "../secret".to_string()).is_err());
+        assert!(read_cursor_rule(Some("/tmp".to_string()), "../secret".to_string()).is_err());
         assert!(write_cursor_rule(
-            "/tmp".to_string(),
+            Some("/tmp".to_string()),
             "../escape".to_string(),
             String::new(),
             String::new(),
             false,
             String::new(),
         ).is_err());
-        assert!(delete_cursor_rule("/tmp".to_string(), "../bad".to_string()).is_err());
+        assert!(delete_cursor_rule(Some("/tmp".to_string()), "../bad".to_string()).is_err());
     }
 }
