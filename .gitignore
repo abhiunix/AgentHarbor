@@ -39,6 +39,10 @@ src-tauri/target/
 # Local state
 .agentharbor/
 
+# AgentHarbor deployed skills (present locally, not committed)
+.claude/skills/
+.cursor/skills/
+
 # macOS installer artifacts (never commit)
 *.dmg
 rw.*.dmg
