@@ -15,7 +15,7 @@ use commands::registry::{
 use commands::agents::{save_agent, delete_agent};
 use commands::project::{
     select_project_folder, detect_adapters, get_recent_projects, add_recent_project,
-    remove_recent_project, get_global_config,
+    remove_recent_project, get_global_config, open_in_app,
 };
 use commands::deploy::{preview_deploy, execute_deploy};
 use commands::presets::{
@@ -204,6 +204,7 @@ pub fn run() {
             get_recent_projects,
             add_recent_project,
             remove_recent_project,
+            open_in_app,
             preview_deploy,
             execute_deploy,
             get_presets,

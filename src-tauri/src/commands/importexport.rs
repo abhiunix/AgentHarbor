@@ -85,19 +85,20 @@ pub fn export_data(
     capability_ids: Vec<String>,
     agent_ids: Vec<String>,
     preset_ids: Vec<String>,
-) -> Result<ExportData, String> {
+    output_path: String,
+) -> Result<(), String> {
     let bundled_path = get_bundled_registry_path();
     let custom_path = get_custom_registry_path();
-    
+
     let mut dirs = vec![bundled_path];
     if custom_path.exists() {
         dirs.push(custom_path);
     }
-    
+
     let all_caps = load_capabilities(&dirs);
     let all_agents = load_agents(&dirs);
     let all_presets = load_all_presets();
-    
+
     let caps: Vec<UniversalCapability> = if capability_ids.is_empty() {
         all_caps.items
             .into_iter()
@@ -109,7 +110,7 @@ pub fn export_data(
             .filter(|c| capability_ids.contains(&c.id().to_string()) && c.is_private())
             .collect()
     };
-    
+
     let agents: Vec<AgentDefinition> = if agent_ids.is_empty() {
         all_agents.items
             .into_iter()
@@ -121,7 +122,7 @@ pub fn export_data(
             .filter(|a| agent_ids.contains(&a.id.to_string()) && a.visibility == Visibility::Private)
             .collect()
     };
-    
+
     let presets: Vec<ExportedPreset> = if preset_ids.is_empty() {
         all_presets
     } else {
@@ -130,7 +131,7 @@ pub fn export_data(
             .filter(|p| preset_ids.contains(&p.id))
             .collect()
     };
-    
+
     let export = ExportData {
         version: "1.0".to_string(),
         exported_at: chrono::Utc::now().to_rfc3339(),
@@ -138,8 +139,14 @@ pub fn export_data(
         agents,
         presets,
     };
-    
-    Ok(export)
+
+    let json = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
+    let path = std::path::Path::new(&output_path);
+    let tmp_path = path.with_extension("json.tmp");
+    fs::write(&tmp_path, &json).map_err(|e| format!("Write failed: {}", e))?;
+    fs::rename(&tmp_path, path).map_err(|e| format!("Rename failed: {}", e))?;
+
+    Ok(())
 }
 
 #[tauri::command]

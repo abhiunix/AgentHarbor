@@ -174,6 +174,10 @@ export async function selectProjectFolder(): Promise<string | null> {
   return invoke<string | null>("select_project_folder");
 }
 
+export async function openInApp(path: string, app: string): Promise<void> {
+  return invoke<void>("open_in_app", { path, app });
+}
+
 export async function detectAdapters(projectPath: string): Promise<DetectedAdapter[]> {
   return invoke<DetectedAdapter[]>("detect_adapters", { projectPath });
 }
@@ -522,9 +526,10 @@ export interface ImportResult {
 export async function exportData(
   capabilityIds: string[],
   agentIds: string[],
-  presetIds: string[]
-): Promise<ExportData> {
-  return invoke<ExportData>("export_data", { capabilityIds, agentIds, presetIds });
+  presetIds: string[],
+  outputPath: string
+): Promise<void> {
+  return invoke<void>("export_data", { capabilityIds, agentIds, presetIds, outputPath });
 }
 
 export async function importData(

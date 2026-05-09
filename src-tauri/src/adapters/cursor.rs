@@ -237,9 +237,26 @@ impl CursorAdapter {
 
     fn map_hook_event(event: &str) -> Option<&'static str> {
         match event {
-            "file_save" | "PostToolUse" | "afterFileEdit" => Some("afterFileEdit"),
-            "stop" | "Notification" => Some("stop"),
+            // Pre/post tool use
+            "PreToolUse" | "preToolUse" => Some("preToolUse"),
+            "PostToolUse" | "postToolUse" | "file_save" | "afterFileEdit" => Some("afterFileEdit"),
+            "PostToolUseFailure" | "postToolUseFailure" => Some("postToolUseFailure"),
+            // Session lifecycle
+            "SessionStart" | "sessionStart" => Some("sessionStart"),
+            "SessionEnd" | "sessionEnd" => Some("sessionEnd"),
+            // User prompt
+            "UserPromptSubmit" | "userPromptSubmit" | "beforeSubmitPrompt" => Some("beforeSubmitPrompt"),
+            // File changes
+            "FileChanged" | "fileChanged" => Some("afterFileEdit"),
+            // Shell execution
             "pre_command" | "beforeShellExecution" => Some("beforeShellExecution"),
+            // Stop / notifications
+            "Stop" | "stop" | "Notification" => Some("stop"),
+            // Compaction
+            "PreCompact" | "preCompact" => Some("preCompact"),
+            // Subagents
+            "SubagentStart" | "subagentStart" => Some("subagentStart"),
+            "SubagentStop" | "subagentStop" => Some("subagentStop"),
             _ => None,
         }
     }

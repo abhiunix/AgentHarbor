@@ -2,6 +2,7 @@ use crate::adapters::{AdapterRegistry, AdapterCapabilities};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +186,17 @@ pub fn get_global_config(adapter_id: String) -> Result<GlobalConfigInfo, String>
         mcp_servers,
         has_config: true,
     })
+}
+
+/// Open a folder path in a specific macOS application (Cursor, VS Code, etc.).
+/// Uses `open -a "AppName" "/path"` which works for any .app bundle on macOS.
+#[tauri::command]
+pub fn open_in_app(path: String, app: String) -> Result<(), String> {
+    Command::new("open")
+        .args(["-a", &app, &path])
+        .spawn()
+        .map_err(|e| format!("Failed to open in {}: {}", app, e))?;
+    Ok(())
 }
 
 #[cfg(test)]

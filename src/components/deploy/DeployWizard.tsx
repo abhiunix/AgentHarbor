@@ -2,9 +2,12 @@ import { useState, useEffect } from "react";
 import { ProjectSelector } from "./ProjectSelector";
 import { AdapterSelector } from "./AdapterSelector";
 import { useProjectStore, getProjectName } from "../../stores/projectStore";
-import { previewDeploy, executeDeploy, recordDeployment, DiffEntry, DeployResultResponse, type ClaudeSettingsTarget } from "../../lib/tauri";
+import { previewDeploy, executeDeploy, recordDeployment, DiffEntry, DeployResultResponse, type ClaudeSettingsTarget, openInApp } from "../../lib/tauri";
 import { PROJECTS_RELOAD_EVENT } from "../projects/ProjectList";
-import { basename } from "../../lib/platform";
+import { basename, fileManagerName } from "../../lib/platform";
+import { invoke } from "@tauri-apps/api/core";
+import cursorIcon from "../../assets/cursor_logo.png";
+import vscodeIcon from "../../assets/vs_code_logo.png";
 
 export type DeployStep = "project" | "select" | "preview" | "success";
 
@@ -314,6 +317,7 @@ export function DeployWizard({
             <MultiAdapterSuccess
               results={multiResults}
               projectName={isGlobalDeploy ? "Global Config" : getProjectName(selectedProject || "")}
+              projectPath={selectedProject || ""}
               capabilityCount={selectedCapabilityIds.length}
               agentCount={isGlobalDeploy ? 0 : selectedAgentIds.length}
               onClose={handleClose}
@@ -555,6 +559,7 @@ function DiffDetail({
 interface MultiAdapterSuccessProps {
   results: MultiAdapterResult[];
   projectName: string;
+  projectPath: string;
   capabilityCount: number;
   agentCount: number;
   onClose: () => void;
@@ -563,6 +568,7 @@ interface MultiAdapterSuccessProps {
 function MultiAdapterSuccess({
   results,
   projectName,
+  projectPath,
   capabilityCount,
   agentCount,
   onClose,
@@ -578,6 +584,24 @@ function MultiAdapterSuccess({
   const getColor = (id: string) => {
     if (adapterColors[id]) return adapterColors[id];
     return adapterColors[id.split(":")[0]] || "#666";
+  };
+
+  const handleOpenInFinder = async () => {
+    if (!projectPath) return;
+    try {
+      await invoke("plugin:opener|reveal_item_in_dir", { path: projectPath });
+    } catch (e) {
+      console.error("open in finder failed", e);
+    }
+  };
+
+  const handleOpenInIde = async (app: string) => {
+    if (!projectPath) return;
+    try {
+      await openInApp(projectPath, app);
+    } catch (e) {
+      console.error(`open in ${app} failed`, e);
+    }
   };
 
   return (
@@ -598,13 +622,13 @@ function MultiAdapterSuccess({
         {capabilityCount} capabilit{capabilityCount !== 1 ? "ies" : "y"} and {agentCount} agent{agentCount !== 1 ? "s" : ""} deployed to {projectName}
       </p>
 
-      <div className="space-y-4 mb-6">
+      <div className="space-y-3 mb-6">
         {results.map((r) => (
           <div
             key={r.adapterId}
             className="p-4 bg-app-card border border-border rounded-lg text-left"
           >
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-1">
               <div
                 className="w-3 h-3 rounded-full"
                 style={{ backgroundColor: getColor(r.adapterId) }}
@@ -629,6 +653,33 @@ function MultiAdapterSuccess({
           </div>
         ))}
       </div>
+
+      {/* Open-in buttons */}
+      {projectPath && (
+        <div className="flex items-center justify-center gap-2 mb-6">
+          <button
+            onClick={handleOpenInFinder}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+          >
+            <span>📁</span>
+            <span>{fileManagerName}</span>
+          </button>
+          <button
+            onClick={() => handleOpenInIde("Cursor")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+          >
+            <img src={cursorIcon} alt="Cursor" className="w-3.5 h-3.5 object-contain" />
+            <span>Cursor</span>
+          </button>
+          <button
+            onClick={() => handleOpenInIde("Visual Studio Code")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+          >
+            <img src={vscodeIcon} alt="VS Code" className="w-3.5 h-3.5 object-contain" />
+            <span>VS Code</span>
+          </button>
+        </div>
+      )}
 
       <button
         onClick={onClose}

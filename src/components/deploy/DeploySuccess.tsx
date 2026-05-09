@@ -1,8 +1,10 @@
 import { useState } from "react";
 import type { DeployResultResponse } from "../../lib/tauri";
 import { invoke } from "@tauri-apps/api/core";
-import { restoreProjectBackup } from "../../lib/tauri";
+import { restoreProjectBackup, openInApp } from "../../lib/tauri";
 import { fileManagerName } from "../../lib/platform";
+import cursorIcon from "../../assets/cursor_logo.png";
+import vscodeIcon from "../../assets/vs_code_logo.png";
 
 interface DeploySuccessProps {
   result: DeployResultResponse;
@@ -132,12 +134,27 @@ export function DeploySuccess({
         </div>
       )}
 
-      <div className="flex items-center justify-center gap-3">
+      <div className="flex items-center justify-center gap-2 flex-wrap">
         <button
           onClick={handleOpenInFinder}
-          className="px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors flex items-center gap-2"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
         >
-          📁 Open in {fileManagerName}
+          <span>📁</span>
+          <span>{fileManagerName}</span>
+        </button>
+        <button
+          onClick={() => openInApp(projectPath, "Cursor").catch(() => {})}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+        >
+          <img src={cursorIcon} alt="Cursor" className="w-3.5 h-3.5 object-contain" />
+          <span>Cursor</span>
+        </button>
+        <button
+          onClick={() => openInApp(projectPath, "Visual Studio Code").catch(() => {})}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+        >
+          <img src={vscodeIcon} alt="VS Code" className="w-3.5 h-3.5 object-contain" />
+          <span>VS Code</span>
         </button>
         {backupId && (
           <button

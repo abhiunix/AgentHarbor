@@ -531,12 +531,14 @@ impl ClaudeCodeAdapter {
             }
 
             // Legacy path: transform event/matcher/command fields
+            let timeout_secs = hook.timeout_ms / 1000;
             let hook_config = json!({
                 "matcher": hook.matcher,
                 "hooks": [
                     {
                         "type": "command",
                         "command": hook.command,
+                        "timeout": timeout_secs,
                     }
                 ]
             });
@@ -1056,9 +1058,10 @@ impl AgentAdapter for ClaudeCodeAdapter {
                             }
                         }
                     } else {
+                        let timeout_secs = hook.timeout_ms / 1000;
                         let hook_config = json!({
                             "matcher": hook.matcher,
-                            "hooks": [{ "type": "command", "command": hook.command }]
+                            "hooks": [{ "type": "command", "command": hook.command, "timeout": timeout_secs }]
                         });
                         let event_hooks = hooks_obj.as_object_mut().ok_or("Hooks must be an object")?
                             .entry(&hook.event).or_insert(json!([]));

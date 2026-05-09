@@ -7,7 +7,6 @@ import {
   type ImportResult,
 } from "../../lib/tauri";
 import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
 
 interface ImportExportModalProps {
   mode: "export" | "import";
@@ -31,21 +30,19 @@ export function ImportExportModal({ mode, onClose, onComplete }: ImportExportMod
   const handleExport = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
-      const data = await exportData([], [], []);
-      
       const filePath = await save({
         defaultPath: `agentharbor-export-${new Date().toISOString().split("T")[0]}.json`,
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
-      
+
       if (filePath) {
-        await writeTextFile(filePath, JSON.stringify(data, null, 2));
+        await exportData([], [], [], filePath);
         setStep("result");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Export failed");
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -64,7 +61,7 @@ export function ImportExportModal({ mode, onClose, onComplete }: ImportExportMod
       setImportData(data);
       setStep("preview");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid file");
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -82,7 +79,7 @@ export function ImportExportModal({ mode, onClose, onComplete }: ImportExportMod
       setStep("result");
       onComplete?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }

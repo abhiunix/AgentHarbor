@@ -85,6 +85,31 @@ export function CapabilityEditor({ capability, onSave, onCancel }: CapabilityEdi
     Record<string, Array<{ path: string; content: string }>>
   >({});
 
+  // Hook structured form state
+  const [hookActiveTab, setHookActiveTab] = useState<"claude-code" | "cursor">("claude-code");
+  const [hookRawMode, setHookRawMode] = useState(false);
+  const [hookPreviewOpen, setHookPreviewOpen] = useState(false);
+  // Claude Code hook fields
+  const [chEvent, setChEvent] = useState("PreToolUse");
+  const [chMatcher, setChMatcher] = useState("");
+  const [chType, setChType] = useState<"command" | "prompt" | "http">("command");
+  const [chCommand, setChCommand] = useState("");
+  const [chTimeout, setChTimeout] = useState("600");
+  const [chAsync, setChAsync] = useState(false);
+  const [chIfCondition, setChIfCondition] = useState("");
+  const [chShowIf, setChShowIf] = useState(false);
+  // Cursor hook fields
+  const [cuEvent, setCuEvent] = useState("preToolUse");
+  const [cuMatcher, setCuMatcher] = useState("");
+  const [cuType, setCuType] = useState<"command" | "prompt">("command");
+  const [cuCommand, setCuCommand] = useState("");
+  const [cuTimeout, setCuTimeout] = useState("30");
+  const [cuFailClosed, setCuFailClosed] = useState(false);
+  const [cuLoopLimit, setCuLoopLimit] = useState("5");
+  // Script files attached alongside each adapter's hooks.json
+  const [chScriptFiles, setChScriptFiles] = useState<Array<{ path: string; content: string }>>([]);
+  const [cuScriptFiles, setCuScriptFiles] = useState<Array<{ path: string; content: string }>>([]);
+
   const [pluginInstallCmd, setPluginInstallCmd] = useState("");
 
   const [customAdapterConfigs, setCustomAdapterConfigs] = useState<
@@ -282,6 +307,77 @@ export function CapabilityEditor({ capability, onSave, onCancel }: CapabilityEdi
           }
         }
         setHookAdapterFiles(filesByAdapter);
+
+        // Parse existing hook content into structured form fields
+        let parsedCcCommand = "";
+        const ccFiles = filesByAdapter["claude-code"];
+        if (ccFiles?.[0]?.content) {
+          try {
+            const json = JSON.parse(ccFiles[0].content) as Record<string, unknown>;
+            const hooksObj = json?.hooks as Record<string, unknown[]> | undefined;
+            if (hooksObj && typeof hooksObj === "object") {
+              const firstEvt = Object.keys(hooksObj)[0];
+              if (firstEvt) {
+                setChEvent(firstEvt);
+                const entries = hooksObj[firstEvt];
+                if (Array.isArray(entries) && entries[0]) {
+                  const entry = entries[0] as Record<string, unknown>;
+                  if (entry.matcher) setChMatcher(entry.matcher as string);
+                  const innerHooks = entry.hooks as Record<string, unknown>[] | undefined;
+                  if (Array.isArray(innerHooks) && innerHooks[0]) {
+                    const h = innerHooks[0] as Record<string, unknown>;
+                    const t = (h.type as string) || "command";
+                    setChType(t as "command" | "prompt" | "http");
+                    parsedCcCommand = ((h.command ?? h.prompt ?? h.url) as string) ?? "";
+                    setChCommand(parsedCcCommand);
+                    if (h.timeout) setChTimeout(String(h.timeout));
+                    if (h.async) setChAsync(true);
+                    if (h.if) { setChIfCondition(h.if as string); setChShowIf(true); }
+                  }
+                }
+              }
+            }
+          } catch { /* leave defaults */ }
+          // Load extra script files (all files after the first hooks.json)
+          if (ccFiles.length > 1) {
+            setChScriptFiles(ccFiles.slice(1).map((f) => ({ path: f.path, content: f.content })));
+          }
+        }
+        let parsedCuCommand = "";
+        const cuFilesInit = filesByAdapter["cursor"];
+        if (cuFilesInit?.[0]?.content) {
+          try {
+            const json = JSON.parse(cuFilesInit[0].content) as Record<string, unknown>;
+            const hooksObj = json?.hooks as Record<string, unknown[]> | undefined;
+            if (hooksObj && typeof hooksObj === "object") {
+              const firstEvt = Object.keys(hooksObj)[0];
+              if (firstEvt) {
+                setCuEvent(firstEvt);
+                const entries = hooksObj[firstEvt];
+                if (Array.isArray(entries) && entries[0]) {
+                  const h = entries[0] as Record<string, unknown>;
+                  if (h.prompt !== undefined) { setCuType("prompt"); parsedCuCommand = (h.prompt as string) ?? ""; setCuCommand(parsedCuCommand); }
+                  else if (h.command !== undefined) { setCuType("command"); parsedCuCommand = (h.command as string) ?? ""; setCuCommand(parsedCuCommand); }
+                  if (h.timeout) setCuTimeout(String(h.timeout));
+                  if (h.matcher) setCuMatcher(h.matcher as string);
+                  if (h.failClosed) setCuFailClosed(true);
+                  if (h.loop_limit !== undefined) setCuLoopLimit(String(h.loop_limit));
+                }
+              }
+            }
+          } catch { /* leave defaults */ }
+          // Load extra script files (all files after the first hooks.json)
+          if (cuFilesInit.length > 1) {
+            setCuScriptFiles(cuFilesInit.slice(1).map((f) => ({ path: f.path, content: f.content })));
+          }
+        }
+        // Open on the tab that actually has data when editing
+        if (!parsedCcCommand && parsedCuCommand) {
+          setHookActiveTab("cursor");
+        } else if (parsedCcCommand && !parsedCuCommand) {
+          setHookActiveTab("claude-code");
+        }
+
         setGenericEnvEntries(
           Object.entries((hook as Hook).env ?? {}).map(([k, v]) => ({
             _id: genericEnvIdCounter.current++,
@@ -343,6 +439,58 @@ export function CapabilityEditor({ capability, onSave, onCancel }: CapabilityEdi
     "cursor": ".cursor/hooks.json",
   };
 
+  const getClaudeMatcherHint = (event: string): string => {
+    switch (event) {
+      case "PreToolUse": return "e.g. Bash, Write, Edit — or * for all";
+      case "PostToolUse": return "e.g. Bash, Write — matches tool name";
+      case "PostToolUseFailure": return "e.g. Bash — matches on tool failure";
+      case "UserPromptSubmit": return "* matches all prompts";
+      case "Stop": return "* matches on agent stop";
+      case "Notification": return "* matches all notifications";
+      case "PreCompact": return "* matches before context compaction";
+      default: return "* matches all";
+    }
+  };
+
+  const getCursorMatcherHint = (event: string): string => {
+    switch (event) {
+      case "preToolUse": return "e.g. edit_file, run_terminal — or * for all";
+      case "afterFileEdit": return "e.g. *.ts, *.py — file glob pattern";
+      case "postToolUseFailure": return "* matches on tool failure";
+      case "beforeSubmitPrompt": return "* matches all prompts";
+      case "stop": return "* matches on agent stop";
+      case "beforeShellExecution": return "* matches all shell commands";
+      case "sessionStart": return "* matches session start";
+      case "sessionEnd": return "* matches session end";
+      default: return "* matches all";
+    }
+  };
+
+  const generateClaudeJson = (): string => {
+    const hookObj: Record<string, unknown> = { type: chType };
+    if (chType === "command") hookObj.command = chCommand;
+    else if (chType === "prompt") hookObj.prompt = chCommand;
+    else hookObj.url = chCommand;
+    hookObj.timeout = Number(chTimeout) || 600;
+    if (chAsync) hookObj.async = true;
+    if (chShowIf && chIfCondition.trim()) hookObj.if = chIfCondition.trim();
+    return JSON.stringify(
+      { hooks: { [chEvent]: [{ matcher: chMatcher || "*", hooks: [hookObj] }] } },
+      null, 2
+    );
+  };
+
+  const generateCursorJson = (): string => {
+    const hookObj: Record<string, unknown> = {};
+    if (cuType === "prompt") hookObj.prompt = cuCommand;
+    else hookObj.command = cuCommand;
+    if (cuMatcher.trim()) hookObj.matcher = cuMatcher.trim();
+    if (cuTimeout) hookObj.timeout = Number(cuTimeout) || 30;
+    if (cuFailClosed) hookObj.failClosed = true;
+    if (cuEvent === "stop" && cuLoopLimit) hookObj.loop_limit = Number(cuLoopLimit) || 5;
+    return JSON.stringify({ version: 1, hooks: { [cuEvent]: [hookObj] } }, null, 2);
+  };
+
   // Auto-populate hook adapter file list when adapters change (one empty file per adapter)
   useEffect(() => {
     if (capType !== "hook") return;
@@ -359,6 +507,15 @@ export function CapabilityEditor({ capability, onSave, onCancel }: CapabilityEdi
       return next;
     });
   }, [adapters, capType]);
+
+  // Keep hookActiveTab pointing to a valid selected adapter
+  useEffect(() => {
+    if (capType !== "hook") return;
+    const valid = (["claude-code", "cursor"] as const).filter((a) => adapters.includes(a));
+    if (valid.length > 0 && !valid.includes(hookActiveTab)) {
+      setHookActiveTab(valid[0]);
+    }
+  }, [adapters, capType, hookActiveTab]);
 
   // Auto-populate custom adapter configs when adapters change
   useEffect(() => {
@@ -642,52 +799,95 @@ export function CapabilityEditor({ capability, onSave, onCancel }: CapabilityEdi
         case "hook": {
           const adapterConfigs: Record<string, unknown> = {};
           let hasConfig = false;
-          for (const [adapterId, files] of Object.entries(hookAdapterFiles)) {
-            const validFiles = files.filter((f) => f.path.trim() && f.content.trim());
-            if (validFiles.length === 0) continue;
-            const filesToSave = files.length > 0 ? files : validFiles;
-            adapterConfigs[adapterId] = {
-              files: filesToSave.map((f) => ({
-                deploy_path: (f.path && f.path.trim()) || "",
-                content: (f.content && f.content.trim()) || "",
-              })),
-            };
-            hasConfig = true;
-          }
-          if (!hasConfig) {
-            setError("At least one adapter must have at least one file with deploy path and content");
-            setSaving(false);
-            return;
-          }
           let legacyEvent = "PreToolUse";
           let legacyCommand = "";
           let legacyMatcher = "*";
-          const firstFiles = Object.values(hookAdapterFiles)[0];
-          if (firstFiles?.length) {
-            const firstContent = firstFiles[0]?.content?.trim() ?? "";
-            if (firstContent.startsWith("{")) {
-              try {
-                const parsed = JSON.parse(firstContent) as Record<string, unknown>;
-                const hooks = parsed?.hooks as Record<string, unknown[]> | undefined;
-                if (hooks && typeof hooks === "object") {
-                  const firstEvent = Object.keys(hooks)[0];
-                  if (firstEvent) {
-                    legacyEvent = firstEvent;
-                    const firstEntry = hooks[firstEvent]?.[0] as Record<string, unknown> | undefined;
-                    if (firstEntry) {
-                      legacyCommand = (firstEntry.command as string) ?? "";
-                      if (!legacyCommand && Array.isArray(firstEntry.hooks)) {
-                        const inner = (firstEntry.hooks as Record<string, unknown>[])[0];
-                        legacyCommand = (inner?.command as string) ?? "";
-                      }
-                      legacyMatcher = (firstEntry.matcher as string) ?? "*";
-                    }
-                  }
+          let legacyTimeoutMs = 10000;
+
+          if (!hookRawMode) {
+            // Build from structured form state — skip adapters with no command configured
+            for (const adapterId of (["claude-code", "cursor"] as const).filter((a) => adapters.includes(a))) {
+              if (adapterId === "claude-code") {
+                const hasContent = chCommand.trim() || chScriptFiles.some((f) => f.path.trim() && f.content.trim());
+                if (!hasContent) continue;
+                const files: Array<{ deploy_path: string; content: string }> = [
+                  { deploy_path: defaultHookPaths["claude-code"], content: generateClaudeJson() },
+                ];
+                for (const sf of chScriptFiles.filter((f) => f.path.trim())) {
+                  files.push({ deploy_path: sf.path, content: sf.content });
                 }
-              } catch {
-                // ignore
+                adapterConfigs["claude-code"] = { files };
+                hasConfig = true;
+                legacyEvent = chEvent;
+                legacyCommand = chCommand;
+                legacyMatcher = chMatcher || "*";
+                legacyTimeoutMs = (Number(chTimeout) || 600) * 1000;
+              } else {
+                const hasContent = cuCommand.trim() || cuScriptFiles.some((f) => f.path.trim() && f.content.trim());
+                if (!hasContent) continue;
+                const files: Array<{ deploy_path: string; content: string }> = [
+                  { deploy_path: defaultHookPaths["cursor"], content: generateCursorJson() },
+                ];
+                for (const sf of cuScriptFiles.filter((f) => f.path.trim())) {
+                  files.push({ deploy_path: sf.path, content: sf.content });
+                }
+                adapterConfigs["cursor"] = { files };
+                hasConfig = true;
+                // Only set legacy fields from cursor if claude-code wasn't already set
+                if (!adapterConfigs["claude-code"]) {
+                  legacyEvent = cuEvent;
+                  legacyCommand = cuCommand;
+                  legacyMatcher = cuMatcher || "*";
+                  legacyTimeoutMs = (Number(cuTimeout) || 30) * 1000;
+                }
               }
             }
+          } else {
+            // Raw mode: use hookAdapterFiles
+            for (const [adapterId, files] of Object.entries(hookAdapterFiles)) {
+              const validFiles = files.filter((f) => f.path.trim() && f.content.trim());
+              if (validFiles.length === 0) continue;
+              const filesToSave = files.length > 0 ? files : validFiles;
+              adapterConfigs[adapterId] = {
+                files: filesToSave.map((f) => ({
+                  deploy_path: (f.path && f.path.trim()) || "",
+                  content: (f.content && f.content.trim()) || "",
+                })),
+              };
+              hasConfig = true;
+            }
+            // Extract legacy fields from first file's JSON
+            const firstFiles = Object.values(hookAdapterFiles)[0];
+            if (firstFiles?.length) {
+              const firstContent = firstFiles[0]?.content?.trim() ?? "";
+              if (firstContent.startsWith("{")) {
+                try {
+                  const parsed = JSON.parse(firstContent) as Record<string, unknown>;
+                  const hooks = parsed?.hooks as Record<string, unknown[]> | undefined;
+                  if (hooks && typeof hooks === "object") {
+                    const firstEvent = Object.keys(hooks)[0];
+                    if (firstEvent) {
+                      legacyEvent = firstEvent;
+                      const firstEntry = hooks[firstEvent]?.[0] as Record<string, unknown> | undefined;
+                      if (firstEntry) {
+                        legacyCommand = (firstEntry.command as string) ?? "";
+                        if (!legacyCommand && Array.isArray(firstEntry.hooks)) {
+                          const inner = (firstEntry.hooks as Record<string, unknown>[])[0];
+                          legacyCommand = (inner?.command as string) ?? "";
+                        }
+                        legacyMatcher = (firstEntry.matcher as string) ?? "*";
+                      }
+                    }
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+          }
+
+          if (!hasConfig) {
+            setError("Configure at least one adapter hook");
+            setSaving(false);
+            return;
           }
           newCapability = {
             type: "hook",
@@ -695,7 +895,7 @@ export function CapabilityEditor({ capability, onSave, onCancel }: CapabilityEdi
             event: legacyEvent,
             matcher: legacyMatcher,
             command: legacyCommand,
-            timeout_ms: 10000,
+            timeout_ms: legacyTimeoutMs,
             env: genericEnvAsRecord(),
             adapter_configs: adapterConfigs,
           } as Hook;
@@ -1506,108 +1706,520 @@ export function CapabilityEditor({ capability, onSave, onCancel }: CapabilityEdi
 
             {capType === "hook" && (
               <div className="space-y-4">
-                <p className="text-xs text-text-muted">
-                  Specify deploy path and content for each file per adapter. Content is written as-is to the specified path.
-                </p>
+                {/* No supported adapter selected */}
+                {!adapters.includes("claude-code") && !adapters.includes("cursor") && (
+                  <p className="text-sm text-text-muted">Select Claude Code or Cursor above to configure hooks.</p>
+                )}
 
-                {["claude-code", "cursor"].filter((a) => adapters.includes(a)).map((adapter) => {
-                  const files = hookAdapterFiles[adapter] ?? [{ path: defaultHookPaths[adapter] ?? "", content: "" }];
-                  const docsUrl =
-                    adapter === "claude-code"
-                      ? "https://docs.anthropic.com/en/docs/claude-code/hooks"
-                      : "https://docs.cursor.com/context/hooks";
-                  const adapterLabel = adapter === "claude-code" ? "Claude Code" : "Cursor";
-                  return (
-                    <div key={adapter} className="border border-border rounded-lg p-3 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-text-primary">{adapterLabel}</span>
-                        <div className="flex items-center gap-3">
-                          <a
-                            href={docsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-accent-blue hover:underline"
-                          >
-                            Docs
-                          </a>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setHookAdapterFiles((prev) => ({
-                                ...prev,
-                                [adapter]: [...(prev[adapter] ?? [{ path: "", content: "" }]), { path: defaultHookPaths[adapter] ?? "", content: "" }],
-                              }))
-                            }
-                            className="text-xs text-accent-blue hover:underline"
-                          >
-                            + Add File
-                          </button>
-                        </div>
-                      </div>
-                      {files.map((file, fileIndex) => (
-                        <div key={fileIndex} className="bg-app-bg rounded-lg p-2 space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <label className="block text-xs text-text-muted shrink-0">
-                              Deploy Location <span className="text-accent-red">*</span>
-                            </label>
-                            {files.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setHookAdapterFiles((prev) => {
-                                    const next = (prev[adapter] ?? []).filter((_, i) => i !== fileIndex);
-                                    return { ...prev, [adapter]: next.length > 0 ? next : [{ path: defaultHookPaths[adapter] ?? "", content: "" }] };
-                                  });
-                                }}
-                                className="text-xs text-accent-red hover:underline"
-                              >
-                                Remove
-                              </button>
-                            )}
-                          </div>
-                          <input
-                            type="text"
-                            value={file.path}
-                            onChange={(e) => {
-                              const next = [...(hookAdapterFiles[adapter] ?? [])];
-                              next[fileIndex] = { ...next[fileIndex], path: e.target.value };
-                              setHookAdapterFiles((prev) => ({ ...prev, [adapter]: next }));
-                            }}
-                            placeholder={adapter === "cursor" ? ".cursor/hooks.json" : ".claude/settings.json"}
-                            className="w-full px-2 py-1.5 bg-app-card border border-border rounded text-sm font-mono text-text-primary focus:outline-none focus:border-accent-blue"
-                          />
-                          <div>
-                            <label className="block text-xs text-text-muted mb-1">
-                              Content <span className="text-accent-red">*</span>
-                            </label>
-                            <textarea
-                              value={file.content}
-                              onChange={(e) => {
-                                const next = [...(hookAdapterFiles[adapter] ?? [])];
-                                next[fileIndex] = { ...next[fileIndex], content: e.target.value };
-                                setHookAdapterFiles((prev) => ({ ...prev, [adapter]: next }));
-                              }}
-                              rows={5}
-                              placeholder="Raw content to write to the file..."
-                              className="w-full px-3 py-2 bg-app-card border border-border rounded-lg text-text-primary font-mono text-sm focus:outline-none focus:border-accent-blue resize-none"
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-
-                {adapters.includes("windsurf") && (
+                {/* Windsurf notice */}
+                {adapters.includes("windsurf") && !adapters.includes("claude-code") && !adapters.includes("cursor") && (
                   <div className="border border-border/50 rounded-lg p-3 opacity-60">
                     <span className="text-sm text-text-muted">Windsurf does not support hooks.</span>
                   </div>
                 )}
 
-                {!adapters.includes("claude-code") && !adapters.includes("cursor") && (
-                  <p className="text-sm text-text-muted">
-                    Select Claude Code or Cursor above to configure hooks.
-                  </p>
+                {/* Tab switcher — only when both adapters selected and in form mode */}
+                {!hookRawMode && adapters.includes("claude-code") && adapters.includes("cursor") && (
+                  <div className="flex gap-1 p-1 bg-app-bg rounded-lg">
+                    {(["claude-code", "cursor"] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => setHookActiveTab(tab)}
+                        className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                          hookActiveTab === tab
+                            ? "bg-app-card text-text-primary"
+                            : "text-text-secondary hover:text-text-primary"
+                        }`}
+                      >
+                        {tab === "claude-code" ? "Claude Code" : "Cursor"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Claude Code structured form */}
+                {!hookRawMode && adapters.includes("claude-code") && (hookActiveTab === "claude-code" || !adapters.includes("cursor")) && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      {!adapters.includes("cursor") && <span className="text-sm font-medium text-text-primary">Claude Code</span>}
+                      <a href="https://docs.anthropic.com/en/docs/claude-code/hooks" target="_blank" rel="noopener noreferrer" className="text-xs text-accent-blue hover:underline ml-auto">Docs</a>
+                    </div>
+
+                    {/* Event */}
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">Trigger Event</label>
+                      <select
+                        value={chEvent}
+                        onChange={(e) => setChEvent(e.target.value)}
+                        className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-blue"
+                      >
+                        <optgroup label="Tool Events">
+                          <option value="PreToolUse">PreToolUse — before a tool runs</option>
+                          <option value="PostToolUse">PostToolUse — after a tool succeeds</option>
+                          <option value="PostToolUseFailure">PostToolUseFailure — after a tool fails</option>
+                        </optgroup>
+                        <optgroup label="Session Events">
+                          <option value="SessionStart">SessionStart</option>
+                          <option value="SubagentStart">SubagentStart</option>
+                          <option value="SubagentStop">SubagentStop</option>
+                          <option value="PreCompact">PreCompact — before context compaction</option>
+                        </optgroup>
+                        <optgroup label="Prompt Events">
+                          <option value="UserPromptSubmit">UserPromptSubmit — on each user message</option>
+                        </optgroup>
+                        <optgroup label="Output Events">
+                          <option value="Stop">Stop — when agent finishes</option>
+                          <option value="Notification">Notification — agent notifications</option>
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    {/* Matcher */}
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Matcher <span className="text-[10px] text-text-muted font-normal">— tool name, file glob, or * for all</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={chMatcher}
+                        onChange={(e) => setChMatcher(e.target.value)}
+                        placeholder={getClaudeMatcherHint(chEvent)}
+                        className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue"
+                      />
+                    </div>
+
+                    {/* Hook type */}
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-2">Hook Type</label>
+                      <div className="flex gap-4">
+                        {(["command", "prompt", "http"] as const).map((t) => (
+                          <label key={t} className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={chType === t}
+                              onChange={() => setChType(t)}
+                              className="accent-accent-blue"
+                            />
+                            <span className="text-sm text-text-primary capitalize">{t}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Command/Prompt/URL */}
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        {chType === "command" ? "Shell Command" : chType === "prompt" ? "Prompt Text" : "HTTP URL"}{" "}
+                        <span className="text-accent-red">*</span>
+                      </label>
+                      {chType === "prompt" ? (
+                        <textarea
+                          value={chCommand}
+                          onChange={(e) => setChCommand(e.target.value)}
+                          placeholder="Summarize what was changed..."
+                          rows={3}
+                          className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue resize-none"
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={chCommand}
+                          onChange={(e) => setChCommand(e.target.value)}
+                          placeholder={chType === "command" ? "python3 /path/to/hook.py" : "https://your-server.com/hook"}
+                          className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue"
+                        />
+                      )}
+                    </div>
+
+                    {/* Timeout + Async row */}
+                    <div className="flex gap-3 items-end">
+                      <div className="w-36">
+                        <label className="block text-xs text-text-secondary mb-1">Timeout (seconds)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={chTimeout}
+                          onChange={(e) => setChTimeout(e.target.value)}
+                          className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer pb-2">
+                        <input
+                          type="checkbox"
+                          checked={chAsync}
+                          onChange={(e) => setChAsync(e.target.checked)}
+                          className="w-4 h-4 rounded accent-accent-blue"
+                        />
+                        <span className="text-sm text-text-primary">Run asynchronously</span>
+                      </label>
+                    </div>
+
+                    {/* Conditional execution */}
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setChShowIf(!chShowIf)}
+                        className="text-xs text-accent-blue hover:underline"
+                      >
+                        {chShowIf ? "— Remove condition" : "+ Add if condition"}
+                      </button>
+                      {chShowIf && (
+                        <input
+                          type="text"
+                          value={chIfCondition}
+                          onChange={(e) => setChIfCondition(e.target.value)}
+                          placeholder="e.g. exit_code == 0"
+                          className="mt-2 w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue"
+                        />
+                      )}
+                    </div>
+
+                    {/* Script files */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs text-text-secondary">Script Files</label>
+                        <button
+                          type="button"
+                          onClick={() => setChScriptFiles((prev) => [...prev, { path: "", content: "" }])}
+                          className="text-xs text-accent-blue hover:underline"
+                        >
+                          + Add Script File
+                        </button>
+                      </div>
+                      {chScriptFiles.length === 0 && (
+                        <p className="text-[10px] text-text-muted">Optionally attach helper scripts deployed alongside settings.json.</p>
+                      )}
+                      {chScriptFiles.map((sf, i) => (
+                        <div key={i} className="border border-border/50 rounded-lg p-2 mb-2 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={sf.path}
+                              onChange={(e) => setChScriptFiles((prev) => prev.map((f, j) => j === i ? { ...f, path: e.target.value } : f))}
+                              placeholder=".claude/hooks/my-script.sh"
+                              className="flex-1 px-2 py-1.5 bg-app-bg border border-border rounded text-xs font-mono text-text-primary focus:outline-none focus:border-accent-blue"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setChScriptFiles((prev) => prev.filter((_, j) => j !== i))}
+                              className="text-text-muted hover:text-accent-red text-xs"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <textarea
+                            value={sf.content}
+                            onChange={(e) => setChScriptFiles((prev) => prev.map((f, j) => j === i ? { ...f, content: e.target.value } : f))}
+                            rows={5}
+                            placeholder={"#!/usr/bin/env bash\nset -euo pipefail\n\n# Your script here\n"}
+                            className="w-full px-2 py-1.5 bg-app-bg border border-border rounded text-xs font-mono text-text-primary focus:outline-none focus:border-accent-blue resize-y"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Cursor structured form */}
+                {!hookRawMode && adapters.includes("cursor") && (hookActiveTab === "cursor" || !adapters.includes("claude-code")) && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      {!adapters.includes("claude-code") && <span className="text-sm font-medium text-text-primary">Cursor</span>}
+                      <a href="https://cursor.com/docs/hooks" target="_blank" rel="noopener noreferrer" className="text-xs text-accent-blue hover:underline ml-auto">Docs</a>
+                    </div>
+
+                    {/* Event */}
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">Trigger Event</label>
+                      <select
+                        value={cuEvent}
+                        onChange={(e) => setCuEvent(e.target.value)}
+                        className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-blue"
+                      >
+                        <optgroup label="Tool Events">
+                          <option value="preToolUse">preToolUse — before a tool runs</option>
+                          <option value="postToolUseFailure">postToolUseFailure — after a tool fails</option>
+                        </optgroup>
+                        <optgroup label="File Events">
+                          <option value="afterFileEdit">afterFileEdit — after file is saved</option>
+                        </optgroup>
+                        <optgroup label="Session Events">
+                          <option value="sessionStart">sessionStart</option>
+                          <option value="sessionEnd">sessionEnd</option>
+                          <option value="subagentStart">subagentStart</option>
+                          <option value="subagentStop">subagentStop</option>
+                          <option value="preCompact">preCompact — before context compaction</option>
+                        </optgroup>
+                        <optgroup label="Prompt Events">
+                          <option value="beforeSubmitPrompt">beforeSubmitPrompt — on each user message</option>
+                        </optgroup>
+                        <optgroup label="Output Events">
+                          <option value="stop">stop — when agent finishes</option>
+                          <option value="beforeShellExecution">beforeShellExecution — before shell commands</option>
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    {/* Matcher */}
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        Matcher <span className="text-[10px] text-text-muted font-normal">— tool name, file glob, or * for all</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={cuMatcher}
+                        onChange={(e) => setCuMatcher(e.target.value)}
+                        placeholder={getCursorMatcherHint(cuEvent)}
+                        className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue"
+                      />
+                    </div>
+
+                    {/* Hook type */}
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-2">Hook Type</label>
+                      <div className="flex gap-4">
+                        {(["command", "prompt"] as const).map((t) => (
+                          <label key={t} className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={cuType === t}
+                              onChange={() => setCuType(t)}
+                              className="accent-accent-blue"
+                            />
+                            <span className="text-sm text-text-primary capitalize">{t}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Command/Prompt */}
+                    <div>
+                      <label className="block text-xs text-text-secondary mb-1">
+                        {cuType === "command" ? "Shell Command" : "Prompt Text"}{" "}
+                        <span className="text-accent-red">*</span>
+                      </label>
+                      {cuType === "prompt" ? (
+                        <textarea
+                          value={cuCommand}
+                          onChange={(e) => setCuCommand(e.target.value)}
+                          placeholder="Summarize changes made..."
+                          rows={3}
+                          className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue resize-none"
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={cuCommand}
+                          onChange={(e) => setCuCommand(e.target.value)}
+                          placeholder="python3 /path/to/hook.py"
+                          className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue"
+                        />
+                      )}
+                    </div>
+
+                    {/* Timeout + failClosed row */}
+                    <div className="flex gap-3 items-end flex-wrap">
+                      <div className="w-36">
+                        <label className="block text-xs text-text-secondary mb-1">Timeout (seconds)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={cuTimeout}
+                          onChange={(e) => setCuTimeout(e.target.value)}
+                          className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer pb-2">
+                        <input
+                          type="checkbox"
+                          checked={cuFailClosed}
+                          onChange={(e) => setCuFailClosed(e.target.checked)}
+                          className="w-4 h-4 rounded accent-accent-blue"
+                        />
+                        <span className="text-sm text-text-primary">Fail closed</span>
+                        <span className="text-[10px] text-text-muted">(block on error)</span>
+                      </label>
+                    </div>
+
+                    {/* loop_limit for stop event */}
+                    {cuEvent === "stop" && (
+                      <div className="w-36">
+                        <label className="block text-xs text-text-secondary mb-1">Loop limit</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={cuLoopLimit}
+                          onChange={(e) => setCuLoopLimit(e.target.value)}
+                          className="w-full px-3 py-2 bg-app-bg border border-border rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:border-accent-blue"
+                        />
+                      </div>
+                    )}
+
+                    {/* Script files — Cursor hooks invoke executables; attach scripts here */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs text-text-secondary">Script Files</label>
+                        <button
+                          type="button"
+                          onClick={() => setCuScriptFiles((prev) => [...prev, { path: "", content: "" }])}
+                          className="text-xs text-accent-blue hover:underline"
+                        >
+                          + Add Script File
+                        </button>
+                      </div>
+                      {cuScriptFiles.length === 0 && (
+                        <p className="text-[10px] text-text-muted">
+                          Cursor hooks execute a command and pipe JSON to stdin — attach the script here so it deploys alongside hooks.json.
+                        </p>
+                      )}
+                      {cuScriptFiles.map((sf, i) => (
+                        <div key={i} className="border border-border/50 rounded-lg p-2 mb-2 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={sf.path}
+                              onChange={(e) => setCuScriptFiles((prev) => prev.map((f, j) => j === i ? { ...f, path: e.target.value } : f))}
+                              placeholder=".cursor/hooks/my-hook.sh"
+                              className="flex-1 px-2 py-1.5 bg-app-bg border border-border rounded text-xs font-mono text-text-primary focus:outline-none focus:border-accent-blue"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setCuScriptFiles((prev) => prev.filter((_, j) => j !== i))}
+                              className="text-text-muted hover:text-accent-red text-xs"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <textarea
+                            value={sf.content}
+                            onChange={(e) => setCuScriptFiles((prev) => prev.map((f, j) => j === i ? { ...f, content: e.target.value } : f))}
+                            rows={8}
+                            placeholder={"#!/usr/bin/env bash\nset -euo pipefail\n\n# Read JSON payload from stdin\nPAYLOAD=\"$(cat)\"\n\n# Your logic here\n\necho '{\"permission\":\"allow\"}'"}
+                            className="w-full px-2 py-1.5 bg-app-bg border border-border rounded text-xs font-mono text-text-primary focus:outline-none focus:border-accent-blue resize-y"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* JSON preview (collapsible) */}
+                {!hookRawMode && (adapters.includes("claude-code") || adapters.includes("cursor")) && (
+                  <div className="border border-border/50 rounded-lg overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setHookPreviewOpen(!hookPreviewOpen)}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-text-secondary hover:text-text-primary bg-app-bg"
+                    >
+                      <span>Preview JSON</span>
+                      <span className="font-mono">{hookPreviewOpen ? "▲" : "▼"}</span>
+                    </button>
+                    {hookPreviewOpen && (
+                      <pre className="px-3 py-2 text-xs font-mono text-text-secondary overflow-x-auto bg-app-bg border-t border-border/50">
+                        {hookActiveTab === "claude-code" && adapters.includes("claude-code")
+                          ? generateClaudeJson()
+                          : adapters.includes("cursor")
+                          ? generateCursorJson()
+                          : ""}
+                      </pre>
+                    )}
+                  </div>
+                )}
+
+                {/* Raw mode: per-adapter file editors */}
+                {hookRawMode && (
+                  <>
+                    <p className="text-xs text-text-muted">
+                      Edit the raw JSON written to each file per adapter.
+                    </p>
+                    {["claude-code", "cursor"].filter((a) => adapters.includes(a)).map((adapter) => {
+                      const files = hookAdapterFiles[adapter] ?? [{ path: defaultHookPaths[adapter] ?? "", content: "" }];
+                      const adapterLabel = adapter === "claude-code" ? "Claude Code" : "Cursor";
+                      return (
+                        <div key={adapter} className="border border-border rounded-lg p-3 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium text-text-primary">{adapterLabel}</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setHookAdapterFiles((prev) => ({
+                                  ...prev,
+                                  [adapter]: [...(prev[adapter] ?? []), { path: defaultHookPaths[adapter] ?? "", content: "" }],
+                                }))
+                              }
+                              className="text-xs text-accent-blue hover:underline"
+                            >
+                              + Add File
+                            </button>
+                          </div>
+                          {files.map((file, fileIndex) => (
+                            <div key={fileIndex} className="bg-app-bg rounded-lg p-2 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="block text-xs text-text-muted shrink-0">
+                                  Deploy Path <span className="text-accent-red">*</span>
+                                </label>
+                                {files.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setHookAdapterFiles((prev) => {
+                                        const next = (prev[adapter] ?? []).filter((_, i) => i !== fileIndex);
+                                        return { ...prev, [adapter]: next.length > 0 ? next : [{ path: defaultHookPaths[adapter] ?? "", content: "" }] };
+                                      });
+                                    }}
+                                    className="text-xs text-accent-red hover:underline"
+                                  >
+                                    Remove
+                                  </button>
+                                )}
+                              </div>
+                              <input
+                                type="text"
+                                value={file.path}
+                                onChange={(e) => {
+                                  const next = [...(hookAdapterFiles[adapter] ?? [])];
+                                  next[fileIndex] = { ...next[fileIndex], path: e.target.value };
+                                  setHookAdapterFiles((prev) => ({ ...prev, [adapter]: next }));
+                                }}
+                                placeholder={adapter === "cursor" ? ".cursor/hooks.json" : ".claude/settings.json"}
+                                className="w-full px-2 py-1.5 bg-app-card border border-border rounded text-sm font-mono text-text-primary focus:outline-none focus:border-accent-blue"
+                              />
+                              <textarea
+                                value={file.content}
+                                onChange={(e) => {
+                                  const next = [...(hookAdapterFiles[adapter] ?? [])];
+                                  next[fileIndex] = { ...next[fileIndex], content: e.target.value };
+                                  setHookAdapterFiles((prev) => ({ ...prev, [adapter]: next }));
+                                }}
+                                rows={6}
+                                placeholder="Raw JSON content..."
+                                className="w-full px-3 py-2 bg-app-card border border-border rounded-lg text-text-primary font-mono text-sm focus:outline-none focus:border-accent-blue resize-none"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    {adapters.includes("windsurf") && (
+                      <div className="border border-border/50 rounded-lg p-3 opacity-60">
+                        <span className="text-sm text-text-muted">Windsurf does not support hooks.</span>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Toggle raw mode */}
+                {(adapters.includes("claude-code") || adapters.includes("cursor")) && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setHookRawMode(!hookRawMode)}
+                      className="text-xs text-text-muted hover:text-text-secondary underline underline-offset-2"
+                    >
+                      {hookRawMode ? "← Back to form" : "Edit Raw JSON"}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
