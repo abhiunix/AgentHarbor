@@ -10,10 +10,56 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
+    outputs:
+      changelog: ${{ steps.changelog.outputs.body }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          FEATS=""
+          FIXES=""
+          if [ -n "$PREV_TAG" ]; then
+            FEATS=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s" --no-merges \
+              | grep "^feat:" | sed 's/^feat: /- /' || true)
+            FIXES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s" --no-merges \
+              | grep "^fix:" | sed 's/^fix: /- /' || true)
+          fi
+
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "## What's New in v${VERSION}"
+            echo ""
+            if [ -n "$FEATS" ]; then
+              echo "### Features"
+              echo "$FEATS"
+              echo ""
+            fi
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes"
+              echo "$FIXES"
+              echo ""
+            fi
+            if [ -z "$FEATS" ] && [ -z "$FIXES" ]; then
+              echo "- Minor improvements and internal changes"
+              echo ""
+            fi
+            echo "---"
+            echo "Download the \`.dmg\` (macOS) or \`.exe\` / \`.msi\` (Windows) below to install."
+            echo ""
+            echo "**Already installed?** AgentHarbor will prompt you to update automatically."
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -80,12 +126,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'AgentHarbor ${{ github.ref_name }}'
-          releaseBody: |
-            ## AgentHarbor ${{ github.ref_name }}
-
-            Download the `.dmg` (macOS) or `.exe` / `.msi` (Windows) below to install.
-
-            **Already installed?** AgentHarbor will prompt you to update automatically.
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: false
 
@@ -136,6 +177,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'AgentHarbor ${{ github.ref_name }}'
+          releaseBody: ${{ needs.release-macos.outputs.changelog }}
           releaseDraft: false
           prerelease: false
 
