@@ -14,6 +14,12 @@ Manage configurations, track usage, deploy capabilities, and keep every AI tool 
 [![Windows 10+](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows&logoColor=white)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![License](https://img.shields.io/github/license/abhiunix/AgentHarbor)](LICENSE)
 
+[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8D8?logo=tauri&logoColor=white)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+
 [**Download**](https://github.com/abhiunix/AgentHarbor/releases/latest) · [**Getting Started**](docs/getting-started.md) · [**Features**](docs/features.md) · [**Docs**](docs/)
 
 </div>
@@ -125,12 +131,12 @@ Local files (Claude project JSONLs, Gemini telemetry) are read with file-share-f
 
 | Layer | Technology |
 |---|---|
-| Framework | Tauri v2 |
-| Backend | Rust (`reqwest`, `serde`, `keyring`, `chrono`) |
-| Frontend | React 19 + TypeScript + Vite |
-| Styling | Tailwind CSS v3 (dark theme) |
-| State | Zustand |
-| Build target | macOS aarch64 |
+| Framework | [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8D8?logo=tauri&logoColor=white)](https://tauri.app) |
+| Backend | [![Rust](https://img.shields.io/badge/Rust-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org) · `reqwest`, `serde`, `keyring`, `chrono` |
+| Frontend | [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev) [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org) [![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)](https://vite.dev) |
+| Styling | [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com) · dark theme |
+| State | [![Zustand](https://img.shields.io/badge/Zustand-brown?logoColor=white)](https://zustand-demo.pmnd.rs) |
+| Build target | macOS aarch64 + Windows x64 |
 
 ---
 
@@ -185,6 +191,14 @@ agentharbor/
 </a>
 
 </div>
+
+---
+
+## Contributing
+
+Contributions are welcome — bug fixes, new registry capabilities, provider analytics, or docs improvements.
+
+See [**CONTRIBUTING.md**](CONTRIBUTING.md) for the full guide: dev setup, code standards, adding registry entries, PR checklist, and commit conventions.
 
 ---
 
