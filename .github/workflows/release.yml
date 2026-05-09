@@ -167,7 +167,7 @@ jobs:
 
           MACOS_SIG=$(cat sigs/AgentHarbor_aarch64.app.tar.gz.sig)
 
-          WINDOWS_SIG_FILE=$(find sigs -name "*_x64-setup.nsis.zip.sig" | head -1)
+          WINDOWS_SIG_FILE=$(find sigs -name "*_x64-setup.exe.sig" | head -1)
           WINDOWS_SIG=$(cat "$WINDOWS_SIG_FILE")
 
           jq -n \
@@ -187,7 +187,7 @@ jobs:
                 },
                 "windows-x86_64": {
                   signature: $windows_sig,
-                  url: ("https://github.com/abhiunix/AgentHarbor/releases/download/" + $tag + "/AgentHarbor_" + $version + "_x64-setup.nsis.zip")
+                  url: ("https://github.com/abhiunix/AgentHarbor/releases/download/" + $tag + "/AgentHarbor_" + $version + "_x64-setup.exe")
                 }
               }
             }' > latest.json
