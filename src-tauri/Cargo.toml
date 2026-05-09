@@ -1,6 +1,6 @@
 [package]
 name = "agentharbor"
-version = "1.0.123"
+version = "1.0.124"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
