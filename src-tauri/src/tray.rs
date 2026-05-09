@@ -56,13 +56,39 @@ fn size_to_physical(size: &tauri::Size) -> (f64, f64) {
     }
 }
 
-/// Compute popover (x, y) centered-x below the tray icon.
-fn popover_position(tray: &TrayIcon<Wry>) -> (f64, f64) {
+/// Compute popover (x, y) anchored to the tray icon and clamped to the monitor.
+/// macOS menubar is at the top, so anchor below; Windows/Linux taskbar tray is at
+/// the bottom-right, so anchor above.
+fn popover_position(window: &tauri::WebviewWindow<Wry>, tray: &TrayIcon<Wry>) -> (f64, f64) {
     if let Some(rect) = tray.rect().ok().flatten() {
         let (tray_x, tray_y) = position_to_physical(&rect.position);
         let (tray_w, tray_h) = size_to_physical(&rect.size);
-        let x = tray_x + (tray_w / 2.0) - (POPOVER_WIDTH / 2.0);
-        let y = tray_y + tray_h + 4.0;
+        let mut x = tray_x + (tray_w / 2.0) - (POPOVER_WIDTH / 2.0);
+        let mut y = if cfg!(target_os = "macos") {
+            tray_y + tray_h + 4.0
+        } else {
+            tray_y - POPOVER_HEIGHT - 4.0
+        };
+
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let mon_pos = monitor.position();
+            let mon_size = monitor.size();
+            let mon_x = mon_pos.x as f64;
+            let mon_y = mon_pos.y as f64;
+            let mon_w = mon_size.width as f64;
+            let mon_h = mon_size.height as f64;
+            let margin = 8.0;
+            let min_x = mon_x + margin;
+            let max_x = mon_x + mon_w - POPOVER_WIDTH - margin;
+            let min_y = mon_y + margin;
+            let max_y = mon_y + mon_h - POPOVER_HEIGHT - margin;
+            if max_x >= min_x {
+                x = x.clamp(min_x, max_x);
+            }
+            if max_y >= min_y {
+                y = y.clamp(min_y, max_y);
+            }
+        }
         (x, y)
     } else {
         // Fallback: top-right of screen
@@ -74,7 +100,7 @@ fn popover_position(tray: &TrayIcon<Wry>) -> (f64, f64) {
 
 /// Reposition an existing popover window near the tray icon.
 fn position_popover_near_tray(window: &tauri::WebviewWindow<Wry>, tray: &TrayIcon<Wry>) {
-    let (x, y) = popover_position(tray);
+    let (x, y) = popover_position(window, tray);
     let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
 }
 
