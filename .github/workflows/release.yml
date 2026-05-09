@@ -83,11 +83,79 @@ jobs:
           releaseBody: |
             ## AgentHarbor ${{ github.ref_name }}
 
-            Download the `.dmg` below to install. macOS will verify the app is signed and notarized.
+            Download the `.dmg` (macOS) or `.exe` / `.msi` (Windows) below to install.
 
             **Already installed?** AgentHarbor will prompt you to update automatically.
           releaseDraft: false
           prerelease: false
+
+      - name: Cleanup secrets
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/build.keychain 2>/dev/null || true
+          rm -f $RUNNER_TEMP/certificate.p12
+          rm -rf $RUNNER_TEMP/private_keys
+
+  release-windows:
+    runs-on: windows-latest
+    needs: release-macos
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          SKIP_VERSION_BUMP: '1'
+        uses: tauri-apps/tauri-action@v0
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'AgentHarbor ${{ github.ref_name }}'
+          releaseDraft: false
+          prerelease: false
+
+  finalize:
+    runs-on: ubuntu-latest
+    needs: [release-macos, release-windows]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download sig files from release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir sigs
+          gh release download "$TAG" \
+            --repo abhiunix/AgentHarbor \
+            --pattern "*.sig" \
+            --dir sigs/
 
       - name: Generate and upload latest.json
         env:
@@ -95,12 +163,17 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           VERSION="${TAG#v}"
-          SIG=$(cat src-tauri/target/release/bundle/macos/AgentHarbor_aarch64.app.tar.gz.sig)
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          MACOS_SIG=$(cat sigs/AgentHarbor_aarch64.app.tar.gz.sig)
+
+          WINDOWS_SIG_FILE=$(find sigs -name "*_x64-setup.nsis.zip.sig" | head -1)
+          WINDOWS_SIG=$(cat "$WINDOWS_SIG_FILE")
 
           jq -n \
             --arg version "$VERSION" \
-            --arg sig "$SIG" \
+            --arg macos_sig "$MACOS_SIG" \
+            --arg windows_sig "$WINDOWS_SIG" \
             --arg tag "$TAG" \
             --arg pub_date "$PUB_DATE" \
             '{
@@ -109,17 +182,16 @@ jobs:
               pub_date: $pub_date,
               platforms: {
                 "darwin-aarch64": {
-                  signature: $sig,
+                  signature: $macos_sig,
                   url: ("https://github.com/abhiunix/AgentHarbor/releases/download/" + $tag + "/AgentHarbor_aarch64.app.tar.gz")
+                },
+                "windows-x86_64": {
+                  signature: $windows_sig,
+                  url: ("https://github.com/abhiunix/AgentHarbor/releases/download/" + $tag + "/AgentHarbor_" + $version + "_x64-setup.nsis.zip")
                 }
               }
             }' > latest.json
 
-          gh release upload "$TAG" latest.json --clobber
-
-      - name: Cleanup secrets
-        if: always()
-        run: |
-          security delete-keychain $RUNNER_TEMP/build.keychain 2>/dev/null || true
-          rm -f $RUNNER_TEMP/certificate.p12
-          rm -rf $RUNNER_TEMP/private_keys
+          gh release upload "$TAG" latest.json \
+            --repo abhiunix/AgentHarbor \
+            --clobber
