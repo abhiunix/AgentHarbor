@@ -7,14 +7,11 @@ A visual tour of every major feature. Screenshots are ordered to match the in-ap
 ## Tray Analytics
 
 AgentHarbor lives in your menu bar (macOS) or system tray (Windows). A single glance shows your active session burn, monthly spend, and rate-limit state for every AI provider — no browser, no CLI.
-
-<!-- SCREENSHOT: menu bar tray showing Claude Code session %, Cursor spend, Codex quota -->
-> _Screenshot placeholder — tray popover with multi-provider metrics_
-
 Clicking the tray icon opens a compact popover with per-provider cards. Each card shows the metric most relevant to that provider (session percentage, dollar spend, or quota bar).
-
-<!-- SCREENSHOT: tray popover open, showing provider cards -->
-> _Screenshot placeholder — tray popover with provider cards_
+<!-- SCREENSHOT: menu bar tray showing Claude Code session %, Cursor spend, Codex quota -->
+> <img width="409" height="667" alt="image" src="https://github.com/user-attachments/assets/1e4ceefb-f941-4698-8b2a-210caa0db37f" />
+> <img width="438" height="717" alt="image" src="https://github.com/user-attachments/assets/c10bc42e-f174-4ad2-9c93-d7a946b7af0d" />
+> <img width="410" height="674" alt="image" src="https://github.com/user-attachments/assets/f1d446df-816b-4e34-bedb-d0cf2b59766a" />
 
 ---
 
@@ -23,13 +20,17 @@ Clicking the tray icon opens a compact popover with per-provider cards. Each car
 Each provider has a dedicated full-screen analytics page with detailed usage breakdowns, cost history, and limit-state timeline.
 
 <!-- SCREENSHOT: Claude Code analytics page — session timeline, Sonnet/Opus breakdown -->
-> _Screenshot placeholder — Claude Code analytics page_
+> <img width="1727" height="994" alt="image" src="https://github.com/user-attachments/assets/1263f234-a338-422f-9829-056f0235f453" />
+<img width="1723" height="904" alt="image" src="https://github.com/user-attachments/assets/0f415d6b-e8a9-4950-8fb5-76e6bcaa0712" />
+<img width="1725" height="967" alt="image" src="https://github.com/user-attachments/assets/539ff4fa-ffdc-407d-827a-1decce9baac1" />
 
 <!-- SCREENSHOT: Cursor analytics page — plan + on-demand spend breakdown -->
-> _Screenshot placeholder — Cursor analytics page_
+<img width="1724" height="868" alt="image" src="https://github.com/user-attachments/assets/5ae5eb03-5e33-4e3e-99d3-748ab10144ce" />
+
 
 <!-- SCREENSHOT: Codex analytics page — primary/weekly windows, per-model cost -->
-> _Screenshot placeholder — Codex analytics page_
+> <img width="1723" height="963" alt="image" src="https://github.com/user-attachments/assets/25fc7ead-19c5-4187-ad2e-5f8a9db2ca01" />
+
 
 ---
 
