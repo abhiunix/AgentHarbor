@@ -10,10 +10,11 @@ Manage configurations, track usage, deploy capabilities, and keep every AI tool 
 
 [![GitHub release](https://img.shields.io/github/v/release/abhiunix/AgentHarbor?label=latest&color=blue)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![Total Downloads](https://img.shields.io/github/downloads/abhiunix/AgentHarbor/total?label=downloads&color=green)](https://github.com/abhiunix/AgentHarbor/releases)
-[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%7C%20Windows%2010%2B-lightgrey)](https://github.com/abhiunix/AgentHarbor/releases/latest)
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](https://github.com/abhiunix/AgentHarbor/releases/latest)
+[![Windows 10+](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows&logoColor=white)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![License](https://img.shields.io/github/license/abhiunix/AgentHarbor)](LICENSE)
 
-[**Download**](https://github.com/abhiunix/AgentHarbor/releases/latest) · [**Getting Started**](docs/getting-started.md) · [**Docs**](docs/) · [**Changelog**](CHANGELOG.md)
+[**Download**](https://github.com/abhiunix/AgentHarbor/releases/latest) · [**Getting Started**](docs/getting-started.md) · [**Features**](docs/features.md) · [**Docs**](docs/)
 
 </div>
 
@@ -102,13 +103,13 @@ The icon swaps to its red variant and appends `!` whenever the active provider i
 
 | Document | Contents |
 |---|---|
+| [Features](docs/features.md) | Visual tour of every major feature with screenshot placeholders |
 | [Getting Started](docs/getting-started.md) | Install, first launch, connect providers, first deploy |
 | [Analytics & Tray](docs/analytics.md) | Menu-bar metrics, tray popover, LimitState ladder, per-provider pages |
 | [Deploying Capabilities & Agents](docs/deploying-capabilities.md) | Deploy wizard, presets, backups, drift detection, removing capabilities |
 | [Build & Release](docs/build-and-release.md) | Local dev, signed builds, release checklist |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Regression Checklist](docs/regression-checklist.md) | QA checklist before every release |
-| [Changelog](CHANGELOG.md) | Full version history |
 
 ---
 
@@ -175,7 +176,13 @@ agentharbor/
 
 <div align="center">
 
-[![Star History Chart](https://api.star-history.com/svg?repos=abhiunix/AgentHarbor&type=Date)](https://star-history.com/#abhiunix/AgentHarbor&Date)
+<a href="https://star-history.com/#abhiunix/agentharbor&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=abhiunix/agentharbor&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=abhiunix/agentharbor&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=abhiunix/agentharbor&type=Date" />
+  </picture>
+</a>
 
 </div>
 
