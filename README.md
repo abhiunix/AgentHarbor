@@ -4,7 +4,7 @@
 
 # AgentHarbor
 
-**The macOS dock for your AI coding agents.**
+**One tray app to manage all your AI coding agents.**
 
 Manage configurations, track usage, deploy capabilities, and keep every AI tool in sync — all from one native app.
 
