@@ -44,6 +44,8 @@ export interface AdapterPlugin {
   defaultExpanded: boolean;
   /** If true, shown as a non-interactive "Coming soon" entry */
   comingSoon?: boolean;
+  /** If false, this adapter is hidden by default (user can re-enable in Settings) */
+  enabledByDefault?: boolean;
 }
 
 export const adapterPlugins: AdapterPlugin[] = [
@@ -130,6 +132,7 @@ export const adapterPlugins: AdapterPlugin[] = [
     color: "#1f6feb",
     defaultExpanded: false,
     features: [],
+    enabledByDefault: false,
   },
   {
     id: "antigravity",
@@ -139,6 +142,7 @@ export const adapterPlugins: AdapterPlugin[] = [
     color: "#a855f7",
     defaultExpanded: false,
     features: [],
+    enabledByDefault: false,
   },
   {
     id: "vscode",
@@ -148,6 +152,7 @@ export const adapterPlugins: AdapterPlugin[] = [
     color: "#007acc",
     defaultExpanded: false,
     features: [],
+    enabledByDefault: false,
   },
   {
     id: "codex",
@@ -199,7 +204,12 @@ export function getAdapterIds(): string[] {
 
 const ENABLED_ADAPTERS_KEY = "agentharbor-enabled-adapters";
 
-/** Get the set of enabled adapter IDs from localStorage. All enabled by default. */
+/** Get the default enabled adapter IDs (everything except those marked enabledByDefault: false). */
+function getDefaultEnabledAdapterIds(): string[] {
+  return adapterPlugins.filter((p) => p.enabledByDefault !== false).map((p) => p.id);
+}
+
+/** Get the set of enabled adapter IDs from localStorage. Falls back to plugin defaults. */
 export function getEnabledAdapterIds(): string[] {
   try {
     const stored = localStorage.getItem(ENABLED_ADAPTERS_KEY);
@@ -208,7 +218,7 @@ export function getEnabledAdapterIds(): string[] {
       if (Array.isArray(parsed)) return parsed;
     }
   } catch { /* noop */ }
-  return adapterPlugins.map((p) => p.id);
+  return getDefaultEnabledAdapterIds();
 }
 
 /** Save the set of enabled adapter IDs to localStorage. */
