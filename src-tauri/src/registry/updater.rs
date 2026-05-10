@@ -396,12 +396,18 @@ pub fn sync_registry(config: &SyncConfig) -> SyncResult {
                 if let Some(archive_data) = data {
                     let dest = get_community_registry_path();
                     match extract_registry_archive(&archive_data, &dest) {
-                        Ok((caps, agents)) => {
+                        Ok(_) => {
+                            // File-count heuristics (README/index.json/non-recursive skill walk) are
+                            // brittle. Use the real loader output so the displayed totals match what
+                            // the user sees in the registry browser.
+                            let caps = crate::registry::loader::load_capabilities(&[dest.clone()]).items.len();
+                            let agents = crate::registry::loader::load_agents(&[dest.clone()]).items.len();
+
                             state.last_etag = new_etag;
                             state.capabilities_count = caps;
                             state.agents_count = agents;
                             state.last_sync_time = Some(chrono::Utc::now().to_rfc3339());
-                            
+
                             SyncResult {
                                 success: true,
                                 message: format!("Synced {} capabilities and {} agents", caps, agents),

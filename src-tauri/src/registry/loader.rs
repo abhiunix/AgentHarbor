@@ -792,6 +792,19 @@ pub fn load_agents(dirs: &[PathBuf]) -> LoadResult<AgentDefinition> {
                 continue;
             }
 
+            // Skip non-agent files that often live alongside agent definitions
+            // (registry README, manifest index, license, contributing guide).
+            let fname = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            let stem_upper = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_uppercase();
+            if fname == "index.json"
+                || stem_upper == "README"
+                || stem_upper == "CONTRIBUTING"
+                || stem_upper == "LICENSE"
+                || stem_upper == "CHANGELOG"
+            {
+                continue;
+            }
+
             match load_agent_file(&path) {
                 Ok(agent) => {
                     let id = agent.id.to_string();
