@@ -292,10 +292,10 @@ fn enrich_local_stats(extra: &mut HashMap<String, serde_json::Value>) {
                         unique_sessions.insert(sid.clone());
                     }
                     if let Some(ref ts) = log_entry.timestamp {
-                        if earliest_ts.as_ref().map_or(true, |e| ts < e) {
+                        if earliest_ts.as_ref().is_none_or(|e| ts < e) {
                             earliest_ts = Some(ts.clone());
                         }
-                        if latest_ts.as_ref().map_or(true, |l| ts > l) {
+                        if latest_ts.as_ref().is_none_or(|l| ts > l) {
                             latest_ts = Some(ts.clone());
                         }
                     }

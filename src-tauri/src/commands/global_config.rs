@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn home_dir() -> Option<PathBuf> {
     dirs::home_dir()
@@ -32,7 +32,7 @@ fn global_config_path(adapter_id: &str) -> Option<PathBuf> {
     }
 }
 
-fn write_atomic(path: &PathBuf, content: &str) -> Result<(), String> {
+fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
@@ -131,7 +131,7 @@ pub(crate) fn write_claude_settings_env_at(
     }
 
     let serialised = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
-    write_atomic(&path.to_path_buf(), &serialised)
+    write_atomic(path, &serialised)
 }
 
 pub(crate) fn mutate_claude_settings_env(
@@ -234,7 +234,7 @@ pub fn read_global_config_raw(adapter_id: String) -> Result<String, String> {
         let out = serde_json::json!({ "mcpServers": mcp_only });
         Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| "{}".to_string()))
     } else {
-        Ok(serde_json::to_string_pretty(&json).unwrap_or_else(|_| content))
+        Ok(serde_json::to_string_pretty(&json).unwrap_or(content))
     }
 }
 

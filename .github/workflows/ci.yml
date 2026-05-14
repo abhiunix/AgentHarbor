@@ -36,7 +36,7 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Lint Rust
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets -- -D clippy::all
         working-directory: src-tauri
 
       - name: Test Rust

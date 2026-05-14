@@ -25,15 +25,11 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ProjectsData {
     pub projects: Vec<Project>,
 }
 
-impl Default for ProjectsData {
-    fn default() -> Self {
-        Self { projects: vec![] }
-    }
-}
 
 fn get_projects_file_path() -> PathBuf {
     dirs::data_dir()
@@ -520,7 +516,7 @@ pub fn remove_project_item(
                 "claude-code" => path.join(".claude").join("agents").join(format!("{}.md", item_name)),
                 "cursor" => path.join(".cursor").join("agents").join(format!("{}.md", item_name)),
                 "gemini" => path.join(".gemini").join("agents").join(format!("{}.md", item_name)),
-                "shared" | _ => path.join("agents").join(format!("{}.md", item_name)),
+                _ => path.join("agents").join(format!("{}.md", item_name)),
             };
             if !agent_path.exists() {
                 return Err("Agent file not found".to_string());

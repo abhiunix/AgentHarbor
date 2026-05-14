@@ -6,7 +6,6 @@ use crate::analytics::types::*;
 use chrono::Utc;
 use std::collections::HashMap;
 use std::process::Command;
-use std::time::Duration;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -42,7 +41,7 @@ fn strip_ansi(s: &str) -> String {
 fn extract_number_after(text: &str, label: &str) -> Option<f64> {
     let idx = text.find(label)?;
     let after = &text[idx + label.len()..];
-    let trimmed = after.trim_start_matches(|c: char| c == ':' || c == ' ');
+    let trimmed = after.trim_start_matches([':', ' ']);
     let mut num_str = String::new();
     for ch in trimmed.chars() {
         if ch.is_ascii_digit() || ch == '.' {
@@ -58,7 +57,7 @@ fn extract_number_after(text: &str, label: &str) -> Option<f64> {
 fn extract_value_after(text: &str, label: &str) -> Option<String> {
     let idx = text.find(label)?;
     let after = &text[idx + label.len()..];
-    let trimmed = after.trim_start_matches(|c: char| c == ':' || c == ' ');
+    let trimmed = after.trim_start_matches([':', ' ']);
     let line = trimmed.lines().next()?;
     let val = line.trim();
     if val.is_empty() { None } else { Some(val.to_string()) }
@@ -68,7 +67,7 @@ fn extract_value_after(text: &str, label: &str) -> Option<String> {
 fn extract_fraction(text: &str, label: &str) -> Option<(f64, f64)> {
     let idx = text.find(label)?;
     let after = &text[idx + label.len()..];
-    let trimmed = after.trim_start_matches(|c: char| c == ':' || c == ' ');
+    let trimmed = after.trim_start_matches([':', ' ']);
 
     // Find first number
     let mut first = String::new();
@@ -112,14 +111,12 @@ fn extract_fraction(text: &str, label: &str) -> Option<(f64, f64)> {
 fn extract_percentage(text: &str, label: &str) -> Option<f64> {
     let idx = text.find(label)?;
     let after = &text[idx + label.len()..];
-    let trimmed = after.trim_start_matches(|c: char| c == ':' || c == ' ');
+    let trimmed = after.trim_start_matches([':', ' ']);
     let mut num_str = String::new();
     for ch in trimmed.chars() {
         if ch.is_ascii_digit() || ch == '.' {
             num_str.push(ch);
-        } else if ch == '%' {
-            break;
-        } else if !num_str.is_empty() {
+        } else if ch == '%' || !num_str.is_empty() {
             break;
         }
     }

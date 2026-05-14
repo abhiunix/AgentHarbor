@@ -9,8 +9,8 @@ pub mod vscode;
 pub mod codex;
 
 pub use traits::{
-    AdapterCapabilities, AgentAdapter, AgentConfig, ChangeType, ConfigDiffEntry,
-    DeployResult, DeployStrategy, RemoveResult,
+    AdapterCapabilities, AgentAdapter, ChangeType, ConfigDiffEntry,
+    DeployResult, DeployStrategy,
 };
 pub use claude_code::ClaudeCodeAdapter;
 pub use cursor::CursorAdapter;

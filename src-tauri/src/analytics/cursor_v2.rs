@@ -654,7 +654,7 @@ fn _request_breakdown(time_range: &str) -> Result<AnalyticsTimeseriesResponse, S
 #[tauri::command]
 pub async fn get_cursor_v2_connection_status() -> Result<CursorV2ConnectionStatus, String> {
     // Connection status is NOT cached — it's fast (just reads SQLite)
-    tokio::task::spawn_blocking(|| _connection_status())
+    tokio::task::spawn_blocking(_connection_status)
         .await
         .map_err(|e| format!("Task failed: {}", e))
 }
@@ -828,25 +828,25 @@ pub fn get_cursor_v2_cache_info() -> Result<CursorV2CacheInfo, String> {
     let mut last_refreshed: Option<String> = None;
     let mut latest_instant: Option<Instant> = None;
     for entry in cache.overview.values() {
-        if latest_instant.map_or(true, |li| entry.fetched_at > li) {
+        if latest_instant.is_none_or(|li| entry.fetched_at > li) {
             latest_instant = Some(entry.fetched_at);
             last_refreshed = Some(entry.fetched_at_iso.clone());
         }
     }
     for entry in cache.events.values() {
-        if latest_instant.map_or(true, |li| entry.fetched_at > li) {
+        if latest_instant.is_none_or(|li| entry.fetched_at > li) {
             latest_instant = Some(entry.fetched_at);
             last_refreshed = Some(entry.fetched_at_iso.clone());
         }
     }
     for entry in cache.ai_commits.values() {
-        if latest_instant.map_or(true, |li| entry.fetched_at > li) {
+        if latest_instant.is_none_or(|li| entry.fetched_at > li) {
             latest_instant = Some(entry.fetched_at);
             last_refreshed = Some(entry.fetched_at_iso.clone());
         }
     }
     for entry in cache.model_usage.values() {
-        if latest_instant.map_or(true, |li| entry.fetched_at > li) {
+        if latest_instant.is_none_or(|li| entry.fetched_at > li) {
             latest_instant = Some(entry.fetched_at);
             last_refreshed = Some(entry.fetched_at_iso.clone());
         }

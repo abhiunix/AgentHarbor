@@ -64,7 +64,7 @@ fn find_quota_xml() -> Option<(PathBuf, String)> {
                 .unwrap_or("Unknown")
                 .to_string();
 
-            if newest.as_ref().map_or(true, |(_, t, _)| modified > *t) {
+            if newest.as_ref().is_none_or(|(_, t, _)| modified > *t) {
                 newest = Some((xml_path, modified, ide_name));
             }
         }

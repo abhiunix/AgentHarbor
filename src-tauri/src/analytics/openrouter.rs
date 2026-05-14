@@ -155,11 +155,11 @@ pub fn fetch_openrouter_analytics() -> ProviderAnalytics {
 
     let plan_name = key_info.as_ref()
         .and_then(|ki| ki.data.as_ref())
-        .and_then(|d| {
+        .map(|d| {
             if d.is_free_tier == Some(true) {
-                Some("Free".into())
+                "Free".into()
             } else {
-                Some("Paid".into())
+                "Paid".into()
             }
         });
 

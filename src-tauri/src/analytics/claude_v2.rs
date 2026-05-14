@@ -236,7 +236,7 @@ fn time_range_cutoff(range: &str) -> Option<chrono::DateTime<chrono::Utc>> {
                 .single()
                 .map(|dt| dt.with_timezone(&chrono::Utc))
         }
-        "all" => return None,
+        "all" => None,
         _ => {
             // Fixed durations: "5h", "1d", "7d", "30d", "90d", etc.
             let hours = match range {
@@ -475,7 +475,7 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
                 estimated_cost_usd: cost,
             }
         }).collect();
-        m.sort_by(|a, b| b.message_count.cmp(&a.message_count));
+        m.sort_by_key(|stat| std::cmp::Reverse(stat.message_count));
         m
     };
 
@@ -486,7 +486,7 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
         let mut t: Vec<ToolStat> = tool_map.into_iter()
             .map(|(name, count)| ToolStat { tool_name: name, count })
             .collect();
-        t.sort_by(|a, b| b.count.cmp(&a.count));
+        t.sort_by_key(|stat| std::cmp::Reverse(stat.count));
         t
     };
 
@@ -497,7 +497,7 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
         let mut g: Vec<GeoStat> = geo_map.into_iter()
             .map(|(region, count)| GeoStat { region, count })
             .collect();
-        g.sort_by(|a, b| b.count.cmp(&a.count));
+        g.sort_by_key(|stat| std::cmp::Reverse(stat.count));
         g
     };
 
@@ -551,7 +551,7 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
                 ProjectStat { project_path: path, project_name: name, message_count: count, total_tokens: tokens, estimated_cost_usd: cost }
             })
             .collect();
-        p.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+        p.sort_by_key(|stat| std::cmp::Reverse(stat.total_tokens));
         p
     };
 

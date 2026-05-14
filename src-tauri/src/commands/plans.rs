@@ -349,8 +349,8 @@ fn claude_project_session_ids(home: &std::path::Path, project_path: &str) -> std
     if let Ok(entries) = std::fs::read_dir(&project_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            if path.is_file()
+                && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
                     if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                         ids.insert(stem.to_string());
                         let prefix: String = stem.split('-').take(5).collect::<Vec<_>>().join("-");
@@ -359,7 +359,6 @@ fn claude_project_session_ids(home: &std::path::Path, project_path: &str) -> std
                         }
                     }
                 }
-            }
         }
     }
     ids

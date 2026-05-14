@@ -174,7 +174,7 @@ pub fn resolve_token_with_context() -> Result<(String, String, Option<String>, O
 
     // Try to read team_id from the DB as well
     let team_id: Option<i64> = cursor_state_db_path().ok().and_then(|db_path| {
-        let conn = rusqlite::Connection::open_with_flags(
+        let _conn = rusqlite::Connection::open_with_flags(
             &db_path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         ).ok()?;

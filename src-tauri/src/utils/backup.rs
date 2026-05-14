@@ -67,8 +67,7 @@ pub fn create_backup(
             };
 
             let safe_backup_name = stored_path
-                .replace('/', "_")
-                .replace('\\', "_");
+                .replace(['/', '\\'], "_");
             let backup_file_path = backup_dir.join(&safe_backup_name);
 
             if let Some(parent) = backup_file_path.parent() {
@@ -127,8 +126,7 @@ pub fn restore_backup(backup_id: &str) -> Result<Vec<PathBuf>, String> {
 
     for stored_path in &manifest.files {
         let safe_backup_name = stored_path
-            .replace('/', "_")
-            .replace('\\', "_");
+            .replace(['/', '\\'], "_");
         let backup_file = backup_dir.join(&safe_backup_name);
 
         // Path traversal guard: reject paths containing ".."
@@ -190,7 +188,7 @@ pub fn list_backups(project_path: &str) -> Result<Vec<BackupInfo>, String> {
         }
     }
 
-    backups.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    backups.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
     Ok(backups)
 }
 
@@ -220,11 +218,10 @@ pub fn cleanup_old_backups(retention_days: u64) -> Result<usize, String> {
             if manifest_path.exists() {
                 if let Ok(content) = fs::read_to_string(&manifest_path) {
                     if let Ok(manifest) = serde_json::from_str::<BackupManifest>(&content) {
-                        if manifest.timestamp < cutoff {
-                            if fs::remove_dir_all(backup_entry.path()).is_ok() {
+                        if manifest.timestamp < cutoff
+                            && fs::remove_dir_all(backup_entry.path()).is_ok() {
                                 removed_count += 1;
                             }
-                        }
                     }
                 }
             }
@@ -261,7 +258,7 @@ pub fn delete_backup(backup_id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
+    
 
     #[test]
     fn test_generate_project_hash() {
