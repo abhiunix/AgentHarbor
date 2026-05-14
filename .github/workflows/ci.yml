@@ -38,7 +38,6 @@ jobs:
       - name: Lint Rust
         run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
-        continue-on-error: true
 
       - name: Test Rust
         run: cargo test

@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "clear-quarantine": "bash scripts/clear-quarantine-mac.sh",
-    "test:regression": "npm run build && cd src-tauri && cargo test"
+    "lint:ts": "tsc --noEmit",
+    "lint:rust": "cd src-tauri && cargo clippy --all-targets -- -D warnings",
+    "lint": "npm run lint:ts && npm run lint:rust",
+    "test:rust": "cd src-tauri && cargo test",
+    "test:regression": "npm run lint:ts && npm run build && npm run test:rust"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
