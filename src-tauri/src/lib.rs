@@ -74,7 +74,11 @@ use commands::transcripts::{list_transcript_sessions, read_transcript, search_tr
 use commands::extensions::{
     list_claude_plugins, list_cursor_extensions, list_cursor_plugins, toggle_claude_plugin,
 };
-use commands::plans::{list_plans, list_project_plans, read_plan, list_todos, get_todo_stats};
+use commands::plans::{
+    list_plans, list_project_plans, read_plan, delete_plan_file,
+    list_hidden_debate_plans, hide_plan_from_debate,
+    list_todos, get_todo_stats,
+};
 use commands::permissions::{
     get_claude_permissions, update_claude_permissions, get_claude_policy,
     update_claude_policy, get_claude_project_permissions, update_claude_project_permissions,
@@ -115,6 +119,11 @@ use commands::gemini::{
 use commands::codex::{
     list_codex_skills, read_codex_skill_file, read_codex_config, write_codex_config,
 };
+use commands::debate::{
+    start_debate, cancel_debate, replace_plan_file, save_refined_plan, check_debate_credentials,
+    discover_project_plans,
+};
+use commands::debate_history::{list_debates, get_debate, delete_debate};
 use analytics::commands::{
     get_all_provider_status, get_provider_analytics, get_all_provider_analytics,
     save_provider_token, delete_provider_token, has_provider_token,
@@ -315,6 +324,9 @@ pub fn run() {
             list_plans,
             list_project_plans,
             read_plan,
+            delete_plan_file,
+            list_hidden_debate_plans,
+            hide_plan_from_debate,
             list_todos,
             get_todo_stats,
             get_claude_permissions,
@@ -363,6 +375,17 @@ pub fn run() {
             read_codex_skill_file,
             read_codex_config,
             write_codex_config,
+            // Debate
+            start_debate,
+            cancel_debate,
+            replace_plan_file,
+            save_refined_plan,
+            check_debate_credentials,
+            discover_project_plans,
+            // Debate history
+            list_debates,
+            get_debate,
+            delete_debate,
             // Test bridge
             test_bridge_read_cmd,
             test_bridge_write_result,

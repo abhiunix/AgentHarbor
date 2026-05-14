@@ -34,3 +34,6 @@ pub mod mcp_registry;
 pub mod claude_history;
 pub mod claude_metadata;
 pub mod codex;
+pub mod debate;
+pub mod debate_history;
+pub mod debate_tools;

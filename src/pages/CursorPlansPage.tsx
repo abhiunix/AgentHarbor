@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DebugPath } from "../components/common/DebugPath";
+import { ProjectScopeSelector } from "../components/common/ProjectScopeSelector";
 
 interface PlanEntry {
   name: string;
@@ -18,19 +19,24 @@ export function CursorPlansPage() {
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [planContent, setPlanContent] = useState<Record<string, string>>({});
   const [loadingContent, setLoadingContent] = useState<string | null>(null);
+  // null = global ~/.cursor/plans; set = scan <projectPath>/.cursor/plans
+  const [projectScope, setProjectScope] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<PlanEntry[]>("list_plans");
+      const result = projectScope
+        ? await invoke<PlanEntry[]>("list_project_plans", { projectPath: projectScope })
+        : await invoke<PlanEntry[]>("list_plans");
+      // Cursor page only ever shows cursor-sourced plans regardless of scope.
       setPlans(result.filter((p) => p.source === "cursor"));
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectScope]);
 
   useEffect(() => {
     load();
@@ -73,14 +79,24 @@ export function CursorPlansPage() {
   return (
     <div className="h-full flex flex-col">
       <div className="px-6 pt-6 pb-4">
-        <div className="flex items-center gap-3 mb-4">
-          <span className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
-          <div>
-            <h1 className="text-2xl font-semibold text-text-primary">
-              Cursor — Plans
-            </h1>
-            <DebugPath path="~/.cursor/plans/" className="text-sm" />
+        <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <span className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
+            <div>
+              <h1 className="text-2xl font-semibold text-text-primary">
+                Cursor — Plans
+              </h1>
+              <DebugPath
+                path={
+                  projectScope
+                    ? `${projectScope}/.cursor/plans/`
+                    : "~/.cursor/plans/"
+                }
+                className="text-sm"
+              />
+            </div>
           </div>
+          <ProjectScopeSelector value={projectScope} onChange={setProjectScope} />
         </div>
 
         <div className="relative">
@@ -128,6 +144,8 @@ export function CursorPlansPage() {
             <p className="text-text-secondary text-sm">
               {search.trim()
                 ? "No plans match your search."
+                : projectScope
+                ? `No Cursor plans found in ${projectScope}/.cursor/plans/.`
                 : "No Cursor plans found."}
             </p>
           </div>

@@ -994,6 +994,21 @@ export async function readPlan(filePath: string): Promise<string> {
   return invoke<string>("read_plan", { filePath });
 }
 
+export async function deletePlanFile(filePath: string): Promise<void> {
+  return invoke<void>("delete_plan_file", { filePath });
+}
+
+/** Returns the list of plan paths the user has hidden from the Debate page
+ * (file stays on disk; just filtered client-side). */
+export async function listHiddenDebatePlans(): Promise<string[]> {
+  return invoke<string[]>("list_hidden_debate_plans");
+}
+
+/** Hide a plan from the Debate page without deleting the file on disk. */
+export async function hidePlanFromDebate(filePath: string): Promise<void> {
+  return invoke<void>("hide_plan_from_debate", { filePath });
+}
+
 export async function listTodos(projectPath?: string | null): Promise<TodoItem[]> {
   return invoke<TodoItem[]>("list_todos", { projectPath: projectPath ?? null });
 }
@@ -1210,4 +1225,342 @@ export async function discoverMcpToolsHttp(
   headers: Record<string, string>,
 ): Promise<import("./types").McpTool[]> {
   return invoke<import("./types").McpTool[]>("discover_mcp_tools_http", { url, headers });
+}
+
+// --- Debate ---
+
+export type DebateProvider = "anthropic" | "openai";
+export type DebateRole = "reviewer" | "author";
+export type DebateVerdict = "APPROVED" | "REVISE";
+
+export interface DebateModel {
+  id: string;
+  label: string;
+  provider: DebateProvider;
+}
+
+/** Catalog the configurator dropdowns offer. First Anthropic, then OpenAI.
+ * `id` is sent verbatim as the API `model` field — keep these matching the
+ * provider's published model IDs. */
+export const DEBATE_MODELS: DebateModel[] = [
+  { id: "claude-opus-4-7", label: "Claude Opus 4.7", provider: "anthropic" },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", provider: "anthropic" },
+  { id: "gpt-5", label: "GPT-5", provider: "openai" },
+  { id: "gpt-5-mini", label: "GPT-5 mini", provider: "openai" },
+  { id: "gpt-4o", label: "GPT-4o", provider: "openai" },
+  { id: "gpt-4o-mini", label: "GPT-4o mini", provider: "openai" },
+];
+
+export const DEFAULT_AUTHOR_MODEL_ID = "claude-sonnet-4-6";
+export const DEFAULT_REVIEWER_MODEL_ID = "gpt-5";
+
+// ── v2 turn-based engine: shared discriminated unions ──────────────────────
+
+export type DebateSpeaker = "author" | "reviewer";
+export type DebateTurnKind = "opening" | "critique" | "response" | "finalize";
+
+/** Structured payload extracted from a turn's raw model output. Discriminated
+ * by `kind`. The Rust side serializes this with the same shape; if parsing
+ * failed end-to-end, `parsed` is null and `parse_error` carries the message. */
+export type ParsedTurn =
+  | { kind: "opening"; plan: string }
+  | { kind: "critique"; issues: string[]; verdict: "REQUEST_CHANGES" | "APPROVE" }
+  | {
+      kind: "response";
+      accepted: string[];
+      rebutted: string[];
+      refined_plan: string | null;
+    }
+  | { kind: "finalize"; plan: string; caveats: string[] };
+
+// ── v2 turn-based engine: events ────────────────────────────────────────────
+
+export interface DebateTurnStartEvent {
+  debate_id: string;
+  /** 1-indexed sequential position in the turn stream. */
+  index: number;
+  speaker: DebateSpeaker;
+  kind: DebateTurnKind;
+  model: string;
+  /** Exact `system` prompt sent to the model for this turn. */
+  system_prompt: string;
+  /** First-turn `user` content sent for this turn. */
+  user_prompt: string;
+}
+
+export interface DebateTokenEvent {
+  debate_id: string;
+  /** Matches the originating turn's `index`. */
+  index: number;
+  text: string;
+}
+
+export interface DebateTurnCompleteEvent {
+  debate_id: string;
+  index: number;
+  speaker: DebateSpeaker;
+  kind: DebateTurnKind;
+  raw_text: string;
+  /** Null when both the initial parse and the corrective retry failed. */
+  parsed: ParsedTurn | null;
+  parse_error: string | null;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/** Emitted once per tool invocation made by either the author or reviewer.
+ * Fires AFTER the tool runs so the payload includes the result preview. The
+ * full output (truncated to ≤ 2 KiB) is persisted on the turn record. */
+export interface DebateToolCallEvent {
+  debate_id: string;
+  /** Matches the originating turn's `index`. */
+  index: number;
+  /** Informational — used purely for display ("Author called …"). */
+  role: DebateSpeaker;
+  tool: string;
+  input_preview: string;
+  output_preview: string;
+  is_error: boolean;
+}
+
+export interface DebateCompleteEvent {
+  debate_id: string;
+  final_plan: string;
+  /** Auto-saved next to the original as `<basename>_v<N>.md`. Empty when no save was possible. */
+  refined_plan_path: string;
+  /** Reviewer's caveats from the finalize turn. Empty when nothing was flagged. */
+  caveats: string[];
+  turns_used: number;
+  approved: boolean;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  author_input_tokens: number;
+  author_output_tokens: number;
+  reviewer_input_tokens: number;
+  reviewer_output_tokens: number;
+  cost_author_usd: number;
+  cost_reviewer_usd: number;
+  cost_total_usd: number;
+}
+
+// ── Legacy round-pair events (back-compat with pre-v2 persisted records) ────
+//
+// The v2 engine doesn't emit these anymore — they're retained so persisted
+// debates that pre-date the rewrite continue to deserialize.
+
+export interface DebateRoundStartEvent {
+  debate_id: string;
+  round: number;
+  total_rounds: number;
+  role: DebateRole;
+  model: string;
+  system_prompt: string;
+  user_prompt: string;
+}
+
+export interface DebateRoundCompleteEvent {
+  debate_id: string;
+  round: number;
+  role: DebateRole;
+  full_text: string;
+  verdict?: DebateVerdict;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+// ── Persisted debate history ────────────────────────────────────────────────
+// Wire format mirrors the Rust structs in `debate_history.rs` — keep
+// snake_case keys verbatim.
+
+/** One sandboxed tool invocation persisted on a debate round. Mirrors
+ * `DebateToolCallRecord` in `debate_history.rs`. */
+export interface DebateToolCallRecord {
+  tool: string;
+  /** Compact JSON string of the model's tool input. */
+  input: string;
+  /** Truncated tool result (≤ 2 KiB). */
+  output: string;
+  is_error: boolean;
+}
+
+/** LEGACY: one author+reviewer "round" persisted by the pre-v2 debate engine.
+ * Kept around because old debates on disk still deserialize via this — newer
+ * debates leave `DebateRecord.rounds` empty and use `turns` instead. */
+export interface DebateRoundRecord {
+  round: number;
+  role: DebateRole;
+  model: string;
+  full_text: string;
+  verdict?: DebateVerdict | null;
+  input_tokens: number;
+  output_tokens: number;
+  /** Tool invocations the model made during this round (optional for
+   * back-compat with debates persisted before the tool feature shipped). */
+  tool_calls?: DebateToolCallRecord[];
+  /** `system` prompt sent to the model. Empty on old records. */
+  system_prompt?: string;
+  /** First-turn `user` content. Empty on old records. */
+  user_prompt?: string;
+}
+
+/** One model turn in the v2 engine. Mirrors the Rust `DebateTurn` struct in
+ * `debate_history.rs`. The `parsed` payload is discriminated by `kind`. */
+export interface DebateTurn {
+  index: number;
+  speaker: DebateSpeaker;
+  kind: DebateTurnKind;
+  model: string;
+  raw_text: string;
+  /** Null when both the initial parse and the corrective retry failed. */
+  parsed: ParsedTurn | null;
+  parse_error: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  system_prompt: string;
+  user_prompt: string;
+  tool_calls: DebateToolCallRecord[];
+}
+
+export interface DebateSummary {
+  id: string;
+  created_at: string;
+  plan_path: string;
+  plan_name: string;
+  /** May be empty for older records or debates with no plan path. */
+  project_dir?: string;
+  /** Path on disk where the refined plan was auto-saved
+   * (`<plan_dir>/<basename>_v<N>.md`). Empty when no save happened. */
+  refined_plan_path?: string;
+  author_provider: DebateProvider;
+  author_model: string;
+  reviewer_provider: DebateProvider;
+  reviewer_model: string;
+  max_rounds: number;
+  rounds_used: number;
+  /** Total turns executed by the v2 engine. Absent / 0 on legacy summaries —
+   * those report `rounds_used` instead. */
+  turns_used?: number;
+  approved: boolean;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  author_input_tokens: number;
+  author_output_tokens: number;
+  reviewer_input_tokens: number;
+  reviewer_output_tokens: number;
+  cost_author_usd: number;
+  cost_reviewer_usd: number;
+  cost_total_usd: number;
+}
+
+export interface DebateRecord extends DebateSummary {
+  original_plan: string;
+  final_plan: string;
+  /** LEGACY: populated only for pre-v2 debates. New records use `turns`. */
+  rounds?: DebateRoundRecord[];
+  /** v2 turn-based transcript. Empty for legacy records. */
+  turns?: DebateTurn[];
+  /** Reviewer's caveats from the finalize turn. Empty when nothing was flagged
+   * or for legacy records. */
+  caveats?: string[];
+}
+
+export interface DebateErrorEvent {
+  debate_id: string;
+  message: string;
+}
+
+export interface DebateCredentials {
+  anthropic: boolean;
+  openai: boolean;
+}
+
+export async function startDebate(args: {
+  planContent: string;
+  planPath: string | null;
+  projectDir: string | null;
+  authorProvider: DebateProvider;
+  authorModel: string;
+  reviewerProvider: DebateProvider;
+  reviewerModel: string;
+  maxRounds: number;
+}): Promise<string> {
+  return invoke<string>("start_debate", {
+    args: {
+      plan_content: args.planContent,
+      plan_path: args.planPath,
+      project_dir: args.projectDir,
+      author_provider: args.authorProvider,
+      author_model: args.authorModel,
+      reviewer_provider: args.reviewerProvider,
+      reviewer_model: args.reviewerModel,
+      max_rounds: args.maxRounds,
+    },
+  });
+}
+
+export async function cancelDebate(debateId: string): Promise<void> {
+  return invoke<void>("cancel_debate", { debate_id: debateId });
+}
+
+export async function replacePlanFile(args: {
+  debateId: string;
+  filePath: string;
+  newContent: string;
+}): Promise<void> {
+  return invoke<void>("replace_plan_file", {
+    args: {
+      debate_id: args.debateId,
+      file_path: args.filePath,
+      new_content: args.newContent,
+    },
+  });
+}
+
+export async function saveRefinedPlan(args: {
+  targetPath: string;
+  content: string;
+}): Promise<void> {
+  return invoke<void>("save_refined_plan", {
+    args: {
+      target_path: args.targetPath,
+      content: args.content,
+    },
+  });
+}
+
+export async function checkDebateCredentials(): Promise<DebateCredentials> {
+  return invoke<DebateCredentials>("check_debate_credentials");
+}
+
+export interface DiscoveredPlan {
+  name: string;
+  source: "claude" | "cursor";
+  file_path: string;
+  modified_at: string;
+}
+
+/** Scan a user-picked project folder for plans inside `.claude/plans/` and
+ * `.cursor/plans/`. Used by the Debate page's "Scan project folder" button —
+ * the macOS file picker hides dotfolders, so this is the route that actually
+ * works for project-local plans. */
+export async function discoverProjectPlans(
+  projectDir: string
+): Promise<DiscoveredPlan[]> {
+  return invoke<DiscoveredPlan[]>("discover_project_plans", {
+    projectDir,
+  });
+}
+
+/** Persisted debate history — newest-first. Tolerant of missing/corrupt index. */
+export async function listDebates(): Promise<DebateSummary[]> {
+  return invoke<DebateSummary[]>("list_debates");
+}
+
+export async function getDebate(id: string): Promise<DebateRecord> {
+  return invoke<DebateRecord>("get_debate", { id });
+}
+
+export async function deleteDebate(id: string): Promise<void> {
+  return invoke<void>("delete_debate", { id });
 }
