@@ -1034,6 +1034,16 @@ export async function hidePlanFromDebate(filePath: string): Promise<void> {
   return invoke<void>("hide_plan_from_debate", { filePath });
 }
 
+/** Un-hide a single previously-hidden plan path. */
+export async function unhidePlanFromDebate(filePath: string): Promise<void> {
+  return invoke<void>("unhide_plan_from_debate", { filePath });
+}
+
+/** Clear the entire hidden-plans list — show everything again. */
+export async function clearHiddenDebatePlans(): Promise<void> {
+  return invoke<void>("clear_hidden_debate_plans");
+}
+
 export async function listTodos(projectPath?: string | null): Promise<TodoItem[]> {
   return invoke<TodoItem[]>("list_todos", { projectPath: projectPath ?? null });
 }
@@ -1049,11 +1059,28 @@ export interface ClaudePermissions {
   deny: string[];
   enabled_plugins: Record<string, boolean>;
   skip_dangerous_mode: boolean;
-}
-
-export interface PolicyRestriction {
-  key: string;
-  allowed: boolean;
+  additional_directories?: string[];
+  default_mode?: string;
+  always_thinking_enabled?: boolean;
+  auto_memory_enabled?: boolean;
+  include_git_instructions?: boolean;
+  disable_all_hooks?: boolean;
+  disable_agent_view?: boolean;
+  disable_skill_shell_execution?: boolean;
+  disable_remote_control?: boolean;
+  fast_mode_per_session_opt_in?: boolean;
+  respect_gitignore?: boolean;
+  show_thinking_summaries?: boolean;
+  effort_level?: string;
+  model?: string;
+  auto_updates_channel?: string;
+  editor_mode?: string;
+  view_mode?: string;
+  default_shell?: string;
+  plans_directory?: string;
+  cleanup_period_days?: number;
+  claude_md_excludes?: string[];
+  available_models?: string[];
 }
 
 export interface CursorPermissions {
@@ -1075,24 +1102,8 @@ export async function getClaudePermissions(): Promise<ClaudePermissions> {
   return invoke<ClaudePermissions>("get_claude_permissions");
 }
 
-export async function updateClaudePermissions(
-  allow: string[],
-  deny: string[],
-  skipDangerousMode: boolean
-): Promise<void> {
-  return invoke<void>("update_claude_permissions", {
-    allow,
-    deny,
-    skipDangerousMode,
-  });
-}
-
-export async function getClaudePolicy(): Promise<PolicyRestriction[]> {
-  return invoke<PolicyRestriction[]>("get_claude_policy");
-}
-
-export async function updateClaudePolicy(key: string, allowed: boolean): Promise<void> {
-  return invoke<void>("update_claude_policy", { key, allowed });
+export async function updateClaudePermissions(payload: ClaudePermissions): Promise<void> {
+  return invoke<void>("update_claude_permissions", { payload });
 }
 
 export async function getClaudeProjectPermissions(projectPath: string): Promise<ClaudeProjectPermissions> {

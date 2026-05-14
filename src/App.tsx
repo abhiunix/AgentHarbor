@@ -18,6 +18,7 @@ import { useAgentStore } from "./stores/agentStore";
 import { usePresetStore } from "./stores/presetStore";
 import { syncRegistryNow, getSettings, startRegistryPolling, getSyncStatus } from "./lib/tauri";
 import { startUpdatePolling, stopUpdatePolling } from "./stores/updateStore";
+import { initDebateRunListeners } from "./stores/debateRunStore";
 import type { SyncConfig } from "./lib/tauri";
 import {
   isPermissionGranted,
@@ -38,6 +39,14 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     startUpdatePolling();
     return () => stopUpdatePolling();
+  }, []);
+
+  // Attach debate:* listeners ONCE for the app's lifetime so an in-flight debate
+  // keeps updating the store even when the user navigates away from DebatePage.
+  useEffect(() => {
+    initDebateRunListeners().catch((e) => {
+      console.error("Failed to init debate-run listeners", e);
+    });
   }, []);
 
   // Ask once for notification permission when limit alerts are enabled (macOS).
