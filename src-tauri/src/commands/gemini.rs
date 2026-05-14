@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 static SETTINGS_MUTEX: Mutex<()> = Mutex::new(());
@@ -70,7 +70,7 @@ fn write_settings_value(value: &Value) -> Result<(), String> {
     crate::utils::paths::atomic_write_str(&path, &content)
 }
 
-fn atomic_write_string(path: &PathBuf, content: &str) -> Result<(), String> {
+fn atomic_write_string(path: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create directory: {}", e))?;
@@ -283,7 +283,7 @@ fn collect_agents(dir: &PathBuf, is_global: bool) -> Vec<GeminiAgent> {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 let name = path
                     .file_stem()
                     .map(|s| s.to_string_lossy().to_string())

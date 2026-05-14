@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::models::{AgentDefinition, UniversalCapability};
 
@@ -181,8 +181,7 @@ fn load_skill_directory(skill_dir: &std::path::Path) -> Result<UniversalCapabili
 
     // Parse YAML frontmatter
     let trimmed = content.trim();
-    let (meta, body) = if trimmed.starts_with("---") {
-        let after_first = &trimmed[3..];
+    let (meta, body) = if let Some(after_first) = trimmed.strip_prefix("---") {
         if let Some(end) = after_first.find("---") {
             let frontmatter = &after_first[..end];
             let body = after_first[end + 3..].trim_start().to_string();
@@ -381,7 +380,7 @@ fn load_skill_directory(skill_dir: &std::path::Path) -> Result<UniversalCapabili
     }))
 }
 
-fn load_capability_file(path: &PathBuf) -> Result<UniversalCapability, String> {
+fn load_capability_file(path: &Path) -> Result<UniversalCapability, String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
 
@@ -392,7 +391,7 @@ fn load_capability_file(path: &PathBuf) -> Result<UniversalCapability, String> {
     parse_community_format(&content, path)
 }
 
-fn parse_community_format(content: &str, path: &PathBuf) -> Result<UniversalCapability, String> {
+fn parse_community_format(content: &str, path: &Path) -> Result<UniversalCapability, String> {
     let raw: serde_json::Value = serde_json::from_str(content)
         .map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
@@ -528,11 +527,7 @@ fn parse_community_format(content: &str, path: &PathBuf) -> Result<UniversalCapa
             .and_then(|v| {
                 if let Some(arr) = v.as_array() {
                     Some(arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
-                } else if let Some(s) = v.as_str() {
-                    Some(s.split_whitespace().map(String::from).collect())
-                } else {
-                    None
-                }
+                } else { v.as_str().map(|s| s.split_whitespace().map(String::from).collect()) }
             });
         let model = skill.get("model").and_then(|v| v.as_str()).map(String::from);
         let context = skill.get("context").and_then(|v| v.as_str()).map(String::from);
@@ -826,7 +821,7 @@ pub fn load_agents(dirs: &[PathBuf]) -> LoadResult<AgentDefinition> {
     }
 }
 
-fn load_agent_file(path: &PathBuf) -> Result<AgentDefinition, String> {
+fn load_agent_file(path: &Path) -> Result<AgentDefinition, String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
 
@@ -851,7 +846,7 @@ fn load_agent_file(path: &PathBuf) -> Result<AgentDefinition, String> {
 
 /// Load an agent from a JSON metadata file + companion .md file (new community format)
 /// The .json provides metadata, the .md (same stem) provides the prompt content.
-fn load_agent_json_with_md(json_path: &PathBuf) -> Result<AgentDefinition, String> {
+fn load_agent_json_with_md(json_path: &Path) -> Result<AgentDefinition, String> {
     use crate::models::{AgentColor, AgentModel, MemoryScope, ToolAccess, Visibility};
 
     let content = fs::read_to_string(json_path)
@@ -956,7 +951,7 @@ fn load_agent_json_with_md(json_path: &PathBuf) -> Result<AgentDefinition, Strin
     })
 }
 
-fn parse_community_agent_md(content: &str, path: &PathBuf) -> Result<AgentDefinition, String> {
+fn parse_community_agent_md(content: &str, path: &Path) -> Result<AgentDefinition, String> {
     use crate::models::{AgentColor, AgentModel, MemoryScope, ToolAccess, Visibility};
 
     if content.trim().starts_with("---") {
@@ -1030,12 +1025,11 @@ fn parse_community_agent_md(content: &str, path: &PathBuf) -> Result<AgentDefini
             };
         } else {
             match section {
-                "description" => {
-                    if !trimmed.is_empty() {
+                "description"
+                    if !trimmed.is_empty() => {
                         if !description.is_empty() { description.push(' '); }
                         description.push_str(trimmed);
                     }
-                }
                 "prompt" => {
                     prompt.push_str(line);
                     prompt.push('\n');
@@ -1156,7 +1150,7 @@ mod tests {
     use std::io::Write;
     use tempfile::tempdir;
 
-    fn create_test_capability_json(content: &str, dir: &PathBuf, subdir: &str, filename: &str) {
+    fn create_test_capability_json(content: &str, dir: &Path, subdir: &str, filename: &str) {
         let cap_dir = dir.join("capabilities").join(subdir);
         fs::create_dir_all(&cap_dir).unwrap();
         let file_path = cap_dir.join(filename);
@@ -1164,7 +1158,7 @@ mod tests {
         file.write_all(content.as_bytes()).unwrap();
     }
 
-    fn create_test_agent_json(content: &str, dir: &PathBuf, filename: &str) {
+    fn create_test_agent_json(content: &str, dir: &Path, filename: &str) {
         let agents_dir = dir.join("agents");
         fs::create_dir_all(&agents_dir).unwrap();
         let file_path = agents_dir.join(filename);

@@ -249,10 +249,8 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
             Ok((model, tokens))
         })
         .map_err(|e| format!("Model query error: {}", e))?;
-    for row in model_rows {
-        if let Ok((model, tokens)) = row {
-            tokens_by_model.insert(model, tokens);
-        }
+    for (model, tokens) in model_rows.flatten() {
+        tokens_by_model.insert(model, tokens);
     }
 
     // Compute sessions_by_project (from cwd, use last path component)
@@ -267,14 +265,12 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
             Ok((cwd, count))
         })
         .map_err(|e| format!("Project query error: {}", e))?;
-    for row in proj_rows {
-        if let Ok((cwd, count)) = row {
-            let project_name = std::path::Path::new(&cwd)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| cwd.clone());
-            *sessions_by_project.entry(project_name).or_insert(0) += count;
-        }
+    for (cwd, count) in proj_rows.flatten() {
+        let project_name = std::path::Path::new(&cwd)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| cwd.clone());
+        *sessions_by_project.entry(project_name).or_insert(0) += count;
     }
 
     // Compute cost estimates per model
