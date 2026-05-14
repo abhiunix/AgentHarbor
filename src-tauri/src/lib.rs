@@ -78,11 +78,12 @@ use commands::extensions::{
 use commands::plans::{
     list_plans, list_project_plans, read_plan, delete_plan_file,
     list_hidden_debate_plans, hide_plan_from_debate,
+    unhide_plan_from_debate, clear_hidden_debate_plans,
     list_todos, get_todo_stats,
 };
 use commands::permissions::{
-    get_claude_permissions, update_claude_permissions, get_claude_policy,
-    update_claude_policy, get_claude_project_permissions, update_claude_project_permissions,
+    get_claude_permissions, update_claude_permissions,
+    get_claude_project_permissions, update_claude_project_permissions,
     get_cursor_permissions, update_cursor_permissions,
 };
 use commands::ai_tracking::{
@@ -332,12 +333,12 @@ pub fn run() {
             delete_plan_file,
             list_hidden_debate_plans,
             hide_plan_from_debate,
+            unhide_plan_from_debate,
+            clear_hidden_debate_plans,
             list_todos,
             get_todo_stats,
             get_claude_permissions,
             update_claude_permissions,
-            get_claude_policy,
-            update_claude_policy,
             get_claude_project_permissions,
             update_claude_project_permissions,
             get_cursor_permissions,

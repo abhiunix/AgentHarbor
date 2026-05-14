@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
@@ -15,100 +14,30 @@ import {
   deletePlanFile,
   listHiddenDebatePlans,
   hidePlanFromDebate,
+  clearHiddenDebatePlans,
   type PlanEntry,
   type DebateCredentials,
   type DebateModel,
-  type DebateTurnStartEvent,
-  type DebateTurnCompleteEvent,
-  type DebateTokenEvent,
-  type DebateToolCallEvent,
   type DebateToolCallRecord,
-  type DebateCompleteEvent,
-  type DebateErrorEvent,
   type DebateSpeaker,
   type DebateTurnKind,
   type DebateSummary,
   type DebateRecord,
   type DebateTurn,
   type DebateRoundRecord,
-  type ParsedTurn,
   DEBATE_MODELS,
   DEFAULT_AUTHOR_MODEL_ID,
   DEFAULT_REVIEWER_MODEL_ID,
 } from "../lib/tauri";
+import {
+  useDebateRunStore,
+  type DebateRunState,
+  type DebateResultState,
+  type DebateTurnState,
+  type DebateToolCallState,
+} from "../stores/debateRunStore";
 import { DebugPath } from "../components/common/DebugPath";
 import { SecretsManager } from "../components/settings/SecretsManager";
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Types
-// ──────────────────────────────────────────────────────────────────────────────
-
-/** UI shape for a single tool call streamed from the backend. */
-interface DebateToolCallState {
-  tool: string;
-  inputPreview: string;
-  outputPreview: string;
-  isError: boolean;
-}
-
-interface DebateTurnState {
-  index: number;
-  speaker: DebateSpeaker;
-  kind: DebateTurnKind;
-  model: string;
-  /** Streaming buffer — tokens are appended as `debate:token` events arrive. */
-  text: string;
-  /** Locked once `turn_complete` fires. */
-  complete: boolean;
-  parsed: ParsedTurn | null;
-  parseError: string | null;
-  inputTokens?: number;
-  outputTokens?: number;
-  /** Tool calls appended live as `debate:tool_call` events arrive. */
-  toolCalls: DebateToolCallState[];
-  /** Captured from `debate:turn_start` so the Inspect view can show them. */
-  systemPrompt: string;
-  userPrompt: string;
-}
-
-interface DebateRunState {
-  debateId: string;
-  /** Max critique turns the user configured. Display uses the live
-   * `currentTurn` directly — we no longer show "k of N". */
-  maxRounds: number;
-  currentTurn: number;
-  turns: DebateTurnState[];
-  planPath: string | null;
-  planContent: string;
-  authorModel: DebateModel;
-  reviewerModel: DebateModel;
-}
-
-interface DebateResultState {
-  debateId: string;
-  planPath: string | null;
-  planContent: string;
-  finalPlan: string;
-  /** Reviewer's caveats from the finalize turn. */
-  caveats: string[];
-  /** Auto-saved path: `<plan_dir>/<basename>_v<N>.md`. Null when not saved. */
-  refinedPlanPath: string | null;
-  turnsUsed: number;
-  approved: boolean;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  authorInputTokens: number;
-  authorOutputTokens: number;
-  reviewerInputTokens: number;
-  reviewerOutputTokens: number;
-  costAuthorUsd: number;
-  costReviewerUsd: number;
-  costTotalUsd: number;
-  authorModelId: string;
-  reviewerModelId: string;
-}
-
-type View = "list" | "running" | "result";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Page
@@ -163,11 +92,14 @@ export function DebatePage() {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
-  // View state
-  const [view, setView] = useState<View>("list");
-  const [runState, setRunState] = useState<DebateRunState | null>(null);
-  const [resultState, setResultState] = useState<DebateResultState | null>(null);
-  const [runError, setRunError] = useState<string | null>(null);
+  // View state — sourced from the app-scoped Zustand store so debates keep
+  // running (and the user can return to view live progress / cancel) when
+  // they navigate away from this page mid-flight. Listeners are wired ONCE
+  // at app startup via `initDebateRunListeners`; they write into the store.
+  const view = useDebateRunStore((s) => s.view);
+  const runState = useDebateRunStore((s) => s.runState);
+  const resultState = useDebateRunStore((s) => s.resultState);
+  const runError = useDebateRunStore((s) => s.runError);
 
   // Persisted debate history
   const [debates, setDebates] = useState<DebateSummary[]>([]);
@@ -361,12 +293,24 @@ export function DebatePage() {
   /** Project-folder scan. macOS Finder hides dotfolders in the file picker,
    * so we let the user pick a regular folder, then the backend walks
    * `.claude/plans/` and `.cursor/plans/` for `.md` files. */
+  /** Open the configurator modal IMMEDIATELY (synchronous state update),
+   * and load the plan content in the background. Previously this awaited
+   * `readPlan` first, which made the button feel unresponsive on the first
+   * click (the modal didn't appear until the IPC round-trip finished).
+   * The Configurator now disables its Start button while content is still
+   * loading, so the user can't fire `handleStartDebate` before it's ready. */
   const openConfigurator = useCallback(
-    async (plan: PlanEntry) => {
-      // Ensure content is loaded before opening
+    (plan: PlanEntry) => {
+      setStartError(null);
+      setAuthorModel(defaultAuthorModel);
+      setReviewerModel(defaultReviewerModel);
+      setIterations("3");
+      setConfiguratorFor(plan);
+
       const key = plan.file_path;
-      if (!planContent[key]) {
-        setLoadingContent(key);
+      if (planContent[key] !== undefined) return; // already cached
+      setLoadingContent(key);
+      void (async () => {
         try {
           const content =
             plan.source === "custom"
@@ -375,18 +319,13 @@ export function DebatePage() {
           setPlanContent((prev) => ({ ...prev, [key]: content }));
         } catch (e) {
           console.error("Failed to load plan content for configurator", e);
-          return;
+          setStartError(`Failed to load plan content: ${e}`);
         } finally {
           setLoadingContent(null);
         }
-      }
-      setStartError(null);
-      setAuthorModel(defaultAuthorModel);
-      setReviewerModel(defaultReviewerModel);
-      setIterations("3");
-      setConfiguratorFor(plan);
+      })();
     },
-    [planContent]
+    [planContent, defaultAuthorModel, defaultReviewerModel]
   );
 
   // ── Start debate ──────────────────────────────────────────────────────────
@@ -432,10 +371,10 @@ export function DebatePage() {
         reviewerModel: reviewerModel.id,
         maxRounds: parsed,
       });
-      // Set the matcher ref SYNCHRONOUSLY before React renders, so the very
-      // first round_start event can't be filtered out by a stale ref.
-      currentDebateIdRef.current = debateId;
-      setRunState({
+      // Commit the run to the store SYNCHRONOUSLY before React renders so the
+      // very first turn_start event can't be filtered out by a stale matcher.
+      // `startRun` atomically sets currentDebateId + runState + view: "running".
+      useDebateRunStore.getState().startRun({
         debateId,
         maxRounds: parsed,
         currentTurn: 0,
@@ -445,10 +384,7 @@ export function DebatePage() {
         authorModel,
         reviewerModel,
       });
-      setRunError(null);
-      setResultState(null);
       setConfiguratorFor(null);
-      setView("running");
     } catch (e) {
       const msg = String(e);
       if (msg.includes("missing_credentials")) {
@@ -466,217 +402,19 @@ export function DebatePage() {
 
   // ── Listen to debate events ───────────────────────────────────────────────
 
-  const runStateRef = useRef<DebateRunState | null>(null);
-  runStateRef.current = runState;
-
-  // Stable ref so the mount-time event listeners can always trigger the
-  // latest `refreshDebates` without re-attaching listeners.
-  const refreshDebatesRef = useRef(refreshDebates);
-  refreshDebatesRef.current = refreshDebates;
-  const loadPlanListRef = useRef(loadPlanList);
-  loadPlanListRef.current = loadPlanList;
-
-  // Updated SYNCHRONOUSLY the instant start_debate returns, before React has
-  // a chance to render. The mount-time listeners filter by this — relying on
-  // runStateRef alone would lose events emitted between `await startDebate()`
-  // resolving and React committing the state update.
-  const currentDebateIdRef = useRef<string | null>(null);
-
-  // Attach listeners ONCE on page mount so events emitted between
-  // `start_debate` returning and the next render can't be lost. Filtering
-  // happens via the runStateRef, so stale debates never bleed in.
+  // When the store transitions into "result" view (i.e. a debate just
+  // completed), re-sync our local view of the persisted artefacts: the
+  // history list picks up the new record, and the plan list picks up the
+  // backend-written `_v<N>.md` sibling. The listener that produced the
+  // `view === "result"` transition lives at app scope (initDebateRunListeners),
+  // so this page-local effect is what replaces the inline refresh calls that
+  // used to live inside the `debate:complete` handler.
   useEffect(() => {
-    let unlistens: UnlistenFn[] = [];
-    let cancelled = false;
-
-    const matches = (debateId: string) =>
-      currentDebateIdRef.current === debateId;
-
-    const attach = async () => {
-      const unTurnStart = await listen<DebateTurnStartEvent>(
-        "debate:turn_start",
-        (event) => {
-          if (!matches(event.payload.debate_id)) return;
-          setRunState((prev) => {
-            if (!prev || prev.debateId !== event.payload.debate_id) return prev;
-            return {
-              ...prev,
-              currentTurn: event.payload.index,
-              turns: [
-                ...prev.turns,
-                {
-                  index: event.payload.index,
-                  speaker: event.payload.speaker,
-                  kind: event.payload.kind,
-                  model: event.payload.model,
-                  text: "",
-                  complete: false,
-                  parsed: null,
-                  parseError: null,
-                  toolCalls: [],
-                  systemPrompt: event.payload.system_prompt ?? "",
-                  userPrompt: event.payload.user_prompt ?? "",
-                },
-              ],
-            };
-          });
-        }
-      );
-
-      const unToken = await listen<DebateTokenEvent>(
-        "debate:token",
-        (event) => {
-          if (!matches(event.payload.debate_id)) return;
-          setRunState((prev) => {
-            if (!prev || prev.debateId !== event.payload.debate_id) return prev;
-            const idx = prev.turns.findIndex(
-              (t) => t.index === event.payload.index
-            );
-            if (idx === -1) return prev;
-            const turns = prev.turns.slice();
-            const existing = turns[idx];
-            if (existing.complete) return prev;
-            turns[idx] = { ...existing, text: existing.text + event.payload.text };
-            return { ...prev, turns };
-          });
-        }
-      );
-
-      const unToolCall = await listen<DebateToolCallEvent>(
-        "debate:tool_call",
-        (event) => {
-          if (!matches(event.payload.debate_id)) return;
-          setRunState((prev) => {
-            if (!prev || prev.debateId !== event.payload.debate_id) return prev;
-            const idx = prev.turns.findIndex(
-              (t) => t.index === event.payload.index
-            );
-            if (idx === -1) return prev;
-            const turns = prev.turns.slice();
-            turns[idx] = {
-              ...turns[idx],
-              toolCalls: [
-                ...turns[idx].toolCalls,
-                {
-                  tool: event.payload.tool,
-                  inputPreview: event.payload.input_preview,
-                  outputPreview: event.payload.output_preview,
-                  isError: event.payload.is_error,
-                },
-              ],
-            };
-            return { ...prev, turns };
-          });
-        }
-      );
-
-      const unTurnComplete = await listen<DebateTurnCompleteEvent>(
-        "debate:turn_complete",
-        (event) => {
-          if (!matches(event.payload.debate_id)) return;
-          setRunState((prev) => {
-            if (!prev || prev.debateId !== event.payload.debate_id) return prev;
-            const idx = prev.turns.findIndex(
-              (t) => t.index === event.payload.index
-            );
-            if (idx === -1) return prev;
-            const turns = prev.turns.slice();
-            const existing = turns[idx];
-            // Prefer the stream buffer; fall back to raw_text if streaming
-            // didn't manage to fill anything (e.g. all output came in one chunk).
-            const text = existing.text || event.payload.raw_text;
-            turns[idx] = {
-              ...existing,
-              text,
-              complete: true,
-              parsed: event.payload.parsed,
-              parseError: event.payload.parse_error,
-              inputTokens: event.payload.input_tokens,
-              outputTokens: event.payload.output_tokens,
-            };
-            return { ...prev, turns };
-          });
-        }
-      );
-
-      const unComplete = await listen<DebateCompleteEvent>(
-        "debate:complete",
-        (event) => {
-          if (!matches(event.payload.debate_id)) return;
-          const snapshot = runStateRef.current;
-          if (!snapshot) return;
-          setResultState({
-            debateId: snapshot.debateId,
-            planPath: snapshot.planPath,
-            planContent: snapshot.planContent,
-            finalPlan: event.payload.final_plan,
-            caveats: event.payload.caveats ?? [],
-            refinedPlanPath: event.payload.refined_plan_path || null,
-            turnsUsed: event.payload.turns_used,
-            approved: event.payload.approved,
-            totalInputTokens: event.payload.total_input_tokens,
-            totalOutputTokens: event.payload.total_output_tokens,
-            authorInputTokens: event.payload.author_input_tokens,
-            authorOutputTokens: event.payload.author_output_tokens,
-            reviewerInputTokens: event.payload.reviewer_input_tokens,
-            reviewerOutputTokens: event.payload.reviewer_output_tokens,
-            costAuthorUsd: event.payload.cost_author_usd,
-            costReviewerUsd: event.payload.cost_reviewer_usd,
-            costTotalUsd: event.payload.cost_total_usd,
-            authorModelId: snapshot.authorModel.id,
-            reviewerModelId: snapshot.reviewerModel.id,
-          });
-          setView("result");
-          // Refresh the persisted history so the "Debated" tag + history
-          // panel pick up this run without a page reload.
-          refreshDebatesRef.current();
-          // The backend just wrote a new `_v<N>.md` next to the original plan
-          // — re-list so it shows up in the project's group.
-          loadPlanListRef.current();
-        }
-      );
-
-      const unError = await listen<DebateErrorEvent>(
-        "debate:error",
-        (event) => {
-          if (!matches(event.payload.debate_id)) return;
-          if (event.payload.message === "cancelled") {
-            // Graceful return to list, no toast
-            setRunState(null);
-            setRunError(null);
-            setView("list");
-          } else {
-            setRunError(event.payload.message);
-          }
-        }
-      );
-
-      if (cancelled) {
-        unTurnStart();
-        unToken();
-        unToolCall();
-        unTurnComplete();
-        unComplete();
-        unError();
-        return;
-      }
-      unlistens = [
-        unTurnStart,
-        unToken,
-        unToolCall,
-        unTurnComplete,
-        unComplete,
-        unError,
-      ];
-    };
-
-    attach();
-
-    return () => {
-      cancelled = true;
-      unlistens.forEach((fn) => fn());
-    };
-  }, []);
+    if (view === "result") {
+      loadPlanList();
+      refreshDebates();
+    }
+  }, [view, loadPlanList, refreshDebates]);
 
   // ── Cancel ────────────────────────────────────────────────────────────────
 
@@ -685,10 +423,9 @@ export function DebatePage() {
     const debateId = runState.debateId;
     // Optimistically return to the list — the backend cancel may take a moment
     // (the worker only polls between SSE lines), so don't make the user wait.
-    currentDebateIdRef.current = null;
-    setRunState(null);
-    setRunError(null);
-    setView("list");
+    // `cancelRun` wipes currentDebateId synchronously so any in-flight events
+    // for this debate are filtered out by the store's matcher.
+    useDebateRunStore.getState().cancelRun();
     try {
       await cancelDebate(debateId);
     } catch (e) {
@@ -699,11 +436,7 @@ export function DebatePage() {
   // ── Result actions ────────────────────────────────────────────────────────
 
   const handleDiscard = useCallback(() => {
-    currentDebateIdRef.current = null;
-    setResultState(null);
-    setRunState(null);
-    setRunError(null);
-    setView("list");
+    useDebateRunStore.getState().discard();
     // Refresh plan list (file mtimes may have changed)
     loadPlanList();
   }, [loadPlanList]);
@@ -795,6 +528,20 @@ export function DebatePage() {
     }
   }, [deletePending, removePlanFromLocalState]);
 
+  /** "Show all" — wipes the persistent hidden-plans list so previously
+   * removed-from-Debate-page plans reappear on the next render. The
+   * project's plans are re-listed so any new files also show up. */
+  const handleClearHidden = useCallback(async () => {
+    try {
+      await clearHiddenDebatePlans();
+      setHiddenPlanPaths(new Set());
+      await loadPlanList();
+    } catch (e) {
+      console.error("Failed to clear hidden plans", e);
+      setPlansError(`Failed to clear hidden plans: ${e}`);
+    }
+  }, [loadPlanList]);
+
   // ── Banner / credential state ─────────────────────────────────────────────
 
   const credsReady = creds?.anthropic === true && creds?.openai === true;
@@ -812,7 +559,7 @@ export function DebatePage() {
       <div className="px-6 pt-6 pb-4">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <div>
-            <h1 className="text-2xl font-semibold text-text-primary mb-1">Debate</h1>
+            <h1 className="text-2xl font-semibold text-text-primary mb-1">AI Debate</h1>
             <DebugPath path="~/.claude/plans/ · ~/.cursor/plans/" className="text-sm" />
           </div>
           <CredentialsBar
@@ -842,8 +589,10 @@ export function DebatePage() {
           debatedPlanPaths={debatedPlanPaths}
           debates={debates}
           projectDir={projectDir}
+          hiddenCount={hiddenPlanPaths.size}
           onPickProject={pickProject}
           onClearProject={clearProject}
+          onClearHidden={handleClearHidden}
           onExpand={handleExpand}
           onCopy={handleCopy}
           onDebate={openConfigurator}
@@ -859,9 +608,11 @@ export function DebatePage() {
           onCancel={handleCancelDebate}
           error={runError}
           onDismissError={() => {
-            setRunState(null);
-            setRunError(null);
-            setView("list");
+            // Wipe both the run and the error banner, returning to the list.
+            // `cancelRun` already clears runError + view; calling setRunError
+            // afterward is harmless but explicit.
+            useDebateRunStore.getState().cancelRun();
+            useDebateRunStore.getState().setRunError(null);
           }}
         />
       )}
@@ -877,6 +628,7 @@ export function DebatePage() {
           reviewerModel={reviewerModel}
           iterations={iterations}
           starting={starting}
+          contentLoading={loadingContent === configuratorFor.file_path}
           error={startError}
           credsReady={selectionCredsReady}
           onAuthorModel={setAuthorModel}
@@ -1039,8 +791,10 @@ function PlanListView({
   debatedPlanPaths,
   debates,
   projectDir,
+  hiddenCount,
   onPickProject,
   onClearProject,
+  onClearHidden,
   onExpand,
   onCopy,
   onDebate,
@@ -1060,8 +814,11 @@ function PlanListView({
   /** All persisted debate summaries — used to slice per-plan history. */
   debates: DebateSummary[];
   projectDir: string | null;
+  /** Number of plans currently in the persistent hidden-from-Debate list. */
+  hiddenCount: number;
   onPickProject: () => void;
   onClearProject: () => void;
+  onClearHidden: () => void;
   onExpand: (p: PlanEntry) => void;
   onCopy: (p: PlanEntry) => void;
   onDebate: (p: PlanEntry) => void;
@@ -1169,9 +926,30 @@ function PlanListView({
           </button>
         </div>
       </div>
-      <p className="text-xs text-text-secondary">
-        {plans.length} plan{plans.length === 1 ? "" : "s"} available
-      </p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <p className="text-xs text-text-secondary">
+          {plans.length} plan{plans.length === 1 ? "" : "s"} available
+        </p>
+        {hiddenCount > 0 && (
+          <>
+            <span className="text-xs text-text-secondary">·</span>
+            <span
+              className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300"
+              title="Plans you removed from this page via the delete dialog. The files are still on disk."
+            >
+              {hiddenCount} hidden
+            </span>
+            <button
+              type="button"
+              onClick={onClearHidden}
+              className="text-xs px-2 py-0.5 rounded border border-border text-text-secondary hover:text-text-primary"
+              title="Restore all hidden plans to the list"
+            >
+              Show all
+            </button>
+          </>
+        )}
+      </div>
 
       {loading ? (
         <p className="text-text-secondary text-sm">Loading plans…</p>
@@ -1312,7 +1090,7 @@ function PlanRow({
                 e.stopPropagation();
                 onShowHistory();
               }}
-              title="View debate history for this plan"
+              title="View AI debate history for this plan"
               className="bg-green-500/15 border border-green-500/40 text-green-300 text-[10px] px-1.5 py-0.5 rounded font-medium hover:bg-green-500/25 transition-colors flex-shrink-0"
             >
               Debated
@@ -1352,9 +1130,9 @@ function PlanRow({
               ? "bg-accent-blue text-white hover:bg-accent-blue/90"
               : "bg-app-card border border-border text-text-secondary cursor-not-allowed"
           }`}
-          title={credsReady ? "Start debate" : "Add API keys to enable"}
+          title={credsReady ? "Start AI debate" : "Add API keys to enable"}
         >
-          Debate
+          AI Debate
         </button>
         <button
           type="button"
@@ -1405,11 +1183,11 @@ function PlanRow({
           )}
           <div className="border-t border-border px-4 py-3 space-y-2">
             <p className="text-[10px] uppercase tracking-wide text-text-secondary">
-              Debates ({planDebates.length})
+              AI Debates ({planDebates.length})
             </p>
             {planDebates.length === 0 ? (
               <p className="text-xs text-text-secondary">
-                No debates yet. Click <span className="text-text-primary">Debate</span> to start one — the rounds will persist here.
+                No AI debates yet. Click <span className="text-text-primary">AI Debate</span> to start one — the rounds will persist here.
               </p>
             ) : (
               <div className="space-y-2">
@@ -1533,6 +1311,7 @@ function Configurator({
   reviewerModel,
   iterations,
   starting,
+  contentLoading,
   error,
   credsReady,
   onAuthorModel,
@@ -1547,6 +1326,9 @@ function Configurator({
   reviewerModel: DebateModel;
   iterations: string;
   starting: boolean;
+  /** True while we're reading the plan file via IPC. Gates the Start button
+   * so a click before the read finishes can't no-op silently. */
+  contentLoading: boolean;
   error: string | null;
   credsReady: boolean;
   onAuthorModel: (m: DebateModel) => void;
@@ -1603,7 +1385,7 @@ function Configurator({
         <div className="p-6 space-y-4">
           <div>
             <h2 className="text-lg font-semibold text-text-primary mb-1">
-              Configure Debate
+              Configure AI Debate
             </h2>
             <p className="text-xs text-text-secondary font-mono truncate">{plan.name}</p>
           </div>
@@ -1682,14 +1464,18 @@ function Configurator({
             <button
               type="button"
               onClick={onStart}
-              disabled={!credsReady || starting}
+              disabled={!credsReady || starting || contentLoading}
               className={`h-9 px-4 rounded-md text-sm font-medium transition-colors ${
-                !credsReady || starting
+                !credsReady || starting || contentLoading
                   ? "bg-accent-blue/50 text-white/70 cursor-not-allowed"
                   : "bg-accent-blue text-white hover:bg-accent-blue/90"
               }`}
             >
-              {starting ? "Starting…" : "Start Debate"}
+              {contentLoading
+                ? "Loading plan…"
+                : starting
+                ? "Starting…"
+                : "Start AI Debate"}
             </button>
           </div>
         </div>
@@ -1782,7 +1568,7 @@ function DebateRunner({
 
       {error && (
         <div className="px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 flex items-center justify-between gap-3">
-          <span>Debate error: {error}</span>
+          <span>AI Debate error: {error}</span>
           <button
             type="button"
             onClick={onDismissError}
@@ -2019,7 +1805,7 @@ function TurnBody({ turn }: { turn: DebateTurnState }) {
               </ul>
             )}
           </Section>
-          <Section label="Rebutted">
+          <Section label="Rejected">
             {parsed.rebutted.length === 0 ? (
               <p className="text-text-secondary">(none)</p>
             ) : (
@@ -2377,7 +2163,7 @@ function ResultView({
       <div className="bg-app-card border border-border rounded-lg p-4 space-y-3">
         <div>
           <p className="text-sm font-medium text-text-primary">
-            Debate complete{" "}
+            AI Debate complete{" "}
             {state.approved ? (
               <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded bg-green-500/15 border border-green-500/40 text-green-400">
                 APPROVED
@@ -2592,7 +2378,7 @@ function HistoryPanel({
       >
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <div className="min-w-0">
-            <p className="text-xs text-text-secondary">Debate history</p>
+            <p className="text-xs text-text-secondary">AI Debate history</p>
             <p className="text-sm font-medium text-text-primary truncate">{planName}</p>
           </div>
           <button
@@ -2605,7 +2391,7 @@ function HistoryPanel({
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {debates.length === 0 ? (
-            <p className="text-text-secondary text-sm">No debates yet for this plan.</p>
+            <p className="text-text-secondary text-sm">No AI debates yet for this plan.</p>
           ) : (
             debates.map((d) => (
               <div

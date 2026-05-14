@@ -102,6 +102,7 @@ pub(crate) fn is_safe_plan_path(file_path: &str) -> bool {
         return true;
     }
     file_path.contains(".cursor/plans") || file_path.contains(".cursor\\plans")
+        || file_path.contains(".claude/plans") || file_path.contains(".claude\\plans")
         || file_path.contains(".claude/projects")
 }
 
@@ -320,6 +321,22 @@ pub fn hide_plan_from_debate(file_path: String) -> Result<(), String> {
     let mut set = load_hidden_plans();
     set.insert(file_path);
     save_hidden_plans(&set)
+}
+
+/// Un-hide a single previously-hidden plan path. No-op if not present.
+#[tauri::command]
+pub fn unhide_plan_from_debate(file_path: String) -> Result<(), String> {
+    let mut set = load_hidden_plans();
+    if set.remove(&file_path) {
+        save_hidden_plans(&set)?;
+    }
+    Ok(())
+}
+
+/// Clear the entire hidden-plans list — equivalent to "show everything again".
+#[tauri::command]
+pub fn clear_hidden_debate_plans() -> Result<(), String> {
+    save_hidden_plans(&std::collections::HashSet::new())
 }
 
 fn claude_project_session_ids(home: &std::path::Path, project_path: &str) -> std::collections::HashSet<String> {

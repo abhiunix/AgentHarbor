@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useRegistryStore, useCapabilityCounts, useNewItemsCount } from "../../stores/registryStore";
 import { useAgentCounts } from "../../stores/agentStore";
 import { usePresetStore } from "../../stores/presetStore";
+import { useDebateRunStore } from "../../stores/debateRunStore";
 import { getEnabledAdapterPlugins, type AdapterPlugin } from "../../lib/adapterPlugins";
 import type { CapabilityType } from "../../lib/types";
 import logoIcon from "../../assets/icon.png";
@@ -211,6 +212,9 @@ export function Sidebar() {
   const newItemsCount = useNewItemsCount();
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [showCcSwitch, setShowCcSwitch] = useState(false);
+  const debateView = useDebateRunStore((s) => s.view);
+  const debateCurrentTurn = useDebateRunStore((s) => s.runState?.currentTurn ?? 0);
+  const debateIsRunning = debateView === "running";
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -291,7 +295,7 @@ export function Sidebar() {
         <SectionHeader title="Utilities" />
         <nav className="px-2 space-y-0.5">
           <NavItem
-            icon="◫"
+            icon="📁"
             label="All Projects"
             active={location.pathname === "/projects"}
             onClick={() => navigate("/projects")}
@@ -302,12 +306,20 @@ export function Sidebar() {
             active={location.pathname === "/notes"}
             onClick={() => navigate("/notes")}
           />
-          <NavItem
-            icon="⚖"
-            label="Debate"
-            active={location.pathname === "/debate"}
-            onClick={() => navigate("/debate")}
-          />
+          <div className="relative">
+            <NavItem
+              icon="⚖️"
+              label="AI Debate"
+              active={location.pathname === "/debate"}
+              onClick={() => navigate("/debate")}
+            />
+            {debateIsRunning && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-accent-blue/15 border border-accent-blue/40 text-accent-blue font-mono pointer-events-none">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse" />
+                {debateCurrentTurn > 0 ? `Turn ${debateCurrentTurn}` : "starting…"}
+              </span>
+            )}
+          </div>
         </nav>
 
         {/* ── Adapters (collapsible per-adapter) ──────── */}
