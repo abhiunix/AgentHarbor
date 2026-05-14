@@ -322,6 +322,17 @@ export function Sidebar() {
           </div>
         </nav>
 
+        <SectionHeader title="Labs" />
+        <nav className="px-2 space-y-0.5">
+          <NavItem
+            icon="🧪"
+            label="Benchmark Lab"
+            active={location.pathname === "/benchmarks"}
+            onClick={() => navigate("/benchmarks")}
+            testId="sidebar-benchmark-lab"
+          />
+        </nav>
+
         {/* ── Adapters (collapsible per-adapter) ──────── */}
         <SectionHeader title="Adapters" />
         <div className="px-2 space-y-0.5">

@@ -19,10 +19,11 @@ const POLL_INTERVAL = 100; // ms
 
 interface TestCommand {
   id: string;
-  action: "query" | "query_all" | "click" | "exists" | "text" | "scroll" | "query_caps" | "query_agents";
+  action: "query" | "query_all" | "click" | "exists" | "text" | "scroll" | "query_caps" | "query_agents" | "input";
   testid?: string;
   selector?: string;
   text?: string;
+  value?: string;
   cap_type?: string; // mcp, rule, skill, hook, plugin
   cap_name?: string; // partial match on capability name
   agent_name?: string; // partial match on agent name
@@ -121,6 +122,59 @@ function findByText(text: string): ElementRect {
   return { found: false, x: 0, y: 0, width: 0, height: 0, centerX: 0, centerY: 0 };
 }
 
+function findElement(testid?: string, selector?: string, text?: string): HTMLElement | null {
+  if (testid) {
+    return document.querySelector(`[data-testid="${testid}"]`) as HTMLElement | null;
+  }
+  if (selector) {
+    return document.querySelector(selector) as HTMLElement | null;
+  }
+  if (text) {
+    const selectors = "button, a, [role='button'], [data-testid], input, textarea, select, [onclick], div[class*='cursor-pointer']";
+    const els = document.querySelectorAll(selectors);
+    for (const el of els) {
+      if (el.textContent?.trim().includes(text)) {
+        return el as HTMLElement;
+      }
+    }
+  }
+  return null;
+}
+
+function clickElement(testid?: string, selector?: string, text?: string) {
+  const el = findElement(testid, selector, text);
+  if (!el) return { clicked: false };
+  el.scrollIntoView({ behavior: "instant", block: "center" });
+  el.click();
+  return { clicked: true };
+}
+
+function inputValue(testid?: string, selector?: string, value?: string) {
+  const el = findElement(testid, selector);
+  if (!el) return { updated: false };
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
+    return { updated: false, error: "Element is not an input, textarea, or select" };
+  }
+
+  const nextValue = value ?? "";
+  const prototype =
+    el instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : el instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+  if (setter) {
+    setter.call(el, nextValue);
+  } else {
+    el.value = nextValue;
+  }
+
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return { updated: true, value: nextValue };
+}
+
 function queryCaps(capType?: string, capName?: string): Array<ElementRect & { capType: string; capName: string; testid: string }> {
   const rows = document.querySelectorAll('[data-testid^="deploy-cap-"]');
   const results: Array<ElementRect & { capType: string; capName: string; testid: string }> = [];
@@ -184,8 +238,12 @@ function handleCommand(cmd: TestCommand): unknown {
       return queryAllElements(cmd.selector || `[data-testid]`);
     case "exists":
       return { exists: !!document.querySelector(cmd.testid ? `[data-testid="${cmd.testid}"]` : cmd.selector || "") };
+    case "click":
+      return clickElement(cmd.testid, cmd.selector, cmd.text);
     case "text":
       return findByText(cmd.text || "");
+    case "input":
+      return inputValue(cmd.testid, cmd.selector, cmd.value);
     case "scroll": {
       const el = cmd.testid ? document.querySelector(`[data-testid="${cmd.testid}"]`) as HTMLElement : null;
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });

@@ -81,6 +81,13 @@ use commands::plans::{
     unhide_plan_from_debate, clear_hidden_debate_plans,
     list_todos, get_todo_stats,
 };
+use commands::benchmarks::{
+    list_benchmark_providers, list_benchmark_models, list_reference_benchmarks,
+    list_benchmark_datasets, save_benchmark_dataset, delete_benchmark_dataset,
+    import_benchmark_dataset, export_benchmark_dataset, list_benchmark_runs,
+    get_benchmark_run, update_benchmark_manual_review, export_benchmark_run,
+    run_benchmark_suite,
+};
 use commands::permissions::{
     get_claude_permissions, update_claude_permissions,
     get_claude_project_permissions, update_claude_project_permissions,
@@ -337,6 +344,19 @@ pub fn run() {
             clear_hidden_debate_plans,
             list_todos,
             get_todo_stats,
+            list_benchmark_providers,
+            list_benchmark_models,
+            list_reference_benchmarks,
+            list_benchmark_datasets,
+            save_benchmark_dataset,
+            delete_benchmark_dataset,
+            import_benchmark_dataset,
+            export_benchmark_dataset,
+            list_benchmark_runs,
+            get_benchmark_run,
+            update_benchmark_manual_review,
+            export_benchmark_run,
+            run_benchmark_suite,
             get_claude_permissions,
             update_claude_permissions,
             get_claude_project_permissions,

@@ -12,6 +12,7 @@ import { ProjectsPage } from "./pages/ProjectsPage";
 import { PresetPage } from "./pages/PresetPage";
 import { NotesPage } from "./pages/NotesPage";
 import { DebatePage } from "./pages/DebatePage";
+import { BenchmarkLabPage } from "./pages/BenchmarkLabPage";
 import { AdapterFeaturePage } from "./pages/AdapterFeaturePage";
 import { useRegistryStore } from "./stores/registryStore";
 import { useAgentStore } from "./stores/agentStore";
@@ -233,6 +234,7 @@ function App() {
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="notes" element={<NotesPage />} />
             <Route path="debate" element={<DebatePage />} />
+            <Route path="benchmarks" element={<BenchmarkLabPage />} />
 
             {/* ── Adapter feature routes ────────────────── */}
             <Route
