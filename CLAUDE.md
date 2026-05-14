@@ -91,6 +91,14 @@ Roadmap docs: `docs/dan_features.md` (original), `docs/dan_features-claude.md` (
 - `src/stores/` — 10 Zustand stores. New domains add their own store.
 - `src/components/layout/Sidebar.tsx` — nav surface. Orphan: `UnifiedAnalyticsPage.tsx` has no entry.
 
+## Canonical roadmap
+
+`docs/dan_features.md` is the canonical 10-item next-implementation list and product contract. `docs/dan_features-claude.md` adds depth (architecture, research, short-duration backlog P0–P8) on top — it does not override. When a PR ships, reference the `dan_features.md` task number (`#1`–`#10`) in the commit subject so both docs stay synced. Do not edit `dan_features.md` without explicit approval.
+
+## Known WIP (check `git status` before editing these files)
+
+- Benchmark module skeleton: an uncommitted `pub mod benchmarks;` line in `src-tauri/src/commands/mod.rs` indicates the author is scaffolding `commands/benchmarks.rs` plus `models/benchmark.rs`. **Do not create these files from another session** until the initial skeleton is committed.
+
 ## Operating rules for this repo
 
 1. **Reuse the token store.** Any new feature that calls a provider must go through `analytics::token_store`. Do not introduce a second secrets path.

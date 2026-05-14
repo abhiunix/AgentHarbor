@@ -75,6 +75,51 @@ This is the single biggest piece of technical debt the benchmark lab will exerci
 
 ---
 
+## 1b. Alignment with `dan_features.md` and current WIP
+
+`dan_features.md` already lays out the product direction and a 10-item next-implementation list. This doc does **not** propose a parallel track; it adds depth (research citations, concrete Rust types, command signatures, short-duration backlog) on top of the same plan.
+
+### Current in-progress state (as of 2026-05-15)
+
+- `src-tauri/src/commands/mod.rs` has an **uncommitted** `pub mod benchmarks;` declaration (see local `git status`). The matching `src-tauri/src/commands/benchmarks.rs` file has not been created yet — the Rust module skeleton is being scaffolded right now. **Do not touch this from another session** until the author commits the initial skeleton; coordinating writes across uncommitted changes is how merge conflicts and accidental reverts happen.
+- No `BenchmarkLabPage.tsx`, `benchmarkStore.ts`, or `models/benchmark.rs` yet. The 10-item list in `dan_features.md` is the canonical task ordering; this doc proposes additions rather than reordering.
+
+### Mapping `dan_features.md` § "Suggested next implementation tasks" → this doc
+
+| `dan_features.md` task | This doc adds |
+|---|---|
+| 1. Audit production-ready vs partial providers | §1 audit table + §4 P0 (surface hidden providers) |
+| 2. Add Benchmark Lab to roadmap and navigation | §3.5 UI layout; sidebar insertion above `Notes` |
+| 3. Normalized benchmark types in TS + Rust | §3.1 concrete Rust struct signatures, mirrored TS via existing type-gen path |
+| 4. Single-prompt × many-models MVP via stored keys | §3.2 Tauri commands (`start_benchmark_run`), §3.3 runner topology |
+| 5. Per-run metrics: tokens / cost / latency / context | §3.1 `Usage` field on every `BenchmarkRunItem`; §4 P1 dynamic model catalog (so cost is correct) |
+| 6. Prompt variant comparison | Falls out of `BenchmarkConfig.system_prompt` + multi-config columns |
+| 7. Skill/plugin toggles for overhead and quality impact | `BenchmarkConfig.skills/rules/mcp_servers` reference existing `CompositeId`s + §4 P3 token-diff |
+| 8. Dataset import/export + saved run history | §3.6 persistence (SQLite index + per-run dir); commands `import_benchmark_dataset`, `export_benchmark_run` |
+| 9. Rubric scoring + pairwise judge | §3.4 scoring layers; §2 judge research (pointwise default, balanced permutation, ≥2 judges) |
+| 10. E2E tests with mocked providers + deterministic fixtures | §7 test plan (mocked `Provider` trait, fixture datasets, `cargo insta` snapshots, `Clock` injection) |
+
+### Additions this doc proposes beyond `dan_features.md`
+
+These are net-new and do **not** appear in the original 10:
+
+- CI regression workflow (`.github/workflows/regression.yml`) — independent prerequisite.
+- **P1 — Dynamic model catalog** (replaces hardcoded pricing at `src-tauri/src/analytics/cost_engine.rs:40-82`). Implicit in `dan_features.md` Opportunity B but not in the numbered list. Without it, every cost number in the app rots within weeks.
+- **P3 — Token-diff CLI / panel.** No web tool ships this. Strongest desktop wedge.
+- **P4 — MCP tool latency profiler.**
+- **P5 — Deploy regression detector.** Composition of P3 + a sentinel benchmark; depends on Lab MVP.
+- **P6 — Per-project cost budgets and alerts.**
+- **P7 — Ollama provider.** Local lane; free comparison column.
+- **P8 — Contamination overlay.** Warns when a model's training cutoff is later than a benchmark's release date.
+- Inspect AI subprocess bridge (Phase 4).
+- 2025–2026 judge-bias mitigations baked into defaults.
+
+### Convention: numbering authority
+
+When this doc says "PR #N" or "Phase N", that is local to this doc. When it says "dan_features.md task #N", that is the canonical 10-item list. Anything that ships should reference the `dan_features.md` task number in the commit message so progress is visible on both docs.
+
+---
+
 ## 2. State of the eval landscape (May 2026)
 
 Highlights from a fresh research pass. URLs and arXiv ids are inlined for citation hygiene.
