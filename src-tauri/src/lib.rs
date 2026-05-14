@@ -26,6 +26,7 @@ use commands::config::{
     get_settings, update_settings, update_general_settings,
     update_registry_settings, update_deploy_settings, update_analytics_settings,
     get_username, get_author_id,
+    get_claude_code_settings, apply_claude_code_provider,
 };
 use commands::backup::{
     create_project_backup, restore_project_backup, get_project_backups,
@@ -65,7 +66,7 @@ use commands::global_config::{
     read_claude_settings, write_claude_settings, read_claude_memory, write_claude_memory,
     read_claude_desktop_config, write_claude_desktop_config, get_claude_desktop_config_path,
     read_global_config_raw, write_global_config_raw, add_global_mcp_server, remove_global_mcp_server,
-    discover_capabilities,
+    discover_capabilities, test_ollama_connection, launch_claude_via_ollama,
 };
 use commands::usage::{read_project_usage_files, list_projects_with_mcp};
 use commands::session_stats::get_claude_session_stats;
@@ -276,6 +277,10 @@ pub fn run() {
             get_secrets_count,
             read_claude_settings,
             write_claude_settings,
+            get_claude_code_settings,
+            apply_claude_code_provider,
+            test_ollama_connection,
+            launch_claude_via_ollama,
             read_claude_memory,
             write_claude_memory,
             read_claude_desktop_config,

@@ -99,6 +99,50 @@ impl Default for AnalyticsSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClaudeCodeProvider {
+    Anthropic,
+    Ollama,
+}
+
+impl Default for ClaudeCodeProvider {
+    fn default() -> Self {
+        Self::Anthropic
+    }
+}
+
+fn default_ollama_base_url() -> String {
+    "http://localhost:11434".to_string()
+}
+
+fn default_ollama_auth_token() -> String {
+    "ollama".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeCodeSettings {
+    #[serde(default)]
+    pub provider: ClaudeCodeProvider,
+    #[serde(default = "default_ollama_base_url")]
+    pub ollama_base_url: String,
+    #[serde(default)]
+    pub ollama_model: String,
+    #[serde(default = "default_ollama_auth_token")]
+    pub ollama_auth_token: String,
+}
+
+impl Default for ClaudeCodeSettings {
+    fn default() -> Self {
+        Self {
+            provider: ClaudeCodeProvider::default(),
+            ollama_base_url: default_ollama_base_url(),
+            ollama_model: String::new(),
+            ollama_auth_token: default_ollama_auth_token(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
     pub general: GeneralSettings,
@@ -107,6 +151,8 @@ pub struct AppSettings {
     pub secrets: SecretsInfo,
     #[serde(default)]
     pub analytics: AnalyticsSettings,
+    #[serde(default)]
+    pub claude_code: ClaudeCodeSettings,
 }
 
 fn get_settings_file_path() -> PathBuf {
@@ -210,6 +256,35 @@ pub fn get_author_id() -> String {
     settings.general.author_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
 }
 
+#[tauri::command]
+pub fn get_claude_code_settings() -> ClaudeCodeSettings {
+    load_settings().claude_code
+}
+
+#[tauri::command]
+pub fn apply_claude_code_provider(cc: ClaudeCodeSettings) -> Result<AppSettings, String> {
+    let _lock = SETTINGS_MUTEX
+        .lock()
+        .map_err(|e| format!("Settings lock error: {}", e))?;
+
+    if cc.provider == ClaudeCodeProvider::Ollama {
+        if cc.ollama_model.trim().is_empty() {
+            return Err("Model is required for Ollama".to_string());
+        }
+        let url = cc.ollama_base_url.trim();
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err("Base URL must start with http:// or https://".to_string());
+        }
+    }
+
+    crate::commands::global_config::mutate_claude_settings_env(&cc)?;
+
+    let mut settings = load_settings();
+    settings.claude_code = cc;
+    save_settings(&settings)?;
+    Ok(settings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +302,14 @@ mod tests {
     fn test_default_adapters() {
         let settings = AppSettings::default();
         assert!(settings.deploy.default_adapters.contains(&"claude-code".to_string()));
+    }
+
+    #[test]
+    fn test_default_claude_code_settings() {
+        let cc = ClaudeCodeSettings::default();
+        assert_eq!(cc.provider, ClaudeCodeProvider::Anthropic);
+        assert_eq!(cc.ollama_base_url, "http://localhost:11434");
+        assert_eq!(cc.ollama_auth_token, "ollama");
+        assert_eq!(cc.ollama_model, "");
     }
 }

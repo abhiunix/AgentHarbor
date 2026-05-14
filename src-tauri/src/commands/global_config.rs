@@ -55,6 +55,130 @@ pub fn write_claude_settings(content: String) -> Result<(), String> {
     write_atomic(&path, &content)
 }
 
+// Env keys managed by the Ollama switch.
+// We deliberately do NOT set ANTHROPIC_AUTH_TOKEN alongside ANTHROPIC_API_KEY —
+// Claude Code treats them as competing auth methods and warns when both are present.
+// ANTHROPIC_API_KEY=ollama is the single correct override for local/proxy endpoints.
+const OLLAMA_ENV_KEYS: [&str; 3] = [
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+];
+// Also clean up ANTHROPIC_AUTH_TOKEN if a previous version wrote it.
+const LEGACY_OLLAMA_KEYS: [&str; 1] = ["ANTHROPIC_AUTH_TOKEN"];
+
+/// Read the file at `path`, mutate the top-level `env` object to reflect `cc`, write back atomically.
+/// Preserves any unrelated env keys. Creates the file from `{}` if missing.
+pub(crate) fn write_claude_settings_env_at(
+    path: &std::path::Path,
+    cc: &crate::commands::config::ClaudeCodeSettings,
+) -> Result<(), String> {
+    let mut root: Value = if path.exists() {
+        let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
+        if raw.trim().is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(&raw)
+                .map_err(|e| format!("Existing {} is malformed: {}", path.display(), e))?
+        }
+    } else {
+        json!({})
+    };
+
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| format!("{} is not a JSON object", path.display()))?;
+
+    let env_entry = obj.entry("env".to_string()).or_insert_with(|| json!({}));
+    let env_obj = env_entry
+        .as_object_mut()
+        .ok_or_else(|| "`env` field is not a JSON object".to_string())?;
+
+    use crate::commands::config::ClaudeCodeProvider;
+    match cc.provider {
+        ClaudeCodeProvider::Ollama => {
+            env_obj.insert(
+                "ANTHROPIC_BASE_URL".to_string(),
+                Value::String(cc.ollama_base_url.trim_end_matches('/').to_string()),
+            );
+            // Single auth override — do NOT also set ANTHROPIC_AUTH_TOKEN.
+            // Claude Code warns and behaves unpredictably when both are present.
+            env_obj.insert(
+                "ANTHROPIC_API_KEY".to_string(),
+                Value::String(if cc.ollama_auth_token.is_empty() {
+                    "ollama".to_string()
+                } else {
+                    cc.ollama_auth_token.clone()
+                }),
+            );
+            env_obj.insert(
+                "ANTHROPIC_MODEL".to_string(),
+                Value::String(cc.ollama_model.clone()),
+            );
+            // Remove legacy key written by earlier versions of this feature.
+            for key in LEGACY_OLLAMA_KEYS.iter() {
+                env_obj.remove(*key);
+            }
+        }
+        ClaudeCodeProvider::Anthropic => {
+            for key in OLLAMA_ENV_KEYS.iter() {
+                env_obj.remove(*key);
+            }
+            for key in LEGACY_OLLAMA_KEYS.iter() {
+                env_obj.remove(*key);
+            }
+        }
+    }
+
+    let serialised = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    write_atomic(&path.to_path_buf(), &serialised)
+}
+
+pub(crate) fn mutate_claude_settings_env(
+    cc: &crate::commands::config::ClaudeCodeSettings,
+) -> Result<(), String> {
+    let path = claude_settings_path().ok_or("Could not resolve ~/.claude/settings.json path")?;
+    write_claude_settings_env_at(&path, cc)
+}
+
+#[tauri::command]
+pub async fn test_ollama_connection(base_url: String) -> Result<bool, String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err("Base URL must start with http:// or https://".to_string());
+    }
+    let url = format!("{}/api/tags", trimmed);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+    match client.get(&url).send().await {
+        Ok(r) if r.status().is_success() => Ok(true),
+        Ok(r) => Err(format!("HTTP {}", r.status())),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Open a new Terminal window and run `ollama launch claude --model <model>`.
+/// Uses Ollama's native Claude Code integration (no separate proxy needed).
+/// Clears our env overrides from settings.json first so that Ollama's own
+/// ANTHROPIC_AUTH_TOKEN doesn't conflict with our ANTHROPIC_API_KEY.
+#[tauri::command]
+pub fn launch_claude_via_ollama(model: String) -> Result<(), String> {
+    // Clear our env keys so Ollama can manage its own auth without conflict.
+    if let Some(path) = claude_settings_path() {
+        let clear = crate::commands::config::ClaudeCodeSettings {
+            provider: crate::commands::config::ClaudeCodeProvider::Anthropic,
+            ..Default::default()
+        };
+        let _ = write_claude_settings_env_at(&path, &clear);
+    }
+    crate::utils::platform::launch_in_terminal(&format!(
+        "ollama launch claude --model {}",
+        model.trim()
+    ))
+}
+
 #[tauri::command]
 pub fn read_claude_memory() -> Result<String, String> {
     let path = claude_memory_path().ok_or("Could not resolve path")?;
@@ -348,4 +472,116 @@ pub fn discover_capabilities() -> Result<Vec<DiscoveredCapability>, String> {
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod claude_env_tests {
+    use super::*;
+    use crate::commands::config::{ClaudeCodeProvider, ClaudeCodeSettings};
+    use tempfile::tempdir;
+
+    fn ollama_cc() -> ClaudeCodeSettings {
+        ClaudeCodeSettings {
+            provider: ClaudeCodeProvider::Ollama,
+            ollama_base_url: "http://localhost:11434".to_string(),
+            ollama_model: "llama3.1:8b".to_string(),
+            ollama_auth_token: "ollama".to_string(),
+        }
+    }
+
+    fn anthropic_cc() -> ClaudeCodeSettings {
+        ClaudeCodeSettings {
+            provider: ClaudeCodeProvider::Anthropic,
+            ollama_base_url: "http://localhost:11434".to_string(),
+            ollama_model: "llama3.1:8b".to_string(),
+            ollama_auth_token: "ollama".to_string(),
+        }
+    }
+
+    #[test]
+    fn creates_file_when_missing_and_writes_three_env_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert!(!path.exists());
+
+        write_claude_settings_env_at(&path, &ollama_cc()).unwrap();
+
+        let raw = fs::read_to_string(&path).unwrap();
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        let env = v.get("env").unwrap().as_object().unwrap();
+        assert_eq!(env.get("ANTHROPIC_BASE_URL").unwrap(), "http://localhost:11434");
+        assert_eq!(env.get("ANTHROPIC_API_KEY").unwrap(), "ollama");
+        assert_eq!(env.get("ANTHROPIC_MODEL").unwrap(), "llama3.1:8b");
+        // ANTHROPIC_AUTH_TOKEN must NOT be written — causes auth conflict warning in Claude Code
+        assert!(env.get("ANTHROPIC_AUTH_TOKEN").is_none());
+    }
+
+    #[test]
+    fn preserves_unrelated_env_keys_and_top_level_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{
+              "env": { "MY_OTHER": "foo" },
+              "permissions": { "allow": [] }
+            }"#,
+        )
+        .unwrap();
+
+        write_claude_settings_env_at(&path, &ollama_cc()).unwrap();
+
+        let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let env = v.get("env").unwrap().as_object().unwrap();
+        assert_eq!(env.get("MY_OTHER").unwrap(), "foo");
+        assert_eq!(env.get("ANTHROPIC_MODEL").unwrap(), "llama3.1:8b");
+        assert!(v.get("permissions").is_some());
+    }
+
+    #[test]
+    fn switching_to_anthropic_removes_all_ollama_keys_and_keeps_others() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        write_claude_settings_env_at(&path, &ollama_cc()).unwrap();
+
+        // Inject an unrelated key and a legacy ANTHROPIC_AUTH_TOKEN to verify cleanup
+        let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        v["env"]["MY_OTHER"] = Value::String("foo".to_string());
+        v["env"]["ANTHROPIC_AUTH_TOKEN"] = Value::String("legacy".to_string());
+        fs::write(&path, serde_json::to_string(&v).unwrap()).unwrap();
+
+        write_claude_settings_env_at(&path, &anthropic_cc()).unwrap();
+
+        let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let env = v.get("env").unwrap().as_object().unwrap();
+        assert!(env.get("ANTHROPIC_BASE_URL").is_none());
+        assert!(env.get("ANTHROPIC_API_KEY").is_none());
+        assert!(env.get("ANTHROPIC_AUTH_TOKEN").is_none(), "legacy key must be cleaned up");
+        assert!(env.get("ANTHROPIC_MODEL").is_none());
+        assert_eq!(env.get("MY_OTHER").unwrap(), "foo");
+    }
+
+    #[test]
+    fn malformed_json_returns_structured_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{").unwrap();
+
+        let err = write_claude_settings_env_at(&path, &ollama_cc()).unwrap_err();
+        assert!(err.contains("malformed"), "got: {}", err);
+        // File should not have been overwritten with the error
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{");
+    }
+
+    #[test]
+    fn trailing_slash_in_base_url_is_stripped() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut cc = ollama_cc();
+        cc.ollama_base_url = "http://localhost:11434/".to_string();
+        write_claude_settings_env_at(&path, &cc).unwrap();
+
+        let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["env"]["ANTHROPIC_BASE_URL"], "http://localhost:11434");
+    }
 }
