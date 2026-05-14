@@ -247,6 +247,17 @@ export function Sidebar() {
           />
         </nav>
 
+        {/* ── AI Recommendations ──────────────────────── */}
+        <SectionHeader title="AI Assist" />
+        <nav className="px-2 space-y-0.5">
+          <NavItem
+            icon="✨"
+            label="Recommendations"
+            active={location.pathname === "/recommendations"}
+            onClick={() => navigate("/recommendations")}
+          />
+        </nav>
+
         {/* ── Private Notes ───────────────────────────── */}
         <SectionHeader title="Private Notes" />
         <nav className="px-2 space-y-0.5">

@@ -1,5 +1,6 @@
 mod commands;
 mod adapters;
+mod ai;
 mod analytics;
 mod models;
 mod registry;
@@ -114,6 +115,10 @@ use commands::gemini::{
 };
 use commands::codex::{
     list_codex_skills, read_codex_skill_file, read_codex_config, write_codex_config,
+};
+use commands::recommendations::{
+    get_recommendations, get_cached_recommendations_count, has_anthropic_api_key,
+    clear_recommendations_cache,
 };
 use analytics::commands::{
     get_all_provider_status, get_provider_analytics, get_all_provider_analytics,
@@ -420,6 +425,11 @@ pub fn run() {
             get_claude_plans_summary,
             get_claude_hooks_summary,
             get_claude_file_history_stats,
+            // AI Recommendations
+            get_recommendations,
+            get_cached_recommendations_count,
+            has_anthropic_api_key,
+            clear_recommendations_cache,
             // Cursor Analytics V2
             get_cursor_v2_connection_status,
             get_cursor_v2_overview,
