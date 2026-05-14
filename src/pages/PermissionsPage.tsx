@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   getClaudePermissions,
   updateClaudePermissions,
@@ -14,6 +15,10 @@ import type {
 } from "../lib/tauri";
 import { ProjectScopeSelector } from "../components/common/ProjectScopeSelector";
 import { DebugPath } from "../components/common/DebugPath";
+import {
+  AdapterConfigSection,
+  type AdapterGlobalConfig,
+} from "../components/global/AdapterConfigSection";
 
 function PermissionList({
   label,
@@ -102,6 +107,8 @@ export function PermissionsPage() {
   const [rawSettings, setRawSettings] = useState("");
   const [rawSettingsLoading, setRawSettingsLoading] = useState(false);
 
+  const [claudeMcpConfig, setClaudeMcpConfig] = useState<AdapterGlobalConfig | null>(null);
+
   const [editJsonClaudeGlobal, setEditJsonClaudeGlobal] = useState(false);
   const [editJsonClaudeProjectSettings, setEditJsonClaudeProjectSettings] = useState(false);
   const [editJsonClaudeProjectSettingsLocal, setEditJsonClaudeProjectSettingsLocal] = useState(false);
@@ -164,6 +171,32 @@ export function PermissionsPage() {
     }
   }, []);
 
+  const loadClaudeMcpConfig = useCallback(async () => {
+    try {
+      const result = await invoke<{ mcp_servers: string[]; has_config: boolean }>(
+        "get_global_config",
+        { adapterId: "claude-code" }
+      );
+      setClaudeMcpConfig({
+        id: "claude-code",
+        name: "Claude Code",
+        color: "#DA7756",
+        globalPath: "~/.claude.json",
+        mcpServers: result.mcp_servers,
+        hasConfig: result.has_config,
+      });
+    } catch {
+      setClaudeMcpConfig({
+        id: "claude-code",
+        name: "Claude Code",
+        color: "#DA7756",
+        globalPath: "~/.claude.json",
+        mcpServers: [],
+        hasConfig: false,
+      });
+    }
+  }, []);
+
   async function loadData() {
     setLoading(true);
     setError(null);
@@ -172,6 +205,7 @@ export function PermissionsPage() {
         getClaudePermissions(),
         getClaudePolicy(),
         loadRawSettings(),
+        loadClaudeMcpConfig(),
       ]);
       setClaudePerms(cp);
       setClaudeAllow([...cp.allow]);
@@ -358,10 +392,10 @@ export function PermissionsPage() {
       <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
         <div>
           <h1 className="text-2xl font-bold text-text-primary mb-2">
-            Permission &amp; Policy Controls
+            Permissions &amp; Control
           </h1>
           <p className="text-text-secondary text-sm">
-            Manage allowed and denied tool permissions for Claude Code.
+            Manage permissions, policy restrictions, and global MCP config for Claude Code.
           </p>
         </div>
         <ProjectScopeSelector value={projectScope} onChange={setProjectScope} />
@@ -373,6 +407,18 @@ export function PermissionsPage() {
           Changes directly affect IDE behavior. Save with care.
         </p>
       </div>
+
+      {isGlobal && claudeMcpConfig && (
+        <div className="bg-app-card border border-border rounded-lg p-5 mb-6">
+          <h2 className="text-lg font-semibold text-text-primary mb-4">
+            Global MCP Configuration
+          </h2>
+          <AdapterConfigSection
+            config={claudeMcpConfig}
+            onRefresh={loadClaudeMcpConfig}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-app-card border border-border rounded-lg p-5">

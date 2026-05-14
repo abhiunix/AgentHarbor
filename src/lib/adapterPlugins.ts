@@ -57,10 +57,9 @@ export const adapterPlugins: AdapterPlugin[] = [
     color: "#9333ea",
     defaultExpanded: true,
     features: [
-      { id: "global-config", label: "Global Config", icon: "⊕", route: "/adapters/claude-code/global-config" },
       { id: "instructions", label: "Instructions", icon: "📝", route: "/adapters/claude-code/instructions" },
       { id: "memory", label: "Memory", icon: "🧠", route: "/adapters/claude-code/memory" },
-      { id: "permissions", label: "Permissions", icon: "🔒", route: "/adapters/claude-code/permissions" },
+      { id: "permissions", label: "Permissions & Control", icon: "🔒", route: "/adapters/claude-code/permissions" },
       { id: "analytics-v2", label: "Analytics", icon: "📊", route: "/adapters/claude-code/analytics-v2" },
       { id: "prompts", label: "Prompt History", icon: "💬", route: "/adapters/claude-code/prompts" },
       { id: "transcripts", label: "Transcripts", icon: "📜", route: "/adapters/claude-code/transcripts" },
