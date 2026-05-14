@@ -676,6 +676,31 @@ export async function writeClaudeSettings(content: string): Promise<void> {
   return invoke<void>("write_claude_settings", { content });
 }
 
+export type ClaudeCodeProvider = "anthropic" | "ollama";
+
+export interface ClaudeCodeSettings {
+  provider: ClaudeCodeProvider;
+  ollama_base_url: string;
+  ollama_model: string;
+  ollama_auth_token: string;
+}
+
+export async function getClaudeCodeSettings(): Promise<ClaudeCodeSettings> {
+  return invoke<ClaudeCodeSettings>("get_claude_code_settings");
+}
+
+export async function applyClaudeCodeProvider(cc: ClaudeCodeSettings): Promise<unknown> {
+  return invoke("apply_claude_code_provider", { cc });
+}
+
+export async function testOllamaConnection(baseUrl: string): Promise<boolean> {
+  return invoke<boolean>("test_ollama_connection", { baseUrl });
+}
+
+export async function launchClaudeViaOllama(model: string): Promise<void> {
+  return invoke<void>("launch_claude_via_ollama", { model });
+}
+
 export async function readClaudeMemory(): Promise<string> {
   return invoke<string>("read_claude_memory");
 }
