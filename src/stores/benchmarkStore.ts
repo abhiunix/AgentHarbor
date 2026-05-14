@@ -25,6 +25,7 @@ interface BenchmarkState {
   datasets: BenchmarkDataset[];
   references: ReferenceBenchmark[];
   runs: BenchmarkRunSummary[];
+  runDetails: Record<string, BenchmarkRun>;
   currentRun: BenchmarkRun | null;
   loading: boolean;
   running: boolean;
@@ -34,6 +35,7 @@ interface BenchmarkState {
 interface BenchmarkActions {
   bootstrap: () => Promise<void>;
   refreshRuns: () => Promise<void>;
+  hydrateRunDetails: (runIds?: string[]) => Promise<void>;
   loadRun: (runId: string) => Promise<void>;
   saveDataset: (dataset: BenchmarkDataset) => Promise<BenchmarkDataset | null>;
   runSuite: (request: BenchmarkRunRequest) => Promise<BenchmarkRun | null>;
@@ -47,6 +49,7 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
   datasets: [],
   references: [],
   runs: [],
+  runDetails: {},
   currentRun: null,
   loading: false,
   running: false,
@@ -87,11 +90,38 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
     }
   },
 
+  hydrateRunDetails: async (runIds) => {
+    const state = useBenchmarkStore.getState();
+    const idsToLoad = (runIds ?? state.runs.map((run) => run.id)).filter((runId) => !state.runDetails[runId]);
+    if (idsToLoad.length === 0) {
+      return;
+    }
+
+    try {
+      const runs = await Promise.all(idsToLoad.map((runId) => getBenchmarkRun(runId)));
+      set((current) => ({
+        runDetails: {
+          ...current.runDetails,
+          ...Object.fromEntries(runs.map((run) => [run.id, run])),
+        },
+      }));
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
   loadRun: async (runId) => {
     set({ loading: true, error: null });
     try {
       const run = await getBenchmarkRun(runId);
-      set({ currentRun: run, loading: false });
+      set((current) => ({
+        currentRun: run,
+        runDetails: {
+          ...current.runDetails,
+          [run.id]: run,
+        },
+        loading: false,
+      }));
     } catch (error) {
       set({
         loading: false,
@@ -124,6 +154,10 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
       set({
         currentRun: run,
         runs,
+        runDetails: {
+          ...useBenchmarkStore.getState().runDetails,
+          [run.id]: run,
+        },
         running: false,
       });
       return run;
@@ -139,7 +173,13 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
   saveManualReview: async (runId, itemId, manualReview) => {
     try {
       const run = await updateBenchmarkManualReview(runId, itemId, manualReview);
-      set({ currentRun: run });
+      set((current) => ({
+        currentRun: run,
+        runDetails: {
+          ...current.runDetails,
+          [run.id]: run,
+        },
+      }));
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
     }

@@ -19,11 +19,12 @@ const POLL_INTERVAL = 100; // ms
 
 interface TestCommand {
   id: string;
-  action: "query" | "query_all" | "click" | "exists" | "text" | "scroll" | "query_caps" | "query_agents" | "input";
+  action: "query" | "query_all" | "click" | "click_index" | "exists" | "text" | "scroll" | "query_caps" | "query_agents" | "input";
   testid?: string;
   selector?: string;
   text?: string;
   value?: string;
+  index?: number;
   cap_type?: string; // mcp, rule, skill, hook, plugin
   cap_name?: string; // partial match on capability name
   agent_name?: string; // partial match on agent name
@@ -149,6 +150,16 @@ function clickElement(testid?: string, selector?: string, text?: string) {
   return { clicked: true };
 }
 
+function clickElementAtIndex(selector?: string, index?: number) {
+  if (!selector || index === undefined || index < 0) return { clicked: false };
+  const els = document.querySelectorAll(selector);
+  const el = els.item(index) as HTMLElement | null;
+  if (!el) return { clicked: false };
+  el.scrollIntoView({ behavior: "instant", block: "center" });
+  el.click();
+  return { clicked: true, index };
+}
+
 function inputValue(testid?: string, selector?: string, value?: string) {
   const el = findElement(testid, selector);
   if (!el) return { updated: false };
@@ -240,6 +251,8 @@ function handleCommand(cmd: TestCommand): unknown {
       return { exists: !!document.querySelector(cmd.testid ? `[data-testid="${cmd.testid}"]` : cmd.selector || "") };
     case "click":
       return clickElement(cmd.testid, cmd.selector, cmd.text);
+    case "click_index":
+      return clickElementAtIndex(cmd.selector, cmd.index);
     case "text":
       return findByText(cmd.text || "");
     case "input":
