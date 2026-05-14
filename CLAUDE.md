@@ -67,3 +67,58 @@ Outbound network calls are restricted to each provider's official API endpoints 
 
 - `.github/workflows/ci.yml` — push/PR to `main`: `npx tsc --noEmit`, `cargo clippy` (warning-as-error, but `continue-on-error: true`), `cargo test`, `cargo build` with `SKIP_VERSION_BUMP=1`. Runs on macOS only.
 - `.github/workflows/release.yml` — tag `v*`: full signed + notarized macOS build, publishes DMG + updater `.tar.gz` + `.sig` + `latest.json` to the GitHub Release. Requires the eight signing secrets listed in `docs/build-and-release.md`.
+---
+
+# AgentHarbor — Claude operating notes
+
+Project-specific operating instructions for Claude Code. Read this at the start of every session.
+
+## What this project is
+
+A Tauri 2 + React 19 tray app (macOS + Windows) that manages AI coding agents (Claude Code, Cursor, Codex, Gemini, Windsurf, plus several experimental backends). Rust backend, React frontend, Zustand state, registry-based capability sync via git.
+
+Mainline docs: `README.md`, `docs/features.md`, `docs/getting-started.md`.
+Roadmap docs: `docs/dan_features.md` (original), `docs/dan_features-claude.md` (deeper Claude-authored companion — read this before touching benchmarking work).
+
+## Architecture cheatsheet
+
+- `src-tauri/src/analytics/` — 16 provider analytics modules; only ~5 are GA in the UI. Token storage at `src-tauri/src/analytics/token_store.rs:65-92` uses `~/.agentharbor/provider-tokens.json` + optional keychain.
+- `src-tauri/src/adapters/` — 8 deploy adapters.
+- `src-tauri/src/commands/` + `src-tauri/src/lib.rs:193-435` — 170+ Tauri commands registered.
+- `src-tauri/src/analytics/cost_engine.rs:40-82` — hardcoded pricing (stale within weeks; needs dynamic catalog per `dan_features-claude.md` §4 P1).
+- `src-tauri/src/utils/drift.rs` — file-hash snapshots used by deploy; reusable for benchmark config drift.
+- `src-tauri/src/models/capability.rs` + `models/agent.rs` — typed registry items. Re-use these from new code, do not duplicate.
+- `src/stores/` — 10 Zustand stores. New domains add their own store.
+- `src/components/layout/Sidebar.tsx` — nav surface. Orphan: `UnifiedAnalyticsPage.tsx` has no entry.
+
+## Operating rules for this repo
+
+1. **Reuse the token store.** Any new feature that calls a provider must go through `analytics::token_store`. Do not introduce a second secrets path.
+2. **Rust does network + secrets, React renders.** API keys never enter the renderer. Benchmark / catalog refresh / token-diff all live in Rust.
+3. **Mirror Rust types to TS.** When adding `models/foo.rs`, add a `src/lib/types.ts` counterpart in the same PR.
+4. **Tests: `npm run test:regression`** (tsc build + `cargo test`). No frontend tests exist yet; do not introduce one off-hand — discuss first.
+5. **No CI yet.** Treat that as an open task, not a blocker for individual PRs.
+6. **Branch naming for Dan's work: `dan/<topic>`.** Push directly to upstream (`abhiunix/AgentHarbor`). Open PRs but never merge from this session without explicit user approval.
+7. **Don't expand the GA provider list** without surfacing it in the README provider table AND the sidebar AND the `ProviderConnectModal` AND docs/features.md. Hidden providers are intentional until explicitly graduated.
+8. **No live provider calls in tests.** Mock through the existing `Provider` trait.
+
+## Conventions
+
+- Commits: conventional commits (`feat:`, `fix:`, `docs:`, `chore:`); imperative subject ≤72 chars.
+- File paths in commit bodies use `path:line` form so reviewers can jump.
+- New Tauri commands go in `src-tauri/src/commands/<domain>.rs` and are registered in `lib.rs`.
+
+## Things to avoid
+
+- Adding new hardcoded model pricing rows. Use the dynamic catalog (when it exists) or coordinate.
+- Calling provider APIs from React.
+- Bundling JSONL fixtures or live provider responses into source.
+- Editing `docs/dan_features.md` (original); add to `dan_features-claude.md` or open a separate doc.
+- Using `--no-verify` on commits or force-pushing to anything other than personal `dan/` branches.
+
+## Session memory
+
+- `tasks/todo.md` — current session's actionable list.
+- `tasks/lessons.md` — corrections to incorporate going forward.
+
+When the user corrects an approach, update `tasks/lessons.md` with the rule + the why before continuing.
