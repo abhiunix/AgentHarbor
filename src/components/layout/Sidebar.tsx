@@ -287,8 +287,8 @@ export function Sidebar() {
           />
         </div>
 
-        {/* ── Projects ────────────────────────────────── */}
-        <SectionHeader title="Projects" />
+        {/* ── Utilities (Projects + Notes + Debate) ───── */}
+        <SectionHeader title="Utilities" />
         <nav className="px-2 space-y-0.5">
           <NavItem
             icon="◫"
@@ -296,16 +296,17 @@ export function Sidebar() {
             active={location.pathname === "/projects"}
             onClick={() => navigate("/projects")}
           />
-        </nav>
-
-        {/* ── Private Notes ───────────────────────────── */}
-        <SectionHeader title="Private Notes" />
-        <nav className="px-2 space-y-0.5">
           <NavItem
             icon="📝"
             label="Private Notes"
             active={location.pathname === "/notes"}
             onClick={() => navigate("/notes")}
+          />
+          <NavItem
+            icon="⚖"
+            label="Debate"
+            active={location.pathname === "/debate"}
+            onClick={() => navigate("/debate")}
           />
         </nav>
 
