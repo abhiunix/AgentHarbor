@@ -179,6 +179,61 @@ pub fn file_manager_name() -> &'static str {
     { "File Manager" }
 }
 
+/// Open a new terminal window and immediately run `command`.
+/// Uses osascript on macOS so the command is visible and interactive.
+pub fn launch_in_terminal(command: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "tell application \"Terminal\" to do script \"{}\"",
+            command.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        Command::new("osascript")
+            .args(["-e", &script])
+            .spawn()
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/c", "start", "cmd", "/K", command])
+            .spawn()
+            .map_err(|e| format!("Failed to open Command Prompt: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let shell_cmd = format!("{}; exec $SHELL", command);
+        launch_in_linux_terminal(&shell_cmd)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn launch_in_linux_terminal(command: &str) -> Result<(), String> {
+    let terminals: &[(&str, Vec<String>)] = &[
+        ("gnome-terminal", vec!["--".to_string(), "bash".to_string(), "-c".to_string(), command.to_string()]),
+        ("konsole", vec!["-e".to_string(), format!("bash -c '{}'", command)]),
+        ("alacritty", vec!["-e".to_string(), "bash".to_string(), "-c".to_string(), command.to_string()]),
+        ("kitty", vec!["bash".to_string(), "-c".to_string(), command.to_string()]),
+        ("xterm", vec!["-e".to_string(), format!("bash -c '{}'", command)]),
+    ];
+
+    for (cmd, args) in terminals {
+        if which::which(cmd).is_ok() {
+            Command::new(cmd)
+                .args(args)
+                .spawn()
+                .map_err(|e| format!("Failed to open {}: {}", cmd, e))?;
+            return Ok(());
+        }
+    }
+
+    Err("No supported terminal found. Set $TERMINAL environment variable.".to_string())
+}
+
 /// Returns the platform-appropriate name for the terminal.
 pub fn terminal_name() -> &'static str {
     #[cfg(target_os = "macos")]

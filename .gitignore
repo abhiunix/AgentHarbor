@@ -39,9 +39,13 @@ src-tauri/target/
 # Local state
 .agentharbor/
 
-# AgentHarbor deployed skills (present locally, not committed)
-.claude/skills/
-.cursor/skills/
+# Local agent state — AgentHarbor reads/writes these for testing the app
+# itself, but they're per-developer scratch space and never committed.
+.claude/
+.cursor/
+
+# One-off debate output artifacts at the repo root
+CLAUDE_debate_*.md
 
 # macOS installer artifacts (never commit)
 *.dmg

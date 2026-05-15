@@ -85,7 +85,7 @@ fn encode_claude_project_path(path: &str) -> String {
     format!("-{}", normalized)
 }
 
-fn is_safe_plan_path(file_path: &str) -> bool {
+pub(crate) fn is_safe_plan_path(file_path: &str) -> bool {
     if file_path.contains("..") {
         return false;
     }
@@ -102,6 +102,7 @@ fn is_safe_plan_path(file_path: &str) -> bool {
         return true;
     }
     file_path.contains(".cursor/plans") || file_path.contains(".cursor\\plans")
+        || file_path.contains(".claude/plans") || file_path.contains(".claude\\plans")
         || file_path.contains(".claude/projects")
 }
 
@@ -252,6 +253,90 @@ pub fn read_plan(file_path: String) -> Result<String, String> {
         return Err("Invalid plan path".to_string());
     }
     std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
+}
+
+/// Delete a plan file from disk. The user is expected to have confirmed in
+/// the UI. We do NOT enforce `is_safe_plan_path` here because the Debate
+/// page also lists custom user-picked / project-scanned plans that live
+/// outside `~/.claude/plans/` and `~/.cursor/plans/` — those need to be
+/// deletable too. Sanity checks: must exist, must be a regular file, must
+/// have a `.md` extension (so a misrouted call can't `rm` an arbitrary file).
+#[tauri::command]
+pub fn delete_plan_file(file_path: String) -> Result<(), String> {
+    let path = std::path::Path::new(&file_path);
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", file_path));
+    }
+    if !path.is_file() {
+        return Err(format!("Not a regular file: {}", file_path));
+    }
+    if path.extension().and_then(|s| s.to_str()) != Some("md") {
+        return Err(format!("Refusing to delete non-.md file: {}", file_path));
+    }
+    std::fs::remove_file(path)
+        .map_err(|e| format!("Failed to delete {}: {}", file_path, e))?;
+    Ok(())
+}
+
+// ── Hidden-from-Debate-page list (registry & custom plans the user has
+//    chosen to hide without deleting from disk) ─────────────────────────────
+
+fn debate_hidden_plans_path() -> std::path::PathBuf {
+    crate::utils::paths::app_data_dir().join("debate_hidden_plans.json")
+}
+
+fn load_hidden_plans() -> std::collections::HashSet<String> {
+    let p = debate_hidden_plans_path();
+    if !p.exists() {
+        return std::collections::HashSet::new();
+    }
+    std::fs::read_to_string(&p)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_hidden_plans(set: &std::collections::HashSet<String>) -> Result<(), String> {
+    let p = debate_hidden_plans_path();
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(set).map_err(|e| e.to_string())?;
+    crate::utils::paths::atomic_write_str(&p, &json)
+}
+
+/// Returns the list of plan `file_path`s that the user has hidden from the
+/// Debate page. The file is left on disk; just filtered out client-side.
+#[tauri::command]
+pub fn list_hidden_debate_plans() -> Vec<String> {
+    let mut v: Vec<String> = load_hidden_plans().into_iter().collect();
+    v.sort();
+    v
+}
+
+/// Hide a plan from the Debate page without touching the file on disk.
+/// Persistent across app restarts.
+#[tauri::command]
+pub fn hide_plan_from_debate(file_path: String) -> Result<(), String> {
+    let mut set = load_hidden_plans();
+    set.insert(file_path);
+    save_hidden_plans(&set)
+}
+
+/// Un-hide a single previously-hidden plan path. No-op if not present.
+#[tauri::command]
+pub fn unhide_plan_from_debate(file_path: String) -> Result<(), String> {
+    let mut set = load_hidden_plans();
+    if set.remove(&file_path) {
+        save_hidden_plans(&set)?;
+    }
+    Ok(())
+}
+
+/// Clear the entire hidden-plans list — equivalent to "show everything again".
+#[tauri::command]
+pub fn clear_hidden_debate_plans() -> Result<(), String> {
+    save_hidden_plans(&std::collections::HashSet::new())
 }
 
 fn claude_project_session_ids(home: &std::path::Path, project_path: &str) -> std::collections::HashSet<String> {

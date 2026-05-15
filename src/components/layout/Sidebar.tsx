@@ -1,17 +1,47 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useRegistryStore, useCapabilityCounts, useNewItemsCount } from "../../stores/registryStore";
 import { useAgentCounts } from "../../stores/agentStore";
 import { usePresetStore } from "../../stores/presetStore";
+import { useDebateRunStore } from "../../stores/debateRunStore";
 import { getEnabledAdapterPlugins, type AdapterPlugin } from "../../lib/adapterPlugins";
 import type { CapabilityType } from "../../lib/types";
 import logoIcon from "../../assets/icon.png";
 import mcpIcon from "../../assets/mcp_logo.png";
+import { ClaudeCodeSwitchModal } from "../common/ClaudeCodeSwitchModal";
+
+// Half-white (Ollama) + half-orange (Claude) brain icon.
+function SplitBrainIcon({ className = "w-4 h-4" }: { className?: string }) {
+  const brainPath =
+    "M9 3a3 3 0 0 0-3 3 2.5 2.5 0 0 0-2 4 2.5 2.5 0 0 0 0 4 2.5 2.5 0 0 0 2 4 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3Zm6 0a3 3 0 0 1 3 3 2.5 2.5 0 0 1 2 4 2.5 2.5 0 0 1 0 4 2.5 2.5 0 0 1-2 4 3 3 0 0 1-3 3 3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z";
+  return (
+    <svg viewBox="0 0 24 24" className={className} xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <clipPath id="splitBrainClip">
+          <path d={brainPath} />
+        </clipPath>
+      </defs>
+      <g clipPath="url(#splitBrainClip)">
+        <rect x="0" y="0" width="12" height="24" fill="#f5f5f5" />
+        <rect x="12" y="0" width="12" height="24" fill="#DA7756" />
+      </g>
+      <path
+        d={brainPath}
+        fill="none"
+        stroke="#0e0f13"
+        strokeWidth="1"
+        strokeLinejoin="round"
+      />
+      <line x1="12" y1="3.5" x2="12" y2="20.5" stroke="#0e0f13" strokeWidth="0.75" />
+    </svg>
+  );
+}
 
 interface NavItemProps {
   icon: string;
   iconImg?: string;
+  iconNode?: ReactNode;
   label: string;
   count?: number;
   newCount?: number;
@@ -19,14 +49,16 @@ interface NavItemProps {
   onClick: () => void;
 }
 
-function NavItem({ icon, iconImg, label, count, newCount, active, onClick, testId }: NavItemProps & { testId?: string }) {
+function NavItem({ icon, iconImg, iconNode, label, count, newCount, active, onClick, testId }: NavItemProps & { testId?: string }) {
   return (
     <button
       onClick={onClick}
       className={`sidebar-item w-full text-left ${active ? "active" : ""}`}
       {...(testId ? { "data-testid": testId } : {})}
     >
-      {iconImg ? (
+      {iconNode ? (
+        iconNode
+      ) : iconImg ? (
         <img src={iconImg} alt="" className="w-4 h-4 object-contain" />
       ) : (
         <span className="text-base">{icon}</span>
@@ -77,14 +109,24 @@ function useCollapsedState(adapterId: string, defaultExpanded: boolean): [boolea
   return [expanded, () => setExpanded((prev) => !prev)];
 }
 
+interface ExtraAdapterItem {
+  id: string;
+  label: string;
+  iconNode?: ReactNode;
+  icon?: string;
+  onClick: () => void;
+}
+
 function CollapsibleAdapterSection({
   plugin,
   currentPath,
   onNavigate,
+  extraItems,
 }: {
   plugin: AdapterPlugin;
   currentPath: string;
   onNavigate: (route: string) => void;
+  extraItems?: ExtraAdapterItem[];
 }) {
   const [expanded, toggle] = useCollapsedState(plugin.id, plugin.defaultExpanded);
 
@@ -143,6 +185,15 @@ function CollapsibleAdapterSection({
               onClick={() => onNavigate(feature.route)}
             />
           ))}
+          {extraItems?.map((item) => (
+            <NavItem
+              key={item.id}
+              icon={item.icon ?? ""}
+              iconNode={item.iconNode}
+              label={item.label}
+              onClick={item.onClick}
+            />
+          ))}
         </nav>
       </div>
     </div>
@@ -160,6 +211,10 @@ export function Sidebar() {
   const { presets } = usePresetStore();
   const newItemsCount = useNewItemsCount();
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [showCcSwitch, setShowCcSwitch] = useState(false);
+  const debateView = useDebateRunStore((s) => s.view);
+  const debateCurrentTurn = useDebateRunStore((s) => s.runState?.currentTurn ?? 0);
+  const debateIsRunning = debateView === "running";
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -236,26 +291,35 @@ export function Sidebar() {
           />
         </div>
 
-        {/* ── Projects ────────────────────────────────── */}
-        <SectionHeader title="Projects" />
+        {/* ── Utilities (Projects + Notes + Debate) ───── */}
+        <SectionHeader title="Utilities" />
         <nav className="px-2 space-y-0.5">
           <NavItem
-            icon="◫"
+            icon="📁"
             label="All Projects"
             active={location.pathname === "/projects"}
             onClick={() => navigate("/projects")}
           />
-        </nav>
-
-        {/* ── Private Notes ───────────────────────────── */}
-        <SectionHeader title="Private Notes" />
-        <nav className="px-2 space-y-0.5">
           <NavItem
             icon="📝"
             label="Private Notes"
             active={location.pathname === "/notes"}
             onClick={() => navigate("/notes")}
           />
+          <div className="relative">
+            <NavItem
+              icon="⚖️"
+              label="AI Debate"
+              active={location.pathname === "/debate"}
+              onClick={() => navigate("/debate")}
+            />
+            {debateIsRunning && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-accent-blue/15 border border-accent-blue/40 text-accent-blue font-mono pointer-events-none">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse" />
+                {debateCurrentTurn > 0 ? `Turn ${debateCurrentTurn}` : "starting…"}
+              </span>
+            )}
+          </div>
         </nav>
 
         {/* ── Adapters (collapsible per-adapter) ──────── */}
@@ -286,6 +350,18 @@ export function Sidebar() {
                 plugin={plugin}
                 currentPath={location.pathname}
                 onNavigate={navigate}
+                extraItems={
+                  plugin.id === "claude-code"
+                    ? [
+                        {
+                          id: "switch-model",
+                          label: "Switch Model",
+                          iconNode: <SplitBrainIcon />,
+                          onClick: () => setShowCcSwitch(true),
+                        },
+                      ]
+                    : undefined
+                }
               />
             )
           )}
@@ -304,6 +380,10 @@ export function Sidebar() {
           Version {appVersion ?? "…"}
         </div>
       </div>
+      <ClaudeCodeSwitchModal
+        open={showCcSwitch}
+        onClose={() => setShowCcSwitch(false)}
+      />
     </aside>
   );
 }

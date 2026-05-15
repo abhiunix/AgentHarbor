@@ -27,6 +27,7 @@ use commands::config::{
     get_settings, update_settings, update_general_settings,
     update_registry_settings, update_deploy_settings, update_analytics_settings,
     get_username, get_author_id,
+    get_claude_code_settings, apply_claude_code_provider,
 };
 use commands::backup::{
     create_project_backup, restore_project_backup, get_project_backups,
@@ -66,7 +67,7 @@ use commands::global_config::{
     read_claude_settings, write_claude_settings, read_claude_memory, write_claude_memory,
     read_claude_desktop_config, write_claude_desktop_config, get_claude_desktop_config_path,
     read_global_config_raw, write_global_config_raw, add_global_mcp_server, remove_global_mcp_server,
-    discover_capabilities,
+    discover_capabilities, test_ollama_connection, launch_claude_via_ollama,
 };
 use commands::usage::{read_project_usage_files, list_projects_with_mcp};
 use commands::session_stats::get_claude_session_stats;
@@ -75,10 +76,15 @@ use commands::transcripts::{list_transcript_sessions, read_transcript, search_tr
 use commands::extensions::{
     list_claude_plugins, list_cursor_extensions, list_cursor_plugins, toggle_claude_plugin,
 };
-use commands::plans::{list_plans, list_project_plans, read_plan, list_todos, get_todo_stats};
+use commands::plans::{
+    list_plans, list_project_plans, read_plan, delete_plan_file,
+    list_hidden_debate_plans, hide_plan_from_debate,
+    unhide_plan_from_debate, clear_hidden_debate_plans,
+    list_todos, get_todo_stats,
+};
 use commands::permissions::{
-    get_claude_permissions, update_claude_permissions, get_claude_policy,
-    update_claude_policy, get_claude_project_permissions, update_claude_project_permissions,
+    get_claude_permissions, update_claude_permissions,
+    get_claude_project_permissions, update_claude_project_permissions,
     get_cursor_permissions, update_cursor_permissions,
 };
 use commands::ai_tracking::{
@@ -116,6 +122,11 @@ use commands::gemini::{
 use commands::codex::{
     list_codex_skills, read_codex_skill_file, read_codex_config, write_codex_config,
 };
+use commands::debate::{
+    start_debate, cancel_debate, replace_plan_file, save_refined_plan, check_debate_credentials,
+    discover_project_plans,
+};
+use commands::debate_history::{list_debates, get_debate, delete_debate};
 use commands::recommendations::{
     get_recommendations, get_cached_recommendations_count, has_anthropic_api_key,
     clear_recommendations_cache,
@@ -282,6 +293,10 @@ pub fn run() {
             get_secrets_count,
             read_claude_settings,
             write_claude_settings,
+            get_claude_code_settings,
+            apply_claude_code_provider,
+            test_ollama_connection,
+            launch_claude_via_ollama,
             read_claude_memory,
             write_claude_memory,
             read_claude_desktop_config,
@@ -321,12 +336,15 @@ pub fn run() {
             list_plans,
             list_project_plans,
             read_plan,
+            delete_plan_file,
+            list_hidden_debate_plans,
+            hide_plan_from_debate,
+            unhide_plan_from_debate,
+            clear_hidden_debate_plans,
             list_todos,
             get_todo_stats,
             get_claude_permissions,
             update_claude_permissions,
-            get_claude_policy,
-            update_claude_policy,
             get_claude_project_permissions,
             update_claude_project_permissions,
             get_cursor_permissions,
@@ -369,6 +387,17 @@ pub fn run() {
             read_codex_skill_file,
             read_codex_config,
             write_codex_config,
+            // Debate
+            start_debate,
+            cancel_debate,
+            replace_plan_file,
+            save_refined_plan,
+            check_debate_credentials,
+            discover_project_plans,
+            // Debate history
+            list_debates,
+            get_debate,
+            delete_debate,
             // Test bridge
             test_bridge_read_cmd,
             test_bridge_write_result,
