@@ -1248,3 +1248,33 @@ export async function hasAnthropicApiKey(): Promise<boolean> {
 export async function clearRecommendationsCache(): Promise<void> {
   return invoke<void>("clear_recommendations_cache");
 }
+
+// --- Token Optimizer: Model Routing ---
+
+export interface ModelRoutingMessage {
+  timestamp: string;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read: number;
+  cache_write: number;
+  has_thinking: boolean;
+  tool_count: number;
+  project: string | null;
+  current_cost: number;
+  haiku_cost: number;
+  sonnet_cost: number;
+  prompt_preview: string | null;
+}
+
+export interface ModelRoutingAnalysis {
+  period_days: number;
+  messages: ModelRoutingMessage[];
+  total_current_cost: number;
+  total_messages: number;
+  generated_at: string;
+}
+
+export async function analyzeModelRouting(days?: number): Promise<ModelRoutingAnalysis> {
+  return invoke<ModelRoutingAnalysis>("analyze_model_routing", { days });
+}

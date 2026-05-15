@@ -12,6 +12,7 @@ import { ProjectsPage } from "./pages/ProjectsPage";
 import { PresetPage } from "./pages/PresetPage";
 import { NotesPage } from "./pages/NotesPage";
 import { RecommendationsPage } from "./pages/RecommendationsPage";
+import { OptimizePage } from "./pages/OptimizePage";
 import { AdapterFeaturePage } from "./pages/AdapterFeaturePage";
 import { useRegistryStore } from "./stores/registryStore";
 import { useAgentStore } from "./stores/agentStore";
@@ -223,6 +224,7 @@ function App() {
             <Route path="presets/*" element={<PresetPage />} />
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="recommendations" element={<RecommendationsPage />} />
+            <Route path="optimize" element={<OptimizePage />} />
             <Route path="notes" element={<NotesPage />} />
 
             {/* ── Adapter feature routes ────────────────── */}

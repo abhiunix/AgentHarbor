@@ -35,3 +35,4 @@ pub mod claude_history;
 pub mod claude_metadata;
 pub mod codex;
 pub mod recommendations;
+pub mod model_routing;

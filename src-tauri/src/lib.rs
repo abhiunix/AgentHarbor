@@ -120,6 +120,7 @@ use commands::recommendations::{
     get_recommendations, get_cached_recommendations_count, has_anthropic_api_key,
     clear_recommendations_cache,
 };
+use commands::model_routing::analyze_model_routing;
 use analytics::commands::{
     get_all_provider_status, get_provider_analytics, get_all_provider_analytics,
     save_provider_token, delete_provider_token, has_provider_token,
@@ -430,6 +431,8 @@ pub fn run() {
             get_cached_recommendations_count,
             has_anthropic_api_key,
             clear_recommendations_cache,
+            // Token Optimizer
+            analyze_model_routing,
             // Cursor Analytics V2
             get_cursor_v2_connection_status,
             get_cursor_v2_overview,

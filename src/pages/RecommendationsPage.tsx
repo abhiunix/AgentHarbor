@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   getRecommendations,
   hasAnthropicApiKey,
-  storeSecret,
   clearRecommendationsCache,
   previewDeploy,
   executeDeploy,
@@ -26,56 +26,36 @@ const TYPE_BADGES: Record<string, string> = {
   custom: "bg-app-card-hover text-text-secondary",
 };
 
-function ApiKeySetup({ onSaved }: { onSaved: () => void }) {
-  const [key, setKey] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSave = async () => {
-    if (!key.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await storeSecret("anthropic_api_key", key.trim());
-      onSaved();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
+function MissingKeyNotice({ onRecheck }: { onRecheck: () => void }) {
+  const navigate = useNavigate();
   return (
     <div className="max-w-xl mx-auto mt-12 p-6 bg-app-card border border-border rounded-lg">
       <h2 className="text-lg font-semibold text-text-primary mb-2">
-        Connect Anthropic API
+        Anthropic API key required
       </h2>
       <p className="text-sm text-text-secondary mb-4">
         AI recommendations use Claude to analyze your installed tools, projects,
-        and registry — and suggest capabilities worth deploying. Paste an
-        Anthropic API key to get started. The key is stored in your OS Keychain.
+        and registry. Add a secret named{" "}
+        <span className="font-mono text-text-primary">anthropic_api_key</span>{" "}
+        in Settings → Manage Secrets. The value is stored in your OS Keychain.
       </p>
-      <input
-        type="password"
-        value={key}
-        onChange={(e) => setKey(e.target.value)}
-        placeholder="sk-ant-..."
-        className="w-full bg-app-input border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue"
-      />
-      {error && (
-        <p className="mt-2 text-xs text-accent-red">{error}</p>
-      )}
-      <button
-        onClick={handleSave}
-        disabled={!key.trim() || saving}
-        className="mt-4 px-4 py-2 bg-accent-blue text-white text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
-      >
-        {saving ? "Saving…" : "Save API Key"}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => navigate("/settings")}
+          className="px-4 py-2 bg-accent-blue text-white text-sm font-medium rounded-md hover:opacity-90"
+        >
+          Open Settings
+        </button>
+        <button
+          onClick={onRecheck}
+          className="px-4 py-2 bg-app-card-hover border border-border text-text-primary text-sm font-medium rounded-md hover:border-border-light"
+        >
+          I've added it
+        </button>
+      </div>
       <p className="mt-3 text-xs text-text-muted">
-        Get a key at{" "}
-        <span className="font-mono">console.anthropic.com</span>. We default to
-        Claude Haiku 4.5 — a typical recommendation run costs less than $0.01.
+        Get a key at <span className="font-mono">console.anthropic.com</span>.
+        We default to Claude Haiku 4.5 — a typical run costs under $0.01.
       </p>
     </div>
   );
@@ -285,14 +265,7 @@ export function RecommendationsPage() {
   }
 
   if (!hasKey) {
-    return (
-      <ApiKeySetup
-        onSaved={() => {
-          setHasKey(true);
-          load(true);
-        }}
-      />
-    );
+    return <MissingKeyNotice onRecheck={checkKey} />;
   }
 
   return (
