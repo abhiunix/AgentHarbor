@@ -43,12 +43,18 @@ jobs:
 
       - name: Make rustup default stable
         # Belt-and-suspenders: dtolnay/rust-toolchain installs but doesn't
-        # always set rustup's default, which leads to `cargo clippy` errors
-        # like `unexpected argument 'clippy' found` on macOS runners.
-        # `cargo +stable` is a rustup-shim feature that's also unreliable
-        # if cargo resolves directly to the binary. Forcing the default
-        # cures both.
-        run: rustup default stable
+        # always set rustup's default. Additionally, on some macOS runner
+        # images `cargo` on PATH resolves to a stale rustup-init shim rather
+        # than the rustup proxy, which makes `cargo clippy` error with
+        # `unexpected argument 'clippy' found`. We force the default AND
+        # invoke cargo via `rustup run stable cargo ...` below to bypass
+        # any broken shims on PATH.
+        run: |
+          rustup default stable
+          rustup run stable rustc --version
+          rustup run stable cargo --version
+          echo "PATH cargo: $(command -v cargo)"
+          echo "PATH rustup: $(command -v rustup)"
 
       - name: Install Linux WebKit/Tauri prerequisites
         if: matrix.os == 'ubuntu-latest'
@@ -87,11 +93,11 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Lint Rust
-        run: cargo clippy --all-targets -- -D clippy::all
+        run: rustup run stable cargo clippy --all-targets -- -D clippy::all
         working-directory: src-tauri
 
       - name: Test Rust
-        run: cargo test
+        run: rustup run stable cargo test
         working-directory: src-tauri
 
       - name: Build frontend
@@ -101,7 +107,7 @@ jobs:
 
       - name: Install tauri-driver (Linux only)
         if: matrix.os == 'ubuntu-latest'
-        run: cargo install tauri-driver --locked
+        run: rustup run stable cargo install tauri-driver --locked
 
       - name: Build debug Tauri binary for E2E
         if: matrix.os == 'ubuntu-latest'
