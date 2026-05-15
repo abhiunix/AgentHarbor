@@ -1,19 +1,88 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct ClaudePermissions {
     pub allow: Vec<String>,
     pub deny: Vec<String>,
+    pub additional_directories: Vec<String>,
+    pub default_mode: Option<String>,
     pub enabled_plugins: HashMap<String, bool>,
     pub skip_dangerous_mode: bool,
+
+    pub always_thinking_enabled: Option<bool>,
+    pub auto_memory_enabled: Option<bool>,
+    pub include_git_instructions: Option<bool>,
+    pub disable_all_hooks: Option<bool>,
+    pub disable_agent_view: Option<bool>,
+    pub disable_skill_shell_execution: Option<bool>,
+    pub disable_remote_control: Option<bool>,
+    pub fast_mode_per_session_opt_in: Option<bool>,
+    pub respect_gitignore: Option<bool>,
+    pub show_thinking_summaries: Option<bool>,
+
+    pub effort_level: Option<String>,
+    pub model: Option<String>,
+    pub auto_updates_channel: Option<String>,
+    pub editor_mode: Option<String>,
+    pub view_mode: Option<String>,
+    pub default_shell: Option<String>,
+    pub plans_directory: Option<String>,
+    pub cleanup_period_days: Option<u32>,
+
+    pub claude_md_excludes: Vec<String>,
+    pub available_models: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyRestriction {
-    pub key: String,
-    pub allowed: bool,
+fn opt_str(json: &Value, key: &str) -> Option<String> {
+    json.get(key).and_then(|v| v.as_str()).map(String::from)
+}
+
+fn opt_bool(json: &Value, key: &str) -> Option<bool> {
+    json.get(key).and_then(|v| v.as_bool())
+}
+
+fn opt_u32(json: &Value, key: &str) -> Option<u32> {
+    json.get(key).and_then(|v| v.as_u64()).map(|n| n as u32)
+}
+
+fn str_array(json: &Value, key: &str) -> Vec<String> {
+    json.get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default()
+}
+
+fn set_or_remove_str(obj: &mut serde_json::Map<String, Value>, key: &str, val: &Option<String>) {
+    match val {
+        Some(s) if !s.is_empty() => { obj.insert(key.into(), Value::String(s.clone())); }
+        _ => { obj.remove(key); }
+    }
+}
+
+fn set_or_remove_bool(obj: &mut serde_json::Map<String, Value>, key: &str, val: Option<bool>) {
+    match val {
+        Some(b) => { obj.insert(key.into(), Value::Bool(b)); }
+        None => { obj.remove(key); }
+    }
+}
+
+fn set_or_remove_u32(obj: &mut serde_json::Map<String, Value>, key: &str, val: Option<u32>) {
+    match val {
+        Some(n) => { obj.insert(key.into(), serde_json::json!(n)); }
+        None => { obj.remove(key); }
+    }
+}
+
+fn set_or_remove_str_array(obj: &mut serde_json::Map<String, Value>, key: &str, val: &[String]) {
+    if val.is_empty() {
+        obj.remove(key);
+    } else {
+        obj.insert(key.into(), Value::Array(val.iter().map(|s| Value::String(s.clone())).collect()));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,29 +178,18 @@ pub fn get_claude_permissions() -> Result<ClaudePermissions, String> {
     let path = home.join(".claude").join("settings.json");
 
     if !path.exists() {
-        return Ok(ClaudePermissions {
-            allow: vec![],
-            deny: vec![],
-            enabled_plugins: HashMap::new(),
-            skip_dangerous_mode: false,
-        });
+        return Ok(ClaudePermissions::default());
     }
 
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let json: serde_json::Value = serde_json::from_str(&content)
+    let json: Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse settings.json: {}", e))?;
 
-    let perms = json.get("permissions");
-    let allow: Vec<String> = perms
-        .and_then(|p| p.get("allow"))
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-        .unwrap_or_default();
-    let deny: Vec<String> = perms
-        .and_then(|p| p.get("deny"))
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-        .unwrap_or_default();
+    let perms_val = json.get("permissions").cloned().unwrap_or(Value::Null);
+    let allow = str_array(&perms_val, "allow");
+    let deny = str_array(&perms_val, "deny");
+    let additional_directories = str_array(&perms_val, "additionalDirectories");
+    let default_mode = opt_str(&perms_val, "defaultMode");
 
     let enabled_plugins: HashMap<String, bool> = json
         .get("enabledPlugins")
@@ -143,20 +201,43 @@ pub fn get_claude_permissions() -> Result<ClaudePermissions, String> {
         })
         .unwrap_or_default();
 
-    let skip_dangerous_mode = json
-        .get("skipDangerousModePermissionPrompt")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let skip_dangerous_mode = opt_bool(&json, "skipDangerousModePermissionPrompt").unwrap_or(false);
 
-    Ok(ClaudePermissions { allow, deny, enabled_plugins, skip_dangerous_mode })
+    Ok(ClaudePermissions {
+        allow,
+        deny,
+        additional_directories,
+        default_mode,
+        enabled_plugins,
+        skip_dangerous_mode,
+
+        always_thinking_enabled: opt_bool(&json, "alwaysThinkingEnabled"),
+        auto_memory_enabled: opt_bool(&json, "autoMemoryEnabled"),
+        include_git_instructions: opt_bool(&json, "includeGitInstructions"),
+        disable_all_hooks: opt_bool(&json, "disableAllHooks"),
+        disable_agent_view: opt_bool(&json, "disableAgentView"),
+        disable_skill_shell_execution: opt_bool(&json, "disableSkillShellExecution"),
+        disable_remote_control: opt_bool(&json, "disableRemoteControl"),
+        fast_mode_per_session_opt_in: opt_bool(&json, "fastModePerSessionOptIn"),
+        respect_gitignore: opt_bool(&json, "respectGitignore"),
+        show_thinking_summaries: opt_bool(&json, "showThinkingSummaries"),
+
+        effort_level: opt_str(&json, "effortLevel"),
+        model: opt_str(&json, "model"),
+        auto_updates_channel: opt_str(&json, "autoUpdatesChannel"),
+        editor_mode: opt_str(&json, "editorMode"),
+        view_mode: opt_str(&json, "viewMode"),
+        default_shell: opt_str(&json, "defaultShell"),
+        plans_directory: opt_str(&json, "plansDirectory"),
+        cleanup_period_days: opt_u32(&json, "cleanupPeriodDays"),
+
+        claude_md_excludes: str_array(&json, "claudeMdExcludes"),
+        available_models: str_array(&json, "availableModels"),
+    })
 }
 
 #[tauri::command]
-pub fn update_claude_permissions(
-    allow: Vec<String>,
-    deny: Vec<String>,
-    skip_dangerous_mode: bool,
-) -> Result<(), String> {
+pub fn update_claude_permissions(payload: ClaudePermissions) -> Result<(), String> {
     let home = dirs::home_dir().ok_or("Could not determine home directory")?;
     let path = home.join(".claude").join("settings.json");
 
@@ -166,63 +247,46 @@ pub fn update_claude_permissions(
         "{}".to_string()
     };
 
-    let mut json: serde_json::Value = serde_json::from_str(&content)
+    let mut json: Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse: {}", e))?;
 
     let obj = json.as_object_mut().ok_or("Not an object")?;
+
     let perms = obj.entry("permissions").or_insert_with(|| serde_json::json!({}));
     if let Some(p) = perms.as_object_mut() {
-        p.insert("allow".to_string(), serde_json::json!(allow));
-        p.insert("deny".to_string(), serde_json::json!(deny));
+        p.insert("allow".to_string(), serde_json::json!(payload.allow));
+        p.insert("deny".to_string(), serde_json::json!(payload.deny));
+        set_or_remove_str_array(p, "additionalDirectories", &payload.additional_directories);
+        set_or_remove_str(p, "defaultMode", &payload.default_mode);
     }
+
     obj.insert(
         "skipDangerousModePermissionPrompt".to_string(),
-        serde_json::json!(skip_dangerous_mode),
+        Value::Bool(payload.skip_dangerous_mode),
     );
 
-    let out = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
-    crate::utils::paths::atomic_write_str(&path, &out)?;
-    Ok(())
-}
+    set_or_remove_bool(obj, "alwaysThinkingEnabled", payload.always_thinking_enabled);
+    set_or_remove_bool(obj, "autoMemoryEnabled", payload.auto_memory_enabled);
+    set_or_remove_bool(obj, "includeGitInstructions", payload.include_git_instructions);
+    set_or_remove_bool(obj, "disableAllHooks", payload.disable_all_hooks);
+    set_or_remove_bool(obj, "disableAgentView", payload.disable_agent_view);
+    set_or_remove_bool(obj, "disableSkillShellExecution", payload.disable_skill_shell_execution);
+    set_or_remove_bool(obj, "disableRemoteControl", payload.disable_remote_control);
+    set_or_remove_bool(obj, "fastModePerSessionOptIn", payload.fast_mode_per_session_opt_in);
+    set_or_remove_bool(obj, "respectGitignore", payload.respect_gitignore);
+    set_or_remove_bool(obj, "showThinkingSummaries", payload.show_thinking_summaries);
 
-#[tauri::command]
-pub fn get_claude_policy() -> Result<Vec<PolicyRestriction>, String> {
-    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
-    let path = home.join(".claude").join("policy-limits.json");
-    if !path.exists() { return Ok(vec![]); }
+    set_or_remove_str(obj, "effortLevel", &payload.effort_level);
+    set_or_remove_str(obj, "model", &payload.model);
+    set_or_remove_str(obj, "autoUpdatesChannel", &payload.auto_updates_channel);
+    set_or_remove_str(obj, "editorMode", &payload.editor_mode);
+    set_or_remove_str(obj, "viewMode", &payload.view_mode);
+    set_or_remove_str(obj, "defaultShell", &payload.default_shell);
+    set_or_remove_str(obj, "plansDirectory", &payload.plans_directory);
+    set_or_remove_u32(obj, "cleanupPeriodDays", payload.cleanup_period_days);
 
-    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let json: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse policy-limits.json: {}", e))?;
-
-    let mut policies = Vec::new();
-    if let Some(restrictions) = json.get("restrictions").and_then(|v| v.as_object()) {
-        for (key, value) in restrictions {
-            let allowed = value.get("allowed").and_then(|v| v.as_bool()).unwrap_or(false);
-            policies.push(PolicyRestriction { key: key.clone(), allowed });
-        }
-    }
-    policies.sort_by(|a, b| a.key.cmp(&b.key));
-    Ok(policies)
-}
-
-#[tauri::command]
-pub fn update_claude_policy(key: String, allowed: bool) -> Result<(), String> {
-    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
-    let path = home.join(".claude").join("policy-limits.json");
-
-    let content = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| e.to_string())?
-    } else { r#"{"restrictions":{}}"#.to_string() };
-
-    let mut json: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse: {}", e))?;
-
-    let obj = json.as_object_mut().ok_or("Not an object")?;
-    let restrictions = obj.entry("restrictions").or_insert_with(|| serde_json::json!({}));
-    if let Some(r) = restrictions.as_object_mut() {
-        r.insert(key, serde_json::json!({"allowed": allowed}));
-    }
+    set_or_remove_str_array(obj, "claudeMdExcludes", &payload.claude_md_excludes);
+    set_or_remove_str_array(obj, "availableModels", &payload.available_models);
 
     let out = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
     crate::utils::paths::atomic_write_str(&path, &out)?;

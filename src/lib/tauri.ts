@@ -1102,16 +1102,8 @@ export async function getClaudePermissions(): Promise<ClaudePermissions> {
   return invoke<ClaudePermissions>("get_claude_permissions");
 }
 
-export async function updateClaudePermissions(
-  allow: string[],
-  deny: string[],
-  skipDangerousMode: boolean
-): Promise<void> {
-  return invoke<void>("update_claude_permissions", {
-    allow,
-    deny,
-    skipDangerousMode,
-  });
+export async function updateClaudePermissions(payload: ClaudePermissions): Promise<void> {
+  return invoke<void>("update_claude_permissions", { payload });
 }
 
 export interface PolicyRestriction {
