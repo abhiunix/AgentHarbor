@@ -9,6 +9,79 @@ It is based on:
 - existing prompt/model comparison patterns from tools like Promptfoo and ChainForge
 - open benchmark families that are useful as reference signals rather than product truth
 
+## Current Benchmark Lab workflow
+
+The current Benchmark Lab direction should stay focused on private, runnable comparisons instead of generic leaderboards.
+
+### Run a live benchmark
+
+1. Open `Benchmark Lab`.
+2. In `Credentials`, save an OpenAI and/or Anthropic benchmark API key.
+3. Click `Refresh Models` after saving the key so Benchmark Lab loads the real models available to that key.
+4. In `Targets`, switch the provider away from `Mock` and choose one of the fetched live models.
+5. Add one or more cases and run the benchmark.
+
+If a target is left on `Mock`, that row is synthetic by design.
+
+### Quick launch from reference benchmarks
+
+Benchmark Lab now has a reference-benchmark quick-launch flow:
+
+1. Open `Reference Benchmarks`.
+2. Pick a benchmark family such as `SWE-bench`, `BrowseComp`, or `T2I-CompBench++`.
+3. Select multiple live models from the right-hand launch panel.
+4. Click `Launch Benchmark`.
+
+That turns the reference family into a runnable private comparison instead of leaving it as a paper link only.
+
+### Result views
+
+Benchmark Lab should expose separate result surfaces instead of one overloaded panel:
+
+- `Setup`: run summary, totals, and launch guidance
+- `Compare`: side-by-side bars for tokens, cost, latency, and judge score
+- `Responses`: rendered model responses plus raw output and manual review
+- `Gallery`: image-generation comparison view with side-by-side artifacts
+
+### GitHub strategy comparison
+
+Benchmark Lab should support a repo-driven comparison flow for context-reduction and token-saving approaches:
+
+1. Paste a GitHub repository URL that claims prompt compression, context reduction, retrieval pruning, or token savings.
+2. Let AgentHarbor fetch the repo docs and extract the relevant strategy context and headline claims.
+3. Run two variants side by side:
+   - baseline
+   - strategy-augmented challenger
+4. Compare output quality, token usage, cost, latency, and judge score in one place.
+
+This keeps the product grounded in a workflow users actually care about:
+
+- "Does this repo-backed strategy reduce context and cost for my prompt?"
+- "Does it keep quality the same or better?"
+- "Is the token reduction worth the added complexity?"
+
+## Implemented direction
+
+The Benchmark Lab implementation should keep moving in this order:
+
+- live provider keys for runnable benchmarks
+- live model discovery from saved provider keys
+- private datasets and run history
+- baseline vs challenger comparison
+- GitHub-linked strategy extraction for context-reduction experiments
+- benchmark packs and richer reference views after the core loop is stable
+
+## Short-term TODO
+
+- add Gemini and OpenRouter live model discovery, not just seeded fallback catalogs
+- add cancellation and partial-run resume
+- add dataset export from the UI
+- add a richer comparison overview with per-case baseline vs challenger output panes
+- add explicit token delta, cost delta, and quality delta summaries in run history
+- add stronger first-run onboarding and a sample live benchmark recipe
+- add a curated set of strategy demo repos and benchmark templates
+- add image-specific judging and better visual diff scoring for image benchmarks
+
 ## Current repo findings
 
 AgentHarbor already has most of the plumbing needed for a benchmark lab:
@@ -308,6 +381,16 @@ The app should follow a few hard rules:
 
 - Promptfoo uses matrix views for evaluating outputs across many prompts and models. See [Promptfoo intro](https://www.promptfoo.dev/docs/intro/).
 - ChainForge focuses on prompt comparison and evaluator-driven prompt scoring/plotting. See [ChainForge compare prompts](https://www.chainforge.ai/docs/compare_prompts/).
+
+### Context-reduction and token-saving references
+
+These are the most relevant references for the GitHub strategy-comparison feature:
+
+- Microsoft's [LLMLingua](https://github.com/microsoft/LLMLingua) and the linked LLMLingua / LongLLMLingua / LLMLingua-2 papers are the clearest mainstream examples of prompt compression with explicit cost and long-context framing.
+- [Characterizing Prompt Compression Methods for Long Context Inference](https://arxiv.org/abs/2407.08892) is useful because it compares compression methods instead of treating any one method as universal truth.
+- [Perception Compressor](https://arxiv.org/abs/2409.19272) is a good training-free reference for retrieval plus selective compression in long-context settings.
+- GitHub's [context-compression topic](https://github.com/topics/context-compression) is a practical discovery source for newer repo-level tools that claim token reduction or repository-aware context pruning.
+- Example repo claims from that topic include repository-aware or coding-agent-oriented tools such as `context-editor-agent`, `CogniLayer`, `engram`, and `claude-rolling-context`, which are useful as benchmark inputs even when their claims need to be validated on private workloads.
 
 ### Public benchmark references worth integrating carefully
 

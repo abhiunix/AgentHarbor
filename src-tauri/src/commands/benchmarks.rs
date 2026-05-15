@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use chrono::Utc;
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use serde::{Deserialize, Serialize};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 use zip::write::FileOptions;
@@ -13,6 +13,36 @@ use zip::write::FileOptions;
 use crate::analytics::http::build_client;
 use crate::analytics::token_store;
 use crate::utils::paths::{app_data_dir, atomic_write, atomic_write_str, read_with_sharing};
+
+/// Base URLs for every benchmark-eligible provider.
+///
+/// Production callers use `ProviderEndpoints::default()`, which returns the
+/// real provider hostnames. Tests construct one pointing at a wiremock
+/// server's `uri()` to avoid live HTTP calls.
+#[derive(Debug, Clone)]
+pub struct ProviderEndpoints {
+    pub openai: String,
+    pub anthropic: String,
+    pub gemini: String,
+    pub openrouter: String,
+}
+
+impl ProviderEndpoints {
+    pub fn production() -> Self {
+        Self {
+            openai: "https://api.openai.com".into(),
+            anthropic: "https://api.anthropic.com".into(),
+            gemini: "https://generativelanguage.googleapis.com".into(),
+            openrouter: "https://openrouter.ai".into(),
+        }
+    }
+}
+
+impl Default for ProviderEndpoints {
+    fn default() -> Self {
+        Self::production()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -252,6 +282,43 @@ pub struct ReferenceBenchmark {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkStrategyClaim {
+    pub headline: String,
+    pub metric: Option<String>,
+    pub evidence: String,
+    pub source_path: Option<String>,
+    pub source_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkStrategyDocument {
+    pub path: String,
+    pub source_url: String,
+    pub excerpt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkStrategyAnalysis {
+    pub repo_url: String,
+    pub repository_full_name: String,
+    pub default_branch: String,
+    pub summary: String,
+    pub extracted_context: String,
+    #[serde(default)]
+    pub claims: Vec<BenchmarkStrategyClaim>,
+    #[serde(default)]
+    pub documents: Vec<BenchmarkStrategyDocument>,
+    pub fetched_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BenchmarkModelCacheEntry {
+    provider_id: String,
+    fetched_at: String,
+    models: Vec<BenchmarkModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkRunRequest {
     pub name: String,
     pub modality: BenchmarkModality,
@@ -279,6 +346,10 @@ fn runs_dir() -> PathBuf {
 
 fn reference_dir() -> PathBuf {
     benchmarks_dir().join("reference")
+}
+
+fn model_catalog_path() -> PathBuf {
+    benchmarks_dir().join("model_catalog.json")
 }
 
 fn run_dir(run_id: &str) -> PathBuf {
@@ -677,8 +748,57 @@ fn list_saved_datasets() -> Vec<BenchmarkDataset> {
     datasets
 }
 
+fn load_model_cache_entries() -> Vec<BenchmarkModelCacheEntry> {
+    let path = model_catalog_path();
+    if !path.exists() {
+        return vec![];
+    }
+    read_with_sharing(&path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<Vec<BenchmarkModelCacheEntry>>(&content).ok())
+        .unwrap_or_default()
+}
+
+fn save_model_cache_entries(entries: &[BenchmarkModelCacheEntry]) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(entries).map_err(|e| e.to_string())?;
+    atomic_write_str(&model_catalog_path(), &content)
+}
+
+fn upsert_model_cache_entry(provider_id: &str, models: Vec<BenchmarkModel>) -> Result<Vec<BenchmarkModel>, String> {
+    let mut entries = load_model_cache_entries();
+    let fetched_at = Utc::now().to_rfc3339();
+    if let Some(entry) = entries.iter_mut().find(|entry| entry.provider_id == provider_id) {
+        entry.models = models.clone();
+        entry.fetched_at = fetched_at;
+    } else {
+        entries.push(BenchmarkModelCacheEntry {
+            provider_id: provider_id.to_string(),
+            fetched_at,
+            models: models.clone(),
+        });
+    }
+    save_model_cache_entries(&entries)?;
+    Ok(models)
+}
+
+fn merge_seeded_and_cached_models() -> Vec<BenchmarkModel> {
+    let mut merged = seeded_models();
+    for entry in load_model_cache_entries() {
+        merged.retain(|model| model.provider_id != entry.provider_id);
+        merged.extend(entry.models);
+    }
+    merged.sort_by(|left, right| {
+        let provider_compare = left.provider_id.cmp(&right.provider_id);
+        if provider_compare != std::cmp::Ordering::Equal {
+            return provider_compare;
+        }
+        left.display_name.cmp(&right.display_name)
+    });
+    merged
+}
+
 fn get_model(provider_id: &str, model_id: &str) -> Option<BenchmarkModel> {
-    seeded_models()
+    merge_seeded_and_cached_models()
         .into_iter()
         .find(|model| model.provider_id == provider_id && model.id == model_id)
 }
@@ -856,7 +976,62 @@ fn run_mock_text(case: &BenchmarkCase, variant: &BenchmarkVariant, target: &Benc
     }
 }
 
-fn run_openai_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<TextResponse, String> {
+fn parse_openai_response_text(response: &Value) -> String {
+    if let Some(text) = response["output_text"].as_str() {
+        return text.to_string();
+    }
+
+    if let Some(output) = response["output"].as_array() {
+        let mut text = String::new();
+        for item in output {
+            if let Some(content) = item["content"].as_array() {
+                for part in content {
+                    if let Some(part_text) = part["text"].as_str() {
+                        text.push_str(part_text);
+                    } else if let Some(part_text) = part["output_text"].as_str() {
+                        text.push_str(part_text);
+                    }
+                }
+            }
+        }
+        if !text.is_empty() {
+            return text;
+        }
+    }
+
+    response["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn parse_openai_usage(response: &Value) -> BenchmarkTokenCounts {
+    BenchmarkTokenCounts {
+        input_tokens: response["usage"]["prompt_tokens"]
+            .as_u64()
+            .or_else(|| response["usage"]["input_tokens"].as_u64())
+            .unwrap_or(0),
+        output_tokens: response["usage"]["completion_tokens"]
+            .as_u64()
+            .or_else(|| response["usage"]["output_tokens"].as_u64())
+            .unwrap_or(0),
+        cache_read_tokens: response["usage"]["prompt_tokens_details"]["cached_tokens"]
+            .as_u64()
+            .or_else(|| response["usage"]["input_tokens_details"]["cached_tokens"].as_u64())
+            .unwrap_or(0),
+        cache_write_tokens: response["usage"]["input_tokens_details"]["cache_creation_tokens"]
+            .as_u64()
+            .unwrap_or(0),
+    }
+}
+
+fn run_openai_chat_completions_text(
+    endpoints: &ProviderEndpoints,
+    api_key: &str,
+    case: &BenchmarkCase,
+    variant: &BenchmarkVariant,
+    target: &BenchmarkTarget,
+) -> Result<TextResponse, String> {
     let client = build_client(45).map_err(String::from)?;
     let body = json!({
         "model": target.model_id,
@@ -868,27 +1043,53 @@ fn run_openai_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVaria
         "max_tokens": target.max_output_tokens.unwrap_or(1200),
     });
     let response: Value = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(format!("{}/v1/chat/completions", endpoints.openai))
         .headers(build_client_json_headers(api_key)?)
         .json(&body)
         .send()
         .map_err(|e| e.to_string())?
         .json()
         .map_err(|e| e.to_string())?;
-    let output = response["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    let tokens = BenchmarkTokenCounts {
-        input_tokens: response["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
-        output_tokens: response["usage"]["completion_tokens"].as_u64().unwrap_or(0),
-        cache_read_tokens: response["usage"]["prompt_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0),
-        cache_write_tokens: 0,
-    };
+    let output = parse_openai_response_text(&response);
+    let tokens = parse_openai_usage(&response);
     Ok(TextResponse { output, tokens })
 }
 
-fn run_openrouter_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<TextResponse, String> {
+fn run_openai_text(endpoints: &ProviderEndpoints, api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<TextResponse, String> {
+    let client = build_client(45).map_err(String::from)?;
+    let body = json!({
+        "model": target.model_id,
+        "instructions": variant.system_prompt.clone().unwrap_or_else(|| "You are a precise benchmark assistant.".into()),
+        "input": build_benchmark_prompt(case, variant),
+        "max_output_tokens": target.max_output_tokens.unwrap_or(1200),
+    });
+    let response = client
+        .post(format!("{}/v1/responses", endpoints.openai))
+        .headers(build_client_json_headers(api_key)?)
+        .json(&body)
+        .send()
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return run_openai_chat_completions_text(endpoints, api_key, case, variant, target);
+    }
+
+    let response: Value = match response.json() {
+        Ok(value) => value,
+        Err(_) => return run_openai_chat_completions_text(endpoints, api_key, case, variant, target),
+    };
+
+    let output = parse_openai_response_text(&response);
+    let tokens = parse_openai_usage(&response);
+
+    if output.is_empty() && tokens.input_tokens == 0 && tokens.output_tokens == 0 {
+        return run_openai_chat_completions_text(endpoints, api_key, case, variant, target);
+    }
+
+    Ok(TextResponse { output, tokens })
+}
+
+fn run_openrouter_text(endpoints: &ProviderEndpoints, api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<TextResponse, String> {
     let client = build_client(45).map_err(String::from)?;
     let mut headers = build_client_json_headers(api_key)?;
     headers.insert("HTTP-Referer", HeaderValue::from_static("https://agentharbor.local"));
@@ -903,7 +1104,7 @@ fn run_openrouter_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkV
         "max_tokens": target.max_output_tokens.unwrap_or(1200),
     });
     let response: Value = client
-        .post("https://openrouter.ai/api/v1/chat/completions")
+        .post(format!("{}/api/v1/chat/completions", endpoints.openrouter))
         .headers(headers)
         .json(&body)
         .send()
@@ -923,7 +1124,7 @@ fn run_openrouter_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkV
     Ok(TextResponse { output, tokens })
 }
 
-fn run_anthropic_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<TextResponse, String> {
+fn run_anthropic_text(endpoints: &ProviderEndpoints, api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<TextResponse, String> {
     let client = build_client(45).map_err(String::from)?;
     let mut headers = HeaderMap::new();
     headers.insert("x-api-key", HeaderValue::from_str(api_key).map_err(|e| e.to_string())?);
@@ -939,7 +1140,7 @@ fn run_anthropic_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVa
         "max_tokens": target.max_output_tokens.unwrap_or(1200),
     });
     let response: Value = client
-        .post("https://api.anthropic.com/v1/messages")
+        .post(format!("{}/v1/messages", endpoints.anthropic))
         .headers(headers)
         .json(&body)
         .send()
@@ -963,7 +1164,7 @@ fn run_anthropic_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVa
     Ok(TextResponse { output, tokens })
 }
 
-fn run_gemini_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<TextResponse, String> {
+fn run_gemini_text(endpoints: &ProviderEndpoints, api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<TextResponse, String> {
     let client = build_client(45).map_err(String::from)?;
     let body = json!({
         "systemInstruction": {
@@ -978,7 +1179,7 @@ fn run_gemini_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVaria
         }
     });
     let response: Value = client
-        .post(format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", target.model_id, api_key))
+        .post(format!("{}/v1beta/models/{}:generateContent?key={}", endpoints.gemini, target.model_id, api_key))
         .header(CONTENT_TYPE, "application/json")
         .json(&body)
         .send()
@@ -998,7 +1199,7 @@ fn run_gemini_text(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVaria
     Ok(TextResponse { output, tokens })
 }
 
-fn run_openai_image(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<ImageResponse, String> {
+fn run_openai_image(endpoints: &ProviderEndpoints, api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<ImageResponse, String> {
     let client = build_client(90).map_err(String::from)?;
     let body = json!({
         "model": target.model_id,
@@ -1008,7 +1209,7 @@ fn run_openai_image(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVari
         "response_format": "b64_json",
     });
     let response: Value = client
-        .post("https://api.openai.com/v1/images/generations")
+        .post(format!("{}/v1/images/generations", endpoints.openai))
         .headers(build_client_json_headers(api_key)?)
         .json(&body)
         .send()
@@ -1024,7 +1225,7 @@ fn run_openai_image(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVari
     })
 }
 
-fn run_gemini_image(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<ImageResponse, String> {
+fn run_gemini_image(endpoints: &ProviderEndpoints, api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVariant, target: &BenchmarkTarget) -> Result<ImageResponse, String> {
     let client = build_client(90).map_err(String::from)?;
     let response_format = match target.model_id.as_str() {
         "gemini-2.5-flash-image" => json!({
@@ -1049,7 +1250,7 @@ fn run_gemini_image(api_key: &str, case: &BenchmarkCase, variant: &BenchmarkVari
         }
     });
     let response: Value = client
-        .post(format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", target.model_id, api_key))
+        .post(format!("{}/v1beta/models/{}:generateContent?key={}", endpoints.gemini, target.model_id, api_key))
         .header(CONTENT_TYPE, "application/json")
         .json(&body)
         .send()
@@ -1103,6 +1304,7 @@ fn xml_escape(input: &str) -> String {
 }
 
 fn run_text_provider(
+    endpoints: &ProviderEndpoints,
     provider_id: &str,
     case: &BenchmarkCase,
     variant: &BenchmarkVariant,
@@ -1112,25 +1314,26 @@ fn run_text_provider(
         "mock" => Ok(run_mock_text(case, variant, target)),
         "openai" => {
             let key = provider_token("openai")?.ok_or_else(|| "Missing OpenAI benchmark API key".to_string())?;
-            run_openai_text(&key, case, variant, target)
+            run_openai_text(endpoints, &key, case, variant, target)
         }
         "anthropic" => {
             let key = provider_token("anthropic")?.ok_or_else(|| "Missing Anthropic benchmark API key".to_string())?;
-            run_anthropic_text(&key, case, variant, target)
+            run_anthropic_text(endpoints, &key, case, variant, target)
         }
         "gemini" => {
             let key = provider_token("gemini")?.ok_or_else(|| "Missing Gemini benchmark API key".to_string())?;
-            run_gemini_text(&key, case, variant, target)
+            run_gemini_text(endpoints, &key, case, variant, target)
         }
         "openrouter" => {
             let key = provider_token("openrouter")?.ok_or_else(|| "Missing OpenRouter benchmark API key".to_string())?;
-            run_openrouter_text(&key, case, variant, target)
+            run_openrouter_text(endpoints, &key, case, variant, target)
         }
         _ => Err(format!("Unsupported benchmark provider '{}'", provider_id)),
     }
 }
 
 fn run_image_provider(
+    endpoints: &ProviderEndpoints,
     provider_id: &str,
     case: &BenchmarkCase,
     variant: &BenchmarkVariant,
@@ -1140,17 +1343,18 @@ fn run_image_provider(
         "mock" => Ok(run_mock_image(case, variant)),
         "openai" => {
             let key = provider_token("openai")?.ok_or_else(|| "Missing OpenAI benchmark API key".to_string())?;
-            run_openai_image(&key, case, variant, target)
+            run_openai_image(endpoints, &key, case, variant, target)
         }
         "gemini" => {
             let key = provider_token("gemini")?.ok_or_else(|| "Missing Gemini benchmark API key".to_string())?;
-            run_gemini_image(&key, case, variant, target)
+            run_gemini_image(endpoints, &key, case, variant, target)
         }
         _ => Err(format!("Image benchmarking is not supported for '{}'", provider_id)),
     }
 }
 
 fn judge_output(
+    endpoints: &ProviderEndpoints,
     judge: &BenchmarkJudgeConfig,
     case: &BenchmarkCase,
     variant: &BenchmarkVariant,
@@ -1195,7 +1399,7 @@ fn judge_output(
         image_size: None,
         image_quality: None,
     };
-    match run_text_provider(&provider_id, &judge_case, &judge_variant, &judge_target) {
+    match run_text_provider(endpoints, &provider_id, &judge_case, &judge_variant, &judge_target) {
         Ok(resp) => {
             let parsed = serde_json::from_str::<Value>(&resp.output).ok();
             let score = parsed.as_ref().and_then(|value| value.get("score")).and_then(|value| value.as_f64());
@@ -1258,6 +1462,341 @@ fn write_image_artifact(run_id: &str, item_id: &str, response: &ImageResponse) -
     })
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubRepoResponse {
+    full_name: String,
+    default_branch: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubContentEntry {
+    name: String,
+    path: String,
+    #[serde(rename = "type")]
+    content_type: String,
+    download_url: Option<String>,
+    html_url: String,
+}
+
+fn seeded_model_defaults(
+    provider_id: &str,
+    model_id: &str,
+    display_name: String,
+    modality: BenchmarkModality,
+    context_window: Option<u64>,
+    max_output_tokens: Option<u64>,
+) -> BenchmarkModel {
+    if let Some(mut seeded) = seeded_models()
+        .into_iter()
+        .find(|model| model.provider_id == provider_id && model.id == model_id)
+    {
+        seeded.display_name = display_name;
+        seeded.context_window = context_window.or(seeded.context_window);
+        seeded.max_output_tokens = max_output_tokens.or(seeded.max_output_tokens);
+        return seeded;
+    }
+
+    BenchmarkModel {
+        provider_id: provider_id.to_string(),
+        id: model_id.to_string(),
+        display_name,
+        modality: modality.clone(),
+        context_window,
+        max_output_tokens,
+        supports_judge: modality == BenchmarkModality::Text,
+        input_cost_per_million: None,
+        output_cost_per_million: None,
+        image_price_low_1024: None,
+        image_price_medium_1024: None,
+        image_price_high_1024: None,
+    }
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn is_openai_text_benchmark_model(model_id: &str) -> bool {
+    let lowered = model_id.to_lowercase();
+    if contains_any(
+        &lowered,
+        &["image", "dall-e", "embedding", "audio", "transcribe", "tts", "realtime", "moderation", "search"],
+    ) {
+        return false;
+    }
+    lowered.starts_with("gpt")
+        || lowered.starts_with('o')
+        || lowered.contains("codex")
+        || lowered.starts_with("chatgpt")
+}
+
+fn is_openai_image_benchmark_model(model_id: &str) -> bool {
+    let lowered = model_id.to_lowercase();
+    lowered.contains("image") || lowered.starts_with("dall-e")
+}
+
+fn github_headers() -> Result<HeaderMap, String> {
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static("AgentHarbor Benchmark Lab"));
+    headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.github+json"));
+    Ok(headers)
+}
+
+fn github_json_get<T: DeserializeOwned>(url: &str) -> Result<T, String> {
+    let client = build_client(30).map_err(String::from)?;
+    let response = client
+        .get(url)
+        .headers(github_headers()?)
+        .send()
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("GitHub request failed for {} with status {}", url, response.status()));
+    }
+    response.json::<T>().map_err(|e| e.to_string())
+}
+
+fn github_text_get(url: &str) -> Result<String, String> {
+    let client = build_client(30).map_err(String::from)?;
+    let response = client
+        .get(url)
+        .headers(github_headers()?)
+        .send()
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("GitHub file request failed for {} with status {}", url, response.status()));
+    }
+    response.text().map_err(|e| e.to_string())
+}
+
+fn parse_github_repo_url(repo_url: &str) -> Result<(String, String), String> {
+    let trimmed = repo_url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let parsed = reqwest::Url::parse(trimmed).map_err(|e| format!("Invalid GitHub URL: {}", e))?;
+    if parsed.host_str() != Some("github.com") {
+        return Err("Only github.com repository URLs are supported".into());
+    }
+    let segments: Vec<String> = parsed
+        .path_segments()
+        .map(|items| items.filter(|item| !item.is_empty()).map(|item| item.to_string()).collect())
+        .unwrap_or_default();
+    if segments.len() < 2 {
+        return Err("GitHub URL must point to a repository".into());
+    }
+    Ok((segments[0].clone(), segments[1].clone()))
+}
+
+fn candidate_doc_score(path: &str, name: &str) -> i32 {
+    let lowered_path = path.to_lowercase();
+    let lowered_name = name.to_lowercase();
+    if lowered_name == "readme.md" {
+        return 100;
+    }
+    if lowered_name == "agents.md" || lowered_name == "claude.md" {
+        return 95;
+    }
+    let mut score = 0;
+    if lowered_path.starts_with("docs/") {
+        score += 20;
+    }
+    if contains_any(
+        &lowered_path,
+        &["context", "token", "compress", "prompt", "retriev", "rag", "optimi", "cost", "usage"],
+    ) {
+        score += 40;
+    }
+    if lowered_name.ends_with(".md") || lowered_name.ends_with(".txt") {
+        score += 10;
+    }
+    score
+}
+
+fn excerpt_lines(content: &str, max_lines: usize, max_chars: usize) -> String {
+    let mut selected = vec![];
+    let mut current_len = 0usize;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let lowered = line.to_lowercase();
+        if !contains_any(
+            &lowered,
+            &["token", "context", "compress", "reduce", "saving", "prompt", "retriev", "rag", "cost"],
+        ) {
+            continue;
+        }
+        let snippet = if line.len() > 220 {
+            format!("{}…", &line[..220])
+        } else {
+            line.to_string()
+        };
+        current_len += snippet.len();
+        selected.push(snippet);
+        if selected.len() >= max_lines || current_len >= max_chars {
+            break;
+        }
+    }
+    selected.join("\n")
+}
+
+fn extract_summary(content: &str) -> Option<String> {
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.len() >= 24 {
+            return Some(if line.len() > 280 {
+                format!("{}…", &line[..280])
+            } else {
+                line.to_string()
+            });
+        }
+    }
+    None
+}
+
+fn extract_metric(line: &str) -> Option<String> {
+    for token in line.split_whitespace() {
+        let cleaned = token.trim_matches(|c: char| ",.;:()[]{}".contains(c));
+        if cleaned.chars().any(|c| c.is_ascii_digit())
+            && (cleaned.contains('%')
+                || cleaned.contains('x')
+                || cleaned.contains('X')
+                || cleaned.to_lowercase().contains("token"))
+        {
+            return Some(cleaned.to_string());
+        }
+    }
+    None
+}
+
+fn build_strategy_claims(
+    documents: &[(GitHubContentEntry, String)],
+) -> Vec<BenchmarkStrategyClaim> {
+    let mut claims = vec![];
+    for (entry, content) in documents {
+        for raw_line in content.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let lowered = line.to_lowercase();
+            if !contains_any(
+                &lowered,
+                &["save", "reduce", "compression", "compress", "token", "context", "retriev", "rag", "cost"],
+            ) {
+                continue;
+            }
+            if !(line.chars().any(|c| c.is_ascii_digit()) || line.len() > 80) {
+                continue;
+            }
+            let evidence = if line.len() > 240 {
+                format!("{}…", &line[..240])
+            } else {
+                line.to_string()
+            };
+            if claims.iter().any(|claim: &BenchmarkStrategyClaim| claim.evidence == evidence) {
+                continue;
+            }
+            claims.push(BenchmarkStrategyClaim {
+                headline: entry.name.clone(),
+                metric: extract_metric(line),
+                evidence,
+                source_path: Some(entry.path.clone()),
+                source_url: Some(entry.html_url.clone()),
+            });
+            if claims.len() >= 6 {
+                return claims;
+            }
+        }
+    }
+    claims
+}
+
+fn fetch_openai_models(endpoints: &ProviderEndpoints, api_key: &str) -> Result<Vec<BenchmarkModel>, String> {
+    let client = build_client(30).map_err(String::from)?;
+    let response: Value = client
+        .get(format!("{}/v1/models", endpoints.openai))
+        .headers(build_client_json_headers(api_key)?)
+        .send()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+
+    let mut models = vec![];
+    if let Some(items) = response["data"].as_array() {
+        for item in items {
+            let Some(model_id) = item["id"].as_str() else {
+                continue;
+            };
+            if is_openai_image_benchmark_model(model_id) {
+                models.push(seeded_model_defaults(
+                    "openai",
+                    model_id,
+                    model_id.to_string(),
+                    BenchmarkModality::Image,
+                    None,
+                    None,
+                ));
+                continue;
+            }
+            if !is_openai_text_benchmark_model(model_id) {
+                continue;
+            }
+            models.push(seeded_model_defaults(
+                "openai",
+                model_id,
+                model_id.to_string(),
+                BenchmarkModality::Text,
+                None,
+                None,
+            ));
+        }
+    }
+    models.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    models.dedup_by(|left, right| left.id == right.id && left.modality == right.modality);
+    Ok(models)
+}
+
+fn fetch_anthropic_models(endpoints: &ProviderEndpoints, api_key: &str) -> Result<Vec<BenchmarkModel>, String> {
+    let client = build_client(30).map_err(String::from)?;
+    let mut headers = HeaderMap::new();
+    headers.insert("x-api-key", HeaderValue::from_str(api_key).map_err(|e| e.to_string())?);
+    headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+    headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    let response: Value = client
+        .get(format!("{}/v1/models", endpoints.anthropic))
+        .headers(headers)
+        .send()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+
+    let mut models = vec![];
+    if let Some(items) = response["data"].as_array() {
+        for item in items {
+            let Some(model_id) = item["id"].as_str() else {
+                continue;
+            };
+            let display_name = item["display_name"]
+                .as_str()
+                .unwrap_or(model_id)
+                .to_string();
+            models.push(seeded_model_defaults(
+                "anthropic",
+                model_id,
+                display_name,
+                BenchmarkModality::Text,
+                None,
+                None,
+            ));
+        }
+    }
+    models.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    models.dedup_by(|left, right| left.id == right.id);
+    Ok(models)
+}
+
 #[tauri::command]
 pub fn list_benchmark_providers() -> Vec<BenchmarkProvider> {
     seeded_providers()
@@ -1265,7 +1804,110 @@ pub fn list_benchmark_providers() -> Vec<BenchmarkProvider> {
 
 #[tauri::command]
 pub fn list_benchmark_models() -> Vec<BenchmarkModel> {
-    seeded_models()
+    merge_seeded_and_cached_models()
+}
+
+#[tauri::command]
+pub fn refresh_benchmark_models(provider_id: String) -> Result<Vec<BenchmarkModel>, String> {
+    ensure_benchmark_dirs()?;
+    let endpoints = ProviderEndpoints::default();
+    let models = match provider_id.as_str() {
+        "openai" => {
+            let key = provider_token("openai")?.ok_or_else(|| "Missing OpenAI benchmark API key".to_string())?;
+            fetch_openai_models(&endpoints, &key)?
+        }
+        "anthropic" => {
+            let key = provider_token("anthropic")?.ok_or_else(|| "Missing Anthropic benchmark API key".to_string())?;
+            fetch_anthropic_models(&endpoints, &key)?
+        }
+        _ => {
+            return Err(format!(
+                "Live model refresh is currently supported for OpenAI and Anthropic only. '{}' is not supported yet.",
+                provider_id
+            ))
+        }
+    };
+    upsert_model_cache_entry(&provider_id, models)
+}
+
+#[tauri::command]
+pub fn analyze_benchmark_strategy_repo(repo_url: String) -> Result<BenchmarkStrategyAnalysis, String> {
+    let (owner, repo) = parse_github_repo_url(&repo_url)?;
+    let repo_meta: GitHubRepoResponse =
+        github_json_get(&format!("https://api.github.com/repos/{}/{}", owner, repo))?;
+    let root_entries: Vec<GitHubContentEntry> = github_json_get(&format!(
+        "https://api.github.com/repos/{}/{}/contents?ref={}",
+        owner, repo, repo_meta.default_branch
+    ))?;
+
+    let mut docs_entries = vec![];
+    for entry in &root_entries {
+        if entry.content_type == "dir" && entry.name.eq_ignore_ascii_case("docs") {
+            let mut nested: Vec<GitHubContentEntry> = github_json_get(&format!(
+                "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
+                owner, repo, entry.path, repo_meta.default_branch
+            ))?;
+            docs_entries.append(&mut nested);
+        }
+    }
+
+    let mut candidates: Vec<GitHubContentEntry> = root_entries
+        .into_iter()
+        .chain(docs_entries)
+        .filter(|entry| entry.content_type == "file")
+        .filter(|entry| entry.name.ends_with(".md") || entry.name.ends_with(".txt"))
+        .collect();
+    candidates.sort_by(|left, right| {
+        candidate_doc_score(&right.path, &right.name).cmp(&candidate_doc_score(&left.path, &left.name))
+    });
+    candidates.truncate(6);
+
+    let mut fetched_docs = vec![];
+    for entry in candidates {
+        let Some(download_url) = entry.download_url.clone() else {
+            continue;
+        };
+        if let Ok(content) = github_text_get(&download_url) {
+            fetched_docs.push((entry, content));
+        }
+    }
+
+    if fetched_docs.is_empty() {
+        return Err("No usable markdown or text docs were found in that GitHub repository".into());
+    }
+
+    let summary = fetched_docs
+        .iter()
+        .find(|(entry, _)| entry.name.eq_ignore_ascii_case("readme.md"))
+        .and_then(|(_, content)| extract_summary(content))
+        .or_else(|| fetched_docs.iter().find_map(|(_, content)| extract_summary(content)))
+        .unwrap_or_else(|| "Repository-linked strategy context for benchmark comparison.".into());
+
+    let documents = fetched_docs
+        .iter()
+        .map(|(entry, content)| BenchmarkStrategyDocument {
+            path: entry.path.clone(),
+            source_url: entry.html_url.clone(),
+            excerpt: excerpt_lines(content, 6, 1200),
+        })
+        .filter(|document| !document.excerpt.is_empty())
+        .collect::<Vec<_>>();
+
+    let mut context_parts = vec![format!("Repository: {}", repo_meta.full_name), format!("Summary: {}", summary)];
+    for document in &documents {
+        context_parts.push(format!("## {}\n{}", document.path, document.excerpt));
+    }
+
+    Ok(BenchmarkStrategyAnalysis {
+        repo_url,
+        repository_full_name: repo_meta.full_name,
+        default_branch: repo_meta.default_branch,
+        summary,
+        extracted_context: context_parts.join("\n\n"),
+        claims: build_strategy_claims(&fetched_docs),
+        documents,
+        fetched_at: Utc::now().to_rfc3339(),
+    })
 }
 
 #[tauri::command]
@@ -1399,6 +2041,7 @@ pub fn export_benchmark_run(run_id: String, output_path: String) -> Result<(), S
 #[tauri::command]
 pub async fn run_benchmark_suite(request: BenchmarkRunRequest) -> Result<BenchmarkRun, String> {
     ensure_benchmark_dirs()?;
+    let endpoints = ProviderEndpoints::default();
     let variants = default_variants_if_missing(&request.variants);
     let run_id = Uuid::new_v4().to_string();
     let created_at = Utc::now().to_rfc3339();
@@ -1456,7 +2099,7 @@ pub async fn run_benchmark_suite(request: BenchmarkRunRequest) -> Result<Benchma
                 item.context_window = model.as_ref().and_then(|candidate| candidate.context_window);
 
                 let result = match target.modality {
-                    BenchmarkModality::Text => run_text_provider(&target.provider_id, case, variant, target).map(|response| {
+                    BenchmarkModality::Text => run_text_provider(&endpoints, &target.provider_id, case, variant, target).map(|response| {
                         item.output_text = Some(response.output.clone());
                         item.token_counts = response.tokens.clone();
                         if let Some(model) = &model {
@@ -1466,9 +2109,9 @@ pub async fn run_benchmark_suite(request: BenchmarkRunRequest) -> Result<Benchma
                         item.judge_score = item
                             .output_text
                             .as_deref()
-                            .and_then(|output| request.judge.as_ref().and_then(|judge| judge_output(judge, case, variant, output)));
+                            .and_then(|output| request.judge.as_ref().and_then(|judge| judge_output(&endpoints, judge, case, variant, output)));
                     }),
-                    BenchmarkModality::Image => run_image_provider(&target.provider_id, case, variant, target).and_then(|response| {
+                    BenchmarkModality::Image => run_image_provider(&endpoints, &target.provider_id, case, variant, target).and_then(|response| {
                         let artifact = write_image_artifact(&run.id, &item.item_id, &response)?;
                         item.artifact_refs.push(artifact);
                         if let Some(model) = &model {
@@ -1554,5 +2197,286 @@ mod tests {
         };
         let pct = compute_context_used_percent(&tokens, Some(10_000)).unwrap();
         assert!(pct > 0.0);
+    }
+
+    #[test]
+    fn parses_github_repo_urls() {
+        let parsed = parse_github_repo_url("https://github.com/microsoft/LLMLingua").unwrap();
+        assert_eq!(parsed.0, "microsoft");
+        assert_eq!(parsed.1, "LLMLingua");
+
+        let parsed_with_suffix =
+            parse_github_repo_url("https://github.com/openai/openai-agents-python.git").unwrap();
+        assert_eq!(parsed_with_suffix.0, "openai");
+        assert_eq!(parsed_with_suffix.1, "openai-agents-python");
+    }
+
+    #[test]
+    fn filters_openai_benchmarkable_models() {
+        assert!(is_openai_text_benchmark_model("gpt-5"));
+        assert!(is_openai_text_benchmark_model("o4-mini"));
+        assert!(is_openai_image_benchmark_model("gpt-image-1"));
+        assert!(!is_openai_text_benchmark_model("text-embedding-3-large"));
+        assert!(!is_openai_text_benchmark_model("gpt-realtime"));
+    }
+
+    mod provider_mocks {
+        use super::*;
+        use wiremock::matchers::{header, header_exists, method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        fn sample_case() -> BenchmarkCase {
+            BenchmarkCase {
+                id: "case-1".into(),
+                name: "case-1".into(),
+                modality: BenchmarkModality::Text,
+                input: "Hello".into(),
+                reference_output: None,
+                assertions: vec![],
+                tags: vec![],
+            }
+        }
+
+        fn sample_variant() -> BenchmarkVariant {
+            BenchmarkVariant {
+                id: "v1".into(),
+                name: "v1".into(),
+                system_prompt: None,
+                prompt_prefix: None,
+                prompt_suffix: None,
+                capability_context: None,
+                capability_labels: vec![],
+            }
+        }
+
+        fn sample_target(provider: &str, model: &str) -> BenchmarkTarget {
+            BenchmarkTarget {
+                provider_id: provider.into(),
+                model_id: model.into(),
+                modality: BenchmarkModality::Text,
+                temperature: Some(0.2),
+                max_output_tokens: Some(256),
+                image_size: None,
+                image_quality: None,
+            }
+        }
+
+        fn endpoints_with_uri(server_uri: &str) -> ProviderEndpoints {
+            ProviderEndpoints {
+                openai: server_uri.into(),
+                anthropic: server_uri.into(),
+                gemini: server_uri.into(),
+                openrouter: server_uri.into(),
+            }
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn openai_text_happy_path_parses_tokens_and_output() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1/chat/completions"))
+                .and(header("authorization", "Bearer test-key"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "choices": [{"message": {"content": "hi there"}}],
+                    "usage": {
+                        "prompt_tokens": 17,
+                        "completion_tokens": 9,
+                        "prompt_tokens_details": {"cached_tokens": 4}
+                    }
+                })))
+                .mount(&server)
+                .await;
+
+            let endpoints = endpoints_with_uri(&server.uri());
+            let case = sample_case();
+            let variant = sample_variant();
+            let target = sample_target("openai", "gpt-4o-mini");
+            let resp = tokio::task::spawn_blocking(move || {
+                run_openai_text(&endpoints, "test-key", &case, &variant, &target)
+            })
+            .await
+            .unwrap()
+            .expect("openai mock should succeed");
+
+            assert_eq!(resp.output, "hi there");
+            assert_eq!(resp.tokens.input_tokens, 17);
+            assert_eq!(resp.tokens.output_tokens, 9);
+            assert_eq!(resp.tokens.cache_read_tokens, 4);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn openai_responses_happy_path_parses_output_and_usage() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1/responses"))
+                .and(header("authorization", "Bearer test-key"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "output": [{
+                        "content": [
+                            {"type": "output_text", "text": "first line"},
+                            {"type": "output_text", "text": "\nsecond line"}
+                        ]
+                    }],
+                    "usage": {
+                        "input_tokens": 21,
+                        "output_tokens": 13,
+                        "input_tokens_details": {
+                            "cached_tokens": 5,
+                            "cache_creation_tokens": 2
+                        }
+                    }
+                })))
+                .mount(&server)
+                .await;
+
+            let endpoints = endpoints_with_uri(&server.uri());
+            let case = sample_case();
+            let variant = sample_variant();
+            let target = sample_target("openai", "gpt-5-mini");
+            let resp = tokio::task::spawn_blocking(move || {
+                run_openai_text(&endpoints, "test-key", &case, &variant, &target)
+            })
+            .await
+            .unwrap()
+            .expect("openai responses mock should succeed");
+
+            assert_eq!(resp.output, "first line\nsecond line");
+            assert_eq!(resp.tokens.input_tokens, 21);
+            assert_eq!(resp.tokens.output_tokens, 13);
+            assert_eq!(resp.tokens.cache_read_tokens, 5);
+            assert_eq!(resp.tokens.cache_write_tokens, 2);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn anthropic_text_happy_path_concatenates_content_parts() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1/messages"))
+                .and(header("x-api-key", "ak-test"))
+                .and(header("anthropic-version", "2023-06-01"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "content": [
+                        {"type": "text", "text": "part-a "},
+                        {"type": "text", "text": "part-b"}
+                    ],
+                    "usage": {
+                        "input_tokens": 31,
+                        "output_tokens": 5,
+                        "cache_read_input_tokens": 8,
+                        "cache_creation_input_tokens": 2
+                    }
+                })))
+                .mount(&server)
+                .await;
+
+            let endpoints = endpoints_with_uri(&server.uri());
+            let case = sample_case();
+            let variant = sample_variant();
+            let target = sample_target("anthropic", "claude-sonnet-4-6");
+            let resp = tokio::task::spawn_blocking(move || {
+                run_anthropic_text(&endpoints, "ak-test", &case, &variant, &target)
+            })
+            .await
+            .unwrap()
+            .expect("anthropic mock should succeed");
+
+            assert_eq!(resp.output, "part-a part-b");
+            assert_eq!(resp.tokens.input_tokens, 31);
+            assert_eq!(resp.tokens.output_tokens, 5);
+            assert_eq!(resp.tokens.cache_read_tokens, 8);
+            assert_eq!(resp.tokens.cache_write_tokens, 2);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn gemini_text_happy_path_uses_api_key_in_query() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1beta/models/gemini-2.5-flash:generateContent"))
+                .and(query_param("key", "gk-test"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "candidates": [{
+                        "content": {"parts": [{"text": "gemini-output"}]}
+                    }],
+                    "usageMetadata": {
+                        "promptTokenCount": 12,
+                        "candidatesTokenCount": 7,
+                        "cachedContentTokenCount": 3
+                    }
+                })))
+                .mount(&server)
+                .await;
+
+            let endpoints = endpoints_with_uri(&server.uri());
+            let case = sample_case();
+            let variant = sample_variant();
+            let target = sample_target("gemini", "gemini-2.5-flash");
+            let resp = tokio::task::spawn_blocking(move || {
+                run_gemini_text(&endpoints, "gk-test", &case, &variant, &target)
+            })
+            .await
+            .unwrap()
+            .expect("gemini mock should succeed");
+
+            assert_eq!(resp.output, "gemini-output");
+            assert_eq!(resp.tokens.input_tokens, 12);
+            assert_eq!(resp.tokens.output_tokens, 7);
+            assert_eq!(resp.tokens.cache_read_tokens, 3);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn openrouter_text_happy_path_sends_attribution_headers() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/api/v1/chat/completions"))
+                .and(header("authorization", "Bearer or-test"))
+                .and(header_exists("http-referer"))
+                .and(header_exists("x-title"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "choices": [{"message": {"content": "router-out"}}],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 2}
+                })))
+                .mount(&server)
+                .await;
+
+            let endpoints = endpoints_with_uri(&server.uri());
+            let case = sample_case();
+            let variant = sample_variant();
+            let target = sample_target("openrouter", "anthropic/claude-opus-4-7");
+            let resp = tokio::task::spawn_blocking(move || {
+                run_openrouter_text(&endpoints, "or-test", &case, &variant, &target)
+            })
+            .await
+            .unwrap()
+            .expect("openrouter mock should succeed");
+
+            assert_eq!(resp.output, "router-out");
+            assert_eq!(resp.tokens.input_tokens, 4);
+            assert_eq!(resp.tokens.output_tokens, 2);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn openai_text_surfaces_error_on_invalid_json() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1/chat/completions"))
+                .respond_with(
+                    ResponseTemplate::new(500).set_body_string("upstream exploded"),
+                )
+                .mount(&server)
+                .await;
+
+            let endpoints = endpoints_with_uri(&server.uri());
+            let case = sample_case();
+            let variant = sample_variant();
+            let target = sample_target("openai", "gpt-4o-mini");
+            let err = tokio::task::spawn_blocking(move || {
+                run_openai_text(&endpoints, "test-key", &case, &variant, &target)
+            })
+            .await
+            .unwrap()
+            .expect_err("non-JSON body should fail to parse and surface an error");
+
+            assert!(!err.is_empty());
+        }
     }
 }
