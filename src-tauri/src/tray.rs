@@ -126,12 +126,14 @@ pub fn setup_tray(app: &AppHandle<Wry>, show: bool) -> tauri::Result<()> {
         let open_item = MenuItem::with_id(app, "open", "Open AgentHarbor", true, None::<&str>)?;
         let deploy_item = MenuItem::with_id(app, "deploy", "Quick Deploy...", true, None::<&str>)?;
         let sync_item = MenuItem::with_id(app, "sync", "Sync Registry", true, None::<&str>)?;
+        let recs_item = MenuItem::with_id(app, "recommendations", "AI Recommendations", true, None::<&str>)?;
         let separator = PredefinedMenuItem::separator(app)?;
 
         let menu = Menu::with_items(
             app,
             &[
                 &open_item,
+                &recs_item,
                 &deploy_item,
                 &sync_item,
                 &separator,
@@ -192,6 +194,13 @@ pub fn setup_tray(app: &AppHandle<Wry>, show: bool) -> tauri::Result<()> {
                 "sync" => {
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.emit("sync-registry", ());
+                    }
+                }
+                "recommendations" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.emit("navigate-to", "/recommendations");
                     }
                 }
                 _ => {}

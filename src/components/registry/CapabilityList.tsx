@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { CapabilityCard } from "./CapabilityCard";
 import {
   useRegistryStore,
@@ -221,6 +222,9 @@ export function CapabilityList({
 
   const filteredCapabilities = useFilteredCapabilities();
   const { capabilities } = useRegistryStore();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isRecommendedRoute = location.pathname === "/recommendations";
 
   const selectedArray = Array.from(selectedIds);
 
@@ -410,7 +414,7 @@ export function CapabilityList({
                 key={opt.value}
                 onClick={() => setVisibilityFilter(opt.value)}
                 className={`px-3 py-1.5 text-sm transition-colors ${
-                  filters.visibility === opt.value
+                  !isRecommendedRoute && filters.visibility === opt.value
                     ? "bg-accent-blue text-white"
                     : "bg-app-card text-text-secondary hover:text-text-primary"
                 }`}
@@ -418,6 +422,16 @@ export function CapabilityList({
                 {opt.label}
               </button>
             ))}
+            <button
+              onClick={() => navigate("/recommendations")}
+              className={`px-3 py-1.5 text-sm transition-colors ${
+                isRecommendedRoute
+                  ? "bg-accent-blue text-white"
+                  : "bg-app-card text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Recommended
+            </button>
           </div>
 
           <div className="relative">
