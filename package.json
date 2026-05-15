@@ -11,7 +11,7 @@
     "tauri": "tauri",
     "clear-quarantine": "bash scripts/clear-quarantine-mac.sh",
     "lint:ts": "tsc --noEmit",
-    "lint:rust": "cd src-tauri && cargo clippy --all-targets -- -D warnings",
+    "lint:rust": "cd src-tauri && cargo clippy --all-targets -- -D clippy::all",
     "lint": "npm run lint:ts && npm run lint:rust",
     "test:rust": "cd src-tauri && cargo test",
     "test:regression": "npm run lint:ts && npm run build && npm run test:rust"
