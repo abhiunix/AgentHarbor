@@ -1102,8 +1102,29 @@ export async function getClaudePermissions(): Promise<ClaudePermissions> {
   return invoke<ClaudePermissions>("get_claude_permissions");
 }
 
-export async function updateClaudePermissions(payload: ClaudePermissions): Promise<void> {
-  return invoke<void>("update_claude_permissions", { payload });
+export async function updateClaudePermissions(
+  allow: string[],
+  deny: string[],
+  skipDangerousMode: boolean
+): Promise<void> {
+  return invoke<void>("update_claude_permissions", {
+    allow,
+    deny,
+    skipDangerousMode,
+  });
+}
+
+export interface PolicyRestriction {
+  key: string;
+  allowed: boolean;
+}
+
+export async function getClaudePolicy(): Promise<PolicyRestriction[]> {
+  return invoke<PolicyRestriction[]>("get_claude_policy");
+}
+
+export async function updateClaudePolicy(key: string, allowed: boolean): Promise<void> {
+  return invoke<void>("update_claude_policy", { key, allowed });
 }
 
 export async function getClaudeProjectPermissions(projectPath: string): Promise<ClaudeProjectPermissions> {
