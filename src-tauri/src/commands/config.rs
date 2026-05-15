@@ -101,16 +101,13 @@ impl Default for AnalyticsSettings {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ClaudeCodeProvider {
+    #[default]
     Anthropic,
     Ollama,
 }
 
-impl Default for ClaudeCodeProvider {
-    fn default() -> Self {
-        Self::Anthropic
-    }
-}
 
 fn default_ollama_base_url() -> String {
     "http://localhost:11434".to_string()
@@ -247,7 +244,7 @@ pub fn get_username() -> String {
 pub fn get_author_id() -> String {
     let _lock = SETTINGS_MUTEX.lock().ok();
     let mut settings = load_settings();
-    if settings.general.author_id.as_deref().map_or(true, |s| s.is_empty()) {
+    if settings.general.author_id.as_deref().is_none_or(|s| s.is_empty()) {
         let new_id = uuid::Uuid::new_v4().to_string();
         settings.general.author_id = Some(new_id.clone());
         let _ = save_settings(&settings);

@@ -1,0 +1,98 @@
+name: Regression
+
+# Fast cross-platform gate that runs on every PR, regardless of base
+# branch. Complements ci.yml (which is the macOS release-shaped check
+# scoped to main).
+
+on:
+  push:
+    branches: [main, "dan/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            rust-target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        id: rust-toolchain
+        with:
+          targets: ${{ matrix.rust-target }}
+          components: clippy
+
+      - name: Make rustup default stable
+        # Belt-and-suspenders: dtolnay/rust-toolchain installs but doesn't
+        # always set rustup's default, which leads to `cargo clippy` errors
+        # like `unexpected argument 'clippy' found` on macOS runners.
+        # `cargo +stable` is a rustup-shim feature that's also unreliable
+        # if cargo resolves directly to the binary. Forcing the default
+        # cures both.
+        run: rustup default stable
+
+      - name: Install Linux WebKit/Tauri prerequisites
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            patchelf
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Workaround npm optional-deps bug (Linux native bindings)
+        # The lockfile was generated on macOS so it doesn't include the
+        # *-linux-x64-gnu native binaries that vite/rollup AND @tauri-apps/cli
+        # need on Ubuntu CI (npm/cli#4828). Install just the missing native
+        # bindings without --save so the lockfile / version pins stay intact
+        # and the tauri-cli version check still passes.
+        if: runner.os == 'Linux'
+        run: |
+          npm install --no-save --no-audit --no-fund \
+            @rollup/rollup-linux-x64-gnu \
+            @tauri-apps/cli-linux-x64-gnu
+
+      - name: Type check frontend
+        run: npx tsc --noEmit
+
+      - name: Lint Rust
+        run: cargo clippy --all-targets -- -D clippy::all
+        working-directory: src-tauri
+
+      - name: Test Rust
+        run: cargo test
+        working-directory: src-tauri
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          SKIP_VERSION_BUMP: '1'

@@ -1870,6 +1870,7 @@ fn emit_token(app: &AppHandle<Wry>, debate_id: &str, index: u32, text: &str) {
 }
 
 /// Emit one `debate:tool_call` event AFTER the tool runs (so we know the result).
+#[allow(clippy::too_many_arguments)]
 fn emit_tool_call(
     app: &AppHandle<Wry>,
     debate_id: &str,

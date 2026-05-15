@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,7 +288,7 @@ pub fn read_project_usage_files_with_mtime_floor(
                         .parent()
                         .and_then(|p| p.file_name())
                         .and_then(|n| n.to_str())
-                        .map(|dir_name| decode_claude_project_path(dir_name))
+                        .map(decode_claude_project_path)
                         .filter(|s| !s.is_empty());
                     if let Err(e) = read_jsonl_file(path, project_path, &mut records) {
                         eprintln!("Warning: failed to read {}: {}", path.display(), e);

@@ -1406,7 +1406,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AgentColor, AgentModel, EnvVariable, McpServer, Rule, Skill, SkillFile, ToolAccess, Visibility};
+    use crate::models::{AgentColor, AgentModel, McpServer, Rule, Skill, SkillFile, ToolAccess, Visibility};
     use tempfile::TempDir;
 
     fn create_test_mcp() -> UniversalCapability {
@@ -1678,7 +1678,7 @@ mod tests {
         let agent = create_test_agent();
         let artifact = agent.id.artifact_name(&agent.name);
 
-        adapter.deploy(temp_dir.path(), &[], &[agent.clone()], DeployStrategy::Merge, None).unwrap();
+        adapter.deploy(temp_dir.path(), &[], std::slice::from_ref(&agent), DeployStrategy::Merge, None).unwrap();
         let agent_file = temp_dir.path().join(".claude").join("agents").join(format!("{}.md", artifact));
         assert!(agent_file.exists());
 

@@ -56,17 +56,14 @@ pub struct ConfigDiffEntry {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub enum DeployStrategy {
+    #[default]
     Merge,
     Overwrite,
     Skip,
 }
 
-impl Default for DeployStrategy {
-    fn default() -> Self {
-        Self::Merge
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeployResult {

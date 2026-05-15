@@ -381,7 +381,7 @@ impl CursorAdapter {
                         .as_object_mut()
                         .ok_or("hooks field must be an object")?;
                     for (event_name, event_arr) in adapter_hooks {
-                        let new_entries = event_arr.as_array().map(|a| a.clone()).unwrap_or_default();
+                        let new_entries = event_arr.as_array().cloned().unwrap_or_default();
                         if new_entries.is_empty() {
                             continue;
                         }
@@ -848,7 +848,7 @@ impl AgentAdapter for CursorAdapter {
                                 .entry("hooks").or_insert(json!({}))
                                 .as_object_mut().ok_or("hooks field must be an object")?;
                             for (event_name, event_arr) in adapter_hooks {
-                                let new_entries = event_arr.as_array().map(|a| a.clone()).unwrap_or_default();
+                                let new_entries = event_arr.as_array().cloned().unwrap_or_default();
                                 if new_entries.is_empty() {
                                     continue;
                                 }
@@ -1339,7 +1339,7 @@ mod tests {
         let agent = create_test_agent();
         let artifact = agent.id.artifact_name(&agent.name);
 
-        adapter.deploy(temp_dir.path(), &[], &[agent.clone()], DeployStrategy::Merge, None).unwrap();
+        adapter.deploy(temp_dir.path(), &[], std::slice::from_ref(&agent), DeployStrategy::Merge, None).unwrap();
         let agent_file = temp_dir.path()
             .join(".cursor")
             .join("agents")

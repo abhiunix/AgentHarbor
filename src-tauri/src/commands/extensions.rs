@@ -151,7 +151,7 @@ pub fn list_cursor_extensions() -> Result<Vec<CursorExtension>, String> {
         });
     }
 
-    extensions.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    extensions.sort_by_key(|a| a.name.to_lowercase());
     Ok(extensions)
 }
 

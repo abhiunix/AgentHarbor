@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SyncState {
     pub last_etag: Option<String>,
     pub last_sync_time: Option<String>,
@@ -16,18 +17,6 @@ pub struct SyncState {
     pub agents_count: usize,
 }
 
-impl Default for SyncState {
-    fn default() -> Self {
-        Self {
-            last_etag: None,
-            last_sync_time: None,
-            last_error: None,
-            is_syncing: false,
-            capabilities_count: 0,
-            agents_count: 0,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncConfig {
@@ -96,6 +85,7 @@ pub fn save_sync_state(state: &SyncState) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 pub fn check_for_updates(config: &SyncConfig, last_etag: Option<&str>) -> Result<(bool, Option<String>, Option<Vec<u8>>), String> {
     let (owner, repo) = parse_github_url(&config.repo_url)?;
     let api_url = format!(
@@ -144,16 +134,16 @@ pub fn check_for_updates(config: &SyncConfig, last_etag: Option<&str>) -> Result
 
 fn parse_github_url(url: &str) -> Result<(String, String), String> {
     // Trim whitespace and trailing punctuation (e.g. comma from paste)
-    let url = url.trim().trim_end_matches(|c| c == '/' || c == ',' || c == ';');
+    let url = url.trim().trim_end_matches(['/', ',', ';']);
     let url = url.strip_prefix("https://github.com/").unwrap_or(url);
     let url = url.strip_prefix("http://github.com/").unwrap_or(url);
     let url = url.strip_prefix("github.com/").unwrap_or(url);
     // Trim again in case of space before trailing comma
-    let url = url.trim().trim_end_matches(|c| c == ',' || c == ';');
+    let url = url.trim().trim_end_matches([',', ';']);
     let parts: Vec<&str> = url.split('/').collect();
     if parts.len() >= 2 {
         let owner = parts[0].trim();
-        let repo = parts[1].trim().trim_end_matches(|c| c == ',' || c == ';');
+        let repo = parts[1].trim().trim_end_matches([',', ';']);
         if owner.is_empty() || repo.is_empty() {
             return Err("Invalid GitHub URL format".to_string());
         }
@@ -400,8 +390,8 @@ pub fn sync_registry(config: &SyncConfig) -> SyncResult {
                             // File-count heuristics (README/index.json/non-recursive skill walk) are
                             // brittle. Use the real loader output so the displayed totals match what
                             // the user sees in the registry browser.
-                            let caps = crate::registry::loader::load_capabilities(&[dest.clone()]).items.len();
-                            let agents = crate::registry::loader::load_agents(&[dest.clone()]).items.len();
+                            let caps = crate::registry::loader::load_capabilities(std::slice::from_ref(&dest)).items.len();
+                            let agents = crate::registry::loader::load_agents(std::slice::from_ref(&dest)).items.len();
 
                             state.last_etag = new_etag;
                             state.capabilities_count = caps;

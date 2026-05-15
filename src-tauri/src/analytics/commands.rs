@@ -882,10 +882,10 @@ fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
 /// Build a TraySummary by fetching all 4 providers IN PARALLEL.
 /// Each provider runs in its own thread, so total time = max(provider_times).
 fn build_tray_summary() -> TraySummary {
-    let claude_h = thread::spawn(|| claude::fetch_claude_analytics());
-    let cursor_h = thread::spawn(|| cursor::fetch_cursor_analytics());
-    let codex_h = thread::spawn(|| codex::fetch_codex_analytics());
-    let gemini_h = thread::spawn(|| gemini::fetch_gemini_analytics());
+    let claude_h = thread::spawn(claude::fetch_claude_analytics);
+    let cursor_h = thread::spawn(cursor::fetch_cursor_analytics);
+    let codex_h = thread::spawn(codex::fetch_codex_analytics);
+    let gemini_h = thread::spawn(gemini::fetch_gemini_analytics);
 
     let disconnected = |id: &str, name: &str| ProviderAnalytics {
         provider_id: id.to_string(),
@@ -943,7 +943,7 @@ fn build_tray_summary() -> TraySummary {
     let worst_rate_limit = providers
         .iter()
         .filter(|p| !is_uncapped_enterprise(p))
-        .filter_map(|p| pick_primary_provider_rate(p))
+        .filter_map(pick_primary_provider_rate)
         .min_by(|a, b| {
             a.remaining_percent
                 .partial_cmp(&b.remaining_percent)
@@ -1032,7 +1032,7 @@ pub fn get_tray_summary() -> TraySummary {
 /// Trigger a background refresh of tray data. Fire-and-forget.
 #[tauri::command]
 pub fn refresh_tray_data() {
-    thread::spawn(|| refresh_and_emit());
+    thread::spawn(refresh_and_emit);
 }
 
 /// Force-refresh a specific provider by clearing its cache and re-fetching.

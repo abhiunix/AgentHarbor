@@ -174,7 +174,7 @@ fn parse_server_wrapper(wrapper: &ApiServerWrapper) -> Option<McpRegistryEntry> 
 
     // Use explicit title if available, otherwise derive from name
     let title = server.title.clone().unwrap_or_else(|| {
-        name.split('/').last().unwrap_or(&name)
+        name.split('/').next_back().unwrap_or(&name)
             .replace('-', " ")
             .split_whitespace()
             .map(|w| {

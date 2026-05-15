@@ -77,7 +77,7 @@ fn read_all_prompts() -> Result<Vec<PromptEntry>, String> {
         });
     }
 
-    entries.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp_ms));
     Ok(entries)
 }
 

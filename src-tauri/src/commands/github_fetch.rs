@@ -262,7 +262,7 @@ pub async fn fetch_github_skill(url: String, github_token: Option<String>) -> Re
 
     let name = meta.get("name").cloned().unwrap_or_else(|| {
         // Fall back to last segment of path
-        path.split('/').last().unwrap_or("unknown").to_string()
+        path.split('/').next_back().unwrap_or("unknown").to_string()
     });
     let description = meta.get("description").cloned().unwrap_or_default();
     let license = meta.get("license").cloned();

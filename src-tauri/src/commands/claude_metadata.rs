@@ -298,11 +298,9 @@ pub fn get_claude_file_history_stats() -> Result<FileHistoryStats, String> {
             stats.total_sessions += 1;
             // Count files in each session dir
             if let Ok(files) = std::fs::read_dir(entry.path()) {
-                for file in files {
-                    if let Ok(f) = file {
-                        if f.path().is_file() {
-                            stats.total_checkpoints += 1;
-                        }
+                for f in files.flatten() {
+                    if f.path().is_file() {
+                        stats.total_checkpoints += 1;
                     }
                 }
             }
