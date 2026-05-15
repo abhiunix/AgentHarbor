@@ -6,6 +6,7 @@ import {
   listBenchmarkProviders,
   listBenchmarkRuns,
   listReferenceBenchmarks,
+  refreshBenchmarkModels,
   runBenchmarkSuite,
   saveBenchmarkDataset,
   updateBenchmarkManualReview,
@@ -25,6 +26,7 @@ interface BenchmarkState {
   datasets: BenchmarkDataset[];
   references: ReferenceBenchmark[];
   runs: BenchmarkRunSummary[];
+  runDetails: Record<string, BenchmarkRun>;
   currentRun: BenchmarkRun | null;
   loading: boolean;
   running: boolean;
@@ -33,7 +35,9 @@ interface BenchmarkState {
 
 interface BenchmarkActions {
   bootstrap: () => Promise<void>;
+  refreshModels: (providerId?: string) => Promise<void>;
   refreshRuns: () => Promise<void>;
+  hydrateRunDetails: (runIds?: string[]) => Promise<void>;
   loadRun: (runId: string) => Promise<void>;
   saveDataset: (dataset: BenchmarkDataset) => Promise<BenchmarkDataset | null>;
   runSuite: (request: BenchmarkRunRequest) => Promise<BenchmarkRun | null>;
@@ -47,6 +51,7 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
   datasets: [],
   references: [],
   runs: [],
+  runDetails: {},
   currentRun: null,
   loading: false,
   running: false,
@@ -78,10 +83,57 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
     }
   },
 
+  refreshModels: async (providerId) => {
+    try {
+      if (providerId) {
+        const liveModels = await refreshBenchmarkModels(providerId);
+        set((state) => {
+          const nextModels = [
+            ...state.models.filter((model) => model.provider_id !== providerId),
+            ...liveModels,
+          ].sort((left, right) => {
+            const providerCompare = left.provider_id.localeCompare(right.provider_id);
+            if (providerCompare !== 0) {
+              return providerCompare;
+            }
+            return left.display_name.localeCompare(right.display_name);
+          });
+          return { models: nextModels };
+        });
+        return;
+      }
+
+      const models = await listBenchmarkModels();
+      set({ models });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
   refreshRuns: async () => {
     try {
       const runs = await listBenchmarkRuns();
       set({ runs });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  hydrateRunDetails: async (runIds) => {
+    const state = useBenchmarkStore.getState();
+    const idsToLoad = (runIds ?? state.runs.map((run) => run.id)).filter((runId) => !state.runDetails[runId]);
+    if (idsToLoad.length === 0) {
+      return;
+    }
+
+    try {
+      const runs = await Promise.all(idsToLoad.map((runId) => getBenchmarkRun(runId)));
+      set((current) => ({
+        runDetails: {
+          ...current.runDetails,
+          ...Object.fromEntries(runs.map((run) => [run.id, run])),
+        },
+      }));
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
     }
