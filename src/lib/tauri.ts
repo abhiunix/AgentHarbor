@@ -1702,6 +1702,31 @@ export interface BenchmarkModel {
   image_price_high_1024?: number | null;
 }
 
+export interface BenchmarkStrategyClaim {
+  headline: string;
+  metric?: string | null;
+  evidence: string;
+  source_path?: string | null;
+  source_url?: string | null;
+}
+
+export interface BenchmarkStrategyDocument {
+  path: string;
+  source_url: string;
+  excerpt: string;
+}
+
+export interface BenchmarkStrategyAnalysis {
+  repo_url: string;
+  repository_full_name: string;
+  default_branch: string;
+  summary: string;
+  extracted_context: string;
+  claims: BenchmarkStrategyClaim[];
+  documents: BenchmarkStrategyDocument[];
+  fetched_at: string;
+}
+
 export interface ReferenceBenchmark {
   id: string;
   name: string;
@@ -1815,6 +1840,14 @@ export async function listBenchmarkProviders(): Promise<BenchmarkProvider[]> {
 
 export async function listBenchmarkModels(): Promise<BenchmarkModel[]> {
   return invoke<BenchmarkModel[]>("list_benchmark_models");
+}
+
+export async function refreshBenchmarkModels(providerId: string): Promise<BenchmarkModel[]> {
+  return invoke<BenchmarkModel[]>("refresh_benchmark_models", { providerId });
+}
+
+export async function analyzeBenchmarkStrategyRepo(repoUrl: string): Promise<BenchmarkStrategyAnalysis> {
+  return invoke<BenchmarkStrategyAnalysis>("analyze_benchmark_strategy_repo", { repoUrl });
 }
 
 export async function listReferenceBenchmarks(): Promise<ReferenceBenchmark[]> {

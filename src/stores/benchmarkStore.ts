@@ -6,6 +6,7 @@ import {
   listBenchmarkProviders,
   listBenchmarkRuns,
   listReferenceBenchmarks,
+  refreshBenchmarkModels,
   runBenchmarkSuite,
   saveBenchmarkDataset,
   updateBenchmarkManualReview,
@@ -34,6 +35,7 @@ interface BenchmarkState {
 
 interface BenchmarkActions {
   bootstrap: () => Promise<void>;
+  refreshModels: (providerId?: string) => Promise<void>;
   refreshRuns: () => Promise<void>;
   hydrateRunDetails: (runIds?: string[]) => Promise<void>;
   loadRun: (runId: string) => Promise<void>;
@@ -81,6 +83,33 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
     }
   },
 
+  refreshModels: async (providerId) => {
+    try {
+      if (providerId) {
+        const liveModels = await refreshBenchmarkModels(providerId);
+        set((state) => {
+          const nextModels = [
+            ...state.models.filter((model) => model.provider_id !== providerId),
+            ...liveModels,
+          ].sort((left, right) => {
+            const providerCompare = left.provider_id.localeCompare(right.provider_id);
+            if (providerCompare !== 0) {
+              return providerCompare;
+            }
+            return left.display_name.localeCompare(right.display_name);
+          });
+          return { models: nextModels };
+        });
+        return;
+      }
+
+      const models = await listBenchmarkModels();
+      set({ models });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
   refreshRuns: async () => {
     try {
       const runs = await listBenchmarkRuns();
@@ -114,14 +143,7 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
     set({ loading: true, error: null });
     try {
       const run = await getBenchmarkRun(runId);
-      set((current) => ({
-        currentRun: run,
-        runDetails: {
-          ...current.runDetails,
-          [run.id]: run,
-        },
-        loading: false,
-      }));
+      set({ currentRun: run, loading: false });
     } catch (error) {
       set({
         loading: false,
@@ -154,10 +176,6 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
       set({
         currentRun: run,
         runs,
-        runDetails: {
-          ...useBenchmarkStore.getState().runDetails,
-          [run.id]: run,
-        },
         running: false,
       });
       return run;
@@ -173,13 +191,7 @@ export const useBenchmarkStore = create<BenchmarkState & BenchmarkActions>((set)
   saveManualReview: async (runId, itemId, manualReview) => {
     try {
       const run = await updateBenchmarkManualReview(runId, itemId, manualReview);
-      set((current) => ({
-        currentRun: run,
-        runDetails: {
-          ...current.runDetails,
-          [run.id]: run,
-        },
-      }));
+      set({ currentRun: run });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
     }
