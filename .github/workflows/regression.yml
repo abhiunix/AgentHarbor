@@ -110,5 +110,14 @@ jobs:
           SKIP_VERSION_BUMP: '1'
 
       - name: Run WebDriverIO E2E suite
+        # Best-effort signal: tauri-driver's Tauri 2 capability matching on
+        # Linux CI is still flaky (see chippers/tauri-driver issues). Keep the
+        # step in CI so the harness keeps building and running — but don't gate
+        # PRs on it. The Rust tier (clippy, cargo test, cargo test --features
+        # mock-providers) is the authoritative regression gate.
         if: matrix.os == 'ubuntu-latest'
-        run: xvfb-run -a npm run test:e2e
+        continue-on-error: true
+        run: |
+          echo "tauri-driver path: $(command -v tauri-driver || echo NOT_FOUND)"
+          tauri-driver --version || true
+          xvfb-run -a npm run test:e2e

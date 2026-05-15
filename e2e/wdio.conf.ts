@@ -52,10 +52,16 @@ export const config: WebdriverIO.Config = {
   },
 
   onPrepare() {
+    // Probe but don't gate on `--version` — older tauri-driver releases either
+    // omit the flag or print to stderr and exit non-zero. The real liveness
+    // check is the `spawn` in beforeSession; if the binary is missing there,
+    // tests will fail with a clear error.
     const check = spawnSync("tauri-driver", ["--version"], { encoding: "utf-8" });
-    if (check.error || check.status !== 0) {
-      throw new Error(
-        "tauri-driver is not on PATH. Install with: cargo install tauri-driver --locked",
+    if (check.error) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[wdio] tauri-driver --version probe errored (continuing):",
+        check.error.message,
       );
     }
   },
