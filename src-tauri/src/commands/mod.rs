@@ -20,6 +20,7 @@ pub mod ai_tracking;
 pub mod session_stats;
 pub mod prompt_history;
 pub mod transcripts;
+pub mod benchmarks;
 pub mod extensions;
 pub mod plans;
 pub mod permissions;

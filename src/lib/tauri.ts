@@ -1613,3 +1613,266 @@ export async function getDebate(id: string): Promise<DebateRecord> {
 export async function deleteDebate(id: string): Promise<void> {
   return invoke<void>("delete_debate", { id });
 }
+
+// --- Benchmark Lab ---
+
+export type BenchmarkModality = "text" | "image";
+export type BenchmarkAssertionKind =
+  | "contains"
+  | "regex"
+  | "exact_match"
+  | "json_parse"
+  | "json_keys_present";
+
+export interface BenchmarkAssertion {
+  kind: BenchmarkAssertionKind;
+  value?: string | null;
+  values: string[];
+}
+
+export interface BenchmarkCase {
+  id: string;
+  name: string;
+  modality: BenchmarkModality;
+  input: string;
+  reference_output?: string | null;
+  assertions: BenchmarkAssertion[];
+  tags: string[];
+}
+
+export interface BenchmarkVariant {
+  id: string;
+  name: string;
+  system_prompt?: string | null;
+  prompt_prefix?: string | null;
+  prompt_suffix?: string | null;
+  capability_context?: string | null;
+  capability_labels: string[];
+}
+
+export interface BenchmarkTarget {
+  provider_id: string;
+  model_id: string;
+  modality: BenchmarkModality;
+  temperature?: number | null;
+  max_output_tokens?: number | null;
+  image_size?: string | null;
+  image_quality?: string | null;
+}
+
+export interface BenchmarkJudgeConfig {
+  enabled: boolean;
+  provider_id?: string | null;
+  model_id?: string | null;
+  rubric?: string | null;
+}
+
+export interface BenchmarkDataset {
+  id: string;
+  name: string;
+  modality: BenchmarkModality;
+  description: string;
+  cases: BenchmarkCase[];
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BenchmarkProvider {
+  id: string;
+  name: string;
+  auth_type: string;
+  key_label: string;
+  key_placeholder: string;
+  supported_modalities: BenchmarkModality[];
+}
+
+export interface BenchmarkModel {
+  provider_id: string;
+  id: string;
+  display_name: string;
+  modality: BenchmarkModality;
+  context_window?: number | null;
+  max_output_tokens?: number | null;
+  supports_judge: boolean;
+  input_cost_per_million?: number | null;
+  output_cost_per_million?: number | null;
+  image_price_low_1024?: number | null;
+  image_price_medium_1024?: number | null;
+  image_price_high_1024?: number | null;
+}
+
+export interface ReferenceBenchmark {
+  id: string;
+  name: string;
+  category: string;
+  summary: string;
+  source_url: string;
+  notes: string;
+}
+
+export interface BenchmarkTokenCounts {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+export interface ArtifactRef {
+  kind: string;
+  label: string;
+  path: string;
+  mime_type: string;
+  preview_data_url?: string | null;
+}
+
+export interface DeterministicScore {
+  kind: string;
+  passed: boolean;
+  details: string;
+}
+
+export interface JudgeScore {
+  score?: number | null;
+  rationale?: string | null;
+  provider_id?: string | null;
+  model_id?: string | null;
+  error?: string | null;
+}
+
+export interface ManualReview {
+  rating?: number | null;
+  preferred?: boolean | null;
+  notes?: string | null;
+}
+
+export type BenchmarkItemStatus = "pending" | "completed" | "failed";
+export type BenchmarkRunStatus = "running" | "completed" | "partial" | "failed";
+
+export interface BenchmarkRunItem {
+  item_id: string;
+  case_id: string;
+  case_name: string;
+  variant_id: string;
+  variant_name: string;
+  provider_id: string;
+  model_id: string;
+  modality: BenchmarkModality;
+  status: BenchmarkItemStatus;
+  started_at: string;
+  completed_at?: string | null;
+  latency_ms?: number | null;
+  token_counts: BenchmarkTokenCounts;
+  estimated_cost_usd?: number | null;
+  context_window?: number | null;
+  context_used_percent?: number | null;
+  output_text?: string | null;
+  artifact_refs: ArtifactRef[];
+  deterministic_scores: DeterministicScore[];
+  judge_score?: JudgeScore | null;
+  manual_review: ManualReview;
+  error?: string | null;
+}
+
+export interface BenchmarkRun {
+  id: string;
+  name: string;
+  modality: BenchmarkModality;
+  dataset_name?: string | null;
+  status: BenchmarkRunStatus;
+  created_at: string;
+  completed_at?: string | null;
+  cases: BenchmarkCase[];
+  variants: BenchmarkVariant[];
+  targets: BenchmarkTarget[];
+  items: BenchmarkRunItem[];
+  judge_config?: BenchmarkJudgeConfig | null;
+}
+
+export interface BenchmarkRunSummary {
+  id: string;
+  name: string;
+  modality: BenchmarkModality;
+  status: BenchmarkRunStatus;
+  created_at: string;
+  completed_at?: string | null;
+  item_count: number;
+}
+
+export interface BenchmarkRunRequest {
+  name: string;
+  modality: BenchmarkModality;
+  dataset_name?: string | null;
+  cases: BenchmarkCase[];
+  variants: BenchmarkVariant[];
+  targets: BenchmarkTarget[];
+  judge?: BenchmarkJudgeConfig | null;
+}
+
+export async function listBenchmarkProviders(): Promise<BenchmarkProvider[]> {
+  return invoke<BenchmarkProvider[]>("list_benchmark_providers");
+}
+
+export async function listBenchmarkModels(): Promise<BenchmarkModel[]> {
+  return invoke<BenchmarkModel[]>("list_benchmark_models");
+}
+
+export async function listReferenceBenchmarks(): Promise<ReferenceBenchmark[]> {
+  return invoke<ReferenceBenchmark[]>("list_reference_benchmarks");
+}
+
+export async function listBenchmarkDatasets(): Promise<BenchmarkDataset[]> {
+  return invoke<BenchmarkDataset[]>("list_benchmark_datasets");
+}
+
+export async function saveBenchmarkDataset(dataset: BenchmarkDataset): Promise<BenchmarkDataset> {
+  return invoke<BenchmarkDataset>("save_benchmark_dataset", { dataset });
+}
+
+export async function deleteBenchmarkDataset(datasetId: string): Promise<void> {
+  return invoke<void>("delete_benchmark_dataset", { datasetId });
+}
+
+export async function importBenchmarkDataset(jsonString: string): Promise<BenchmarkDataset> {
+  return invoke<BenchmarkDataset>("import_benchmark_dataset", { jsonString });
+}
+
+export async function exportBenchmarkDataset(datasetId: string, outputPath: string): Promise<void> {
+  return invoke<void>("export_benchmark_dataset", { datasetId, outputPath });
+}
+
+export async function listBenchmarkRuns(): Promise<BenchmarkRunSummary[]> {
+  return invoke<BenchmarkRunSummary[]>("list_benchmark_runs");
+}
+
+export async function getBenchmarkRun(runId: string): Promise<BenchmarkRun> {
+  return invoke<BenchmarkRun>("get_benchmark_run", { runId });
+}
+
+export async function runBenchmarkSuite(request: BenchmarkRunRequest): Promise<BenchmarkRun> {
+  return invoke<BenchmarkRun>("run_benchmark_suite", { request });
+}
+
+export async function updateBenchmarkManualReview(
+  runId: string,
+  itemId: string,
+  manualReview: ManualReview,
+): Promise<BenchmarkRun> {
+  return invoke<BenchmarkRun>("update_benchmark_manual_review", { runId, itemId, manualReview });
+}
+
+export async function exportBenchmarkRun(runId: string, outputPath: string): Promise<void> {
+  return invoke<void>("export_benchmark_run", { runId, outputPath });
+}
+
+export async function saveProviderToken(providerId: string, keyType: string, value: string): Promise<void> {
+  return invoke<void>("save_provider_token", { providerId, keyType, value });
+}
+
+export async function deleteProviderToken(providerId: string, keyType: string): Promise<void> {
+  return invoke<void>("delete_provider_token", { providerId, keyType });
+}
+
+export async function hasProviderToken(providerId: string, keyType: string): Promise<boolean> {
+  return invoke<boolean>("has_provider_token", { providerId, keyType });
+}

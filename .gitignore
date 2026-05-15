@@ -19,6 +19,12 @@ dist-ssr
 # Rust build artifacts (handled by src-tauri/.gitignore too)
 src-tauri/target/
 
+# Project-local Rust toolchain overrides (per-developer; never commit)
+.cargo-local/
+.rustup-local/
+# Accidental nested project-name dir created by absolute-path CARGO_HOME runs
+/agentharbor/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
