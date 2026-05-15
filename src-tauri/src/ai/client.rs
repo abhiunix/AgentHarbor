@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use crate::utils::keychain;
 
-pub const ANTHROPIC_KEY_NAME: &str = "anthropic_api_key";
+// Match the canonical casing used elsewhere (debate worker, debate page UI,
+// existing Secrets manager) so users don't end up with two keychain entries.
+pub const ANTHROPIC_KEY_NAME: &str = "ANTHROPIC_API_KEY";
 const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";

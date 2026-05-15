@@ -210,7 +210,7 @@ fn write_cache(payload: &RecommendationsPayload) -> Result<(), String> {
 fn generate_now() -> Result<RecommendationsPayload, String> {
     if !client::has_api_key() {
         return Err(
-            "Anthropic API key not set. Open Settings → Secrets and add a key with name 'anthropic_api_key'."
+            "Anthropic API key not set. Open Settings → Secrets and add a key with name 'ANTHROPIC_API_KEY'."
                 .to_string(),
         );
     }

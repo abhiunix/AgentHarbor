@@ -36,7 +36,7 @@ function MissingKeyNotice({ onRecheck }: { onRecheck: () => void }) {
       <p className="text-sm text-text-secondary mb-4">
         AI recommendations use Claude to analyze your installed tools, projects,
         and registry. Add a secret named{" "}
-        <span className="font-mono text-text-primary">anthropic_api_key</span>{" "}
+        <span className="font-mono text-text-primary">ANTHROPIC_API_KEY</span>{" "}
         in Settings → Manage Secrets. The value is stored in your OS Keychain.
       </p>
       <div className="flex items-center gap-2">
