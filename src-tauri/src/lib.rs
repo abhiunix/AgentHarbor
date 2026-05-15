@@ -82,11 +82,11 @@ use commands::plans::{
     list_todos, get_todo_stats,
 };
 use commands::benchmarks::{
-    list_benchmark_providers, list_benchmark_models, list_reference_benchmarks,
-    list_benchmark_datasets, save_benchmark_dataset, delete_benchmark_dataset,
-    import_benchmark_dataset, export_benchmark_dataset, list_benchmark_runs,
-    get_benchmark_run, update_benchmark_manual_review, export_benchmark_run,
-    run_benchmark_suite,
+    analyze_benchmark_strategy_repo, list_benchmark_providers, list_benchmark_models,
+    list_reference_benchmarks, list_benchmark_datasets, save_benchmark_dataset,
+    delete_benchmark_dataset, import_benchmark_dataset, export_benchmark_dataset,
+    list_benchmark_runs, get_benchmark_run, refresh_benchmark_models,
+    update_benchmark_manual_review, export_benchmark_run, run_benchmark_suite,
 };
 use commands::permissions::{
     get_claude_permissions, update_claude_permissions,
@@ -346,6 +346,8 @@ pub fn run() {
             get_todo_stats,
             list_benchmark_providers,
             list_benchmark_models,
+            refresh_benchmark_models,
+            analyze_benchmark_strategy_repo,
             list_reference_benchmarks,
             list_benchmark_datasets,
             save_benchmark_dataset,

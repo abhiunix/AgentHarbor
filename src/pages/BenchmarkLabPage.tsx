@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useRegistryStore } from "../stores/registryStore";
 import { useBenchmarkStore } from "../stores/benchmarkStore";
 import {
+  analyzeBenchmarkStrategyRepo,
   exportBenchmarkRun,
   hasProviderToken,
   importBenchmarkDataset,
@@ -12,7 +13,9 @@ import {
   type BenchmarkJudgeConfig,
   type BenchmarkModality,
   type BenchmarkModel,
+  type BenchmarkRunRequest,
   type BenchmarkRunItem,
+  type BenchmarkStrategyAnalysis,
   type BenchmarkTarget,
   type BenchmarkVariant,
   type ManualReview,
@@ -24,84 +27,7 @@ type TargetDraft = {
   modelId: string;
 };
 
-type AnalysisPoint = {
-  key: string;
-  label: string;
-  providerId: string;
-  modelId: string;
-  variantName: string;
-  runId: string;
-  runName: string;
-  createdAt: string;
-  avgScore: number | null;
-  avgLatencyMs: number | null;
-  avgCostUsd: number | null;
-  avgContextUsedPercent: number | null;
-  itemCount: number;
-};
-
-type StabilityStatus = "stable" | "warn" | "critical" | "unknown";
-
-type MetricStatus = {
-  status: StabilityStatus;
-  delta: number | null;
-  baseline: number | null;
-  latest: number | null;
-};
-
 const BENCHMARK_TOKEN_KEY = "api-key";
-
-type MethodologyEntry = {
-  id: string;
-  name: string;
-  category: "Deterministic" | "Model judge" | "Human review";
-  description: string;
-  rubric: string;
-  example: string;
-};
-
-const METHODOLOGY_ENTRIES: MethodologyEntry[] = [
-  {
-    id: "json_keys",
-    name: "JSON keys present",
-    category: "Deterministic",
-    description: "Verifies the model output is JSON and contains every key listed in the assertion.",
-    rubric: "Pass when JSON.parse succeeds and every required key is present at the top level.",
-    example: "Required keys: [\"score\", \"rationale\"] → output { score: 95, rationale: \"…\" } passes.",
-  },
-  {
-    id: "regex_match",
-    name: "Regex match",
-    category: "Deterministic",
-    description: "Tests whether the response matches a configured regular expression.",
-    rubric: "Pass when the regex finds at least one match in the output text.",
-    example: "Pattern /^\\d{3}-\\d{4}$/ → output \"212-5510\" passes.",
-  },
-  {
-    id: "contains_substring",
-    name: "Contains substring",
-    category: "Deterministic",
-    description: "Checks for required tokens that must appear verbatim in the response.",
-    rubric: "Pass when every required substring is found (case-sensitive unless overridden).",
-    example: "Required: [\"BEGIN\", \"END\"] → output \"BEGIN…END\" passes.",
-  },
-  {
-    id: "llm_judge",
-    name: "Model-as-judge rubric",
-    category: "Model judge",
-    description: "Runs a configurable rubric against a separate scoring model (default: mock or gpt-4o-mini).",
-    rubric: "Judge must return strict JSON { score: 0–100, rationale: string }. Non-JSON returns are surfaced as errors.",
-    example: "Rubric: \"Score for correctness, usefulness, and instruction following.\" → judge returns { score: 84, rationale: \"…\" }.",
-  },
-  {
-    id: "manual_review",
-    name: "Manual review",
-    category: "Human review",
-    description: "Stores a 1-5 star rating, a preferred-output flag, and free-form notes alongside each item.",
-    rubric: "Aggregated into stability scoring as rating × 20 (so 5 stars maps to 100).",
-    example: "Reviewer rates 4 stars → contributes 80 to the quality score for that case.",
-  },
-];
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -143,6 +69,105 @@ function formatMetric(value: number | null | undefined, suffix = ""): string {
   return `${value}${suffix}`;
 }
 
+function sum(values: Array<number | null | undefined>): number {
+  return values.reduce<number>((total, value) => total + (value ?? 0), 0);
+}
+
+function average(values: Array<number | null | undefined>): number | null {
+  const normalized = values.filter((value): value is number => value != null);
+  if (normalized.length === 0) {
+    return null;
+  }
+  return normalized.reduce((total, value) => total + value, 0) / normalized.length;
+}
+
+function totalTokens(item: BenchmarkRunItem): number {
+  return item.token_counts.input_tokens
+    + item.token_counts.output_tokens
+    + item.token_counts.cache_read_tokens
+    + item.token_counts.cache_write_tokens;
+}
+
+function formatDelta(value: number | null): string {
+  if (value === null || Number.isNaN(value)) {
+    return "—";
+  }
+  const rounded = Math.round(value * 100) / 100;
+  return `${rounded > 0 ? "+" : ""}${rounded}`;
+}
+
+function formatModelCount(count: number): string {
+  return count === 1 ? "1 model" : `${count} models`;
+}
+
+function metricWidth(value: number, max: number): string {
+  if (!max || max <= 0) {
+    return "0%";
+  }
+  return `${Math.max(10, Math.min(100, (value / max) * 100))}%`;
+}
+
+function renderResponseBlocks(text: string) {
+  return text.split("\n").map((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return <div key={`blank-${index}`} className="h-3" />;
+    }
+    if (trimmed.startsWith("#")) {
+      return (
+        <p key={`heading-${index}`} className="text-sm font-semibold text-text-primary">
+          {trimmed.replace(/^#+\s*/, "")}
+        </p>
+      );
+    }
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      return (
+        <div key={`bullet-${index}`} className="flex gap-2">
+          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-accent-blue shrink-0" />
+          <p className="text-sm leading-6 text-text-secondary">{trimmed.slice(2)}</p>
+        </div>
+      );
+    }
+    return (
+      <p key={`line-${index}`} className="text-sm leading-6 text-text-secondary">
+        {line}
+      </p>
+    );
+  });
+}
+
+function normalizeReferenceTemplate(referenceId: string): { modality: BenchmarkModality; text: string; datasetHint?: string } {
+  switch (referenceId) {
+    case "swe-bench":
+      return {
+        modality: "text",
+        datasetHint: "seeded/coding-quick-check",
+        text: "Given a bug report for a production service, explain the minimal patch, the test plan, and the rollout guardrails in compact bullet points.",
+      };
+    case "browsecomp":
+      return {
+        modality: "text",
+        text: "Research a difficult technical question using only the most relevant evidence, then return a concise cited answer and a short evidence table.",
+      };
+    case "gdpval":
+      return {
+        modality: "text",
+        text: "Solve a practical business workflow task with a short answer, a structured output section, and no unnecessary explanation.",
+      };
+    case "t2i-compbench-plus-plus":
+      return {
+        modality: "image",
+        datasetHint: "seeded/image-prompt-fidelity",
+        text: "Create a highly compositional editorial image that follows every visual constraint exactly.",
+      };
+    default:
+      return {
+        modality: "text",
+        text: "Answer the task with high quality while minimizing prompt overhead and response verbosity.",
+      };
+  }
+}
+
 function supportedModels(models: BenchmarkModel[], providerId: string, modality: BenchmarkModality): BenchmarkModel[] {
   return models.filter((model) => model.provider_id === providerId && model.modality === modality);
 }
@@ -153,102 +178,8 @@ function defaultTargetForModality(modality: BenchmarkModality): TargetDraft {
     : { providerId: "mock", modelId: "mock-fast" };
 }
 
-function average(values: number[]): number | null {
-  if (values.length === 0) {
-    return null;
-  }
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function standardDeviation(values: number[]): number {
-  if (values.length <= 1) {
-    return 0;
-  }
-  const mean = average(values) ?? 0;
-  const variance = values.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / values.length;
-  return Math.sqrt(variance);
-}
-
-function scoreForItem(item: BenchmarkRunItem): number | null {
-  if (typeof item.judge_score?.score === "number") {
-    return item.judge_score.score;
-  }
-  if (item.deterministic_scores.length > 0) {
-    const passed = item.deterministic_scores.filter((score) => score.passed).length;
-    return (passed / item.deterministic_scores.length) * 100;
-  }
-  if (typeof item.manual_review.rating === "number") {
-    return item.manual_review.rating * 20;
-  }
-  return null;
-}
-
-function formatDelta(value: number | null | undefined, suffix = ""): string {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  const rounded = Math.abs(value) >= 10 ? value.toFixed(1) : value.toFixed(2);
-  return `${value > 0 ? "+" : ""}${rounded}${suffix}`;
-}
-
-function classifyMetric(
-  latest: number | null,
-  baselineValues: number[],
-  direction: "higher_better" | "lower_better",
-): MetricStatus {
-  if (latest === null || baselineValues.length === 0) {
-    return {
-      status: "unknown",
-      delta: null,
-      baseline: baselineValues.length > 0 ? average(baselineValues) : null,
-      latest,
-    };
-  }
-
-  const baseline = average(baselineValues);
-  if (baseline === null) {
-    return { status: "unknown", delta: null, baseline: null, latest };
-  }
-
-  const stddev = standardDeviation(baselineValues);
-  const delta = latest - baseline;
-  const badDelta = direction === "higher_better" ? -delta : delta;
-  const warnThreshold = Math.max(direction === "higher_better" ? 5 : 0.05, stddev * 1.5);
-  const criticalThreshold = Math.max(direction === "higher_better" ? 10 : 0.15, stddev * 2.5);
-
-  if (badDelta >= criticalThreshold) {
-    return { status: "critical", delta, baseline, latest };
-  }
-  if (badDelta >= warnThreshold) {
-    return { status: "warn", delta, baseline, latest };
-  }
-  return { status: "stable", delta, baseline, latest };
-}
-
-function statusTone(status: StabilityStatus): string {
-  switch (status) {
-    case "critical":
-      return "bg-red-500/15 text-red-300 border-red-500/30";
-    case "warn":
-      return "bg-amber-500/15 text-amber-300 border-amber-500/30";
-    case "stable":
-      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
-    default:
-      return "bg-white/5 text-text-muted border-[#2a2b36]";
-  }
-}
-
-function statusRank(status: StabilityStatus): number {
-  switch (status) {
-    case "critical":
-      return 3;
-    case "warn":
-      return 2;
-    case "stable":
-      return 1;
-    default:
-      return 0;
-  }
+function targetSelectionKey(providerId: string, modelId: string): string {
+  return `${providerId}::${modelId}`;
 }
 
 export function BenchmarkLabPage() {
@@ -258,13 +189,12 @@ export function BenchmarkLabPage() {
     datasets,
     references,
     runs,
-    runDetails,
     currentRun,
     loading,
     running,
     error,
     bootstrap,
-    hydrateRunDetails,
+    refreshModels,
     loadRun,
     runSuite,
     saveDataset,
@@ -273,17 +203,11 @@ export function BenchmarkLabPage() {
   } = useBenchmarkStore();
   const capabilities = useRegistryStore((state) => state.capabilities);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<
-    "runner" | "stability" | "regressions" | "compare" | "methodology" | "references"
-  >("stability");
-  const [compareSelection, setCompareSelection] = useState<string[]>([]);
-  const [comparePreset, setComparePreset] = useState<
-    "head_to_head" | "latest_vs_previous" | "all_variants" | null
-  >(null);
+  const [activeTab, setActiveTab] = useState<"runner" | "references">("runner");
+  const [runnerTab, setRunnerTab] = useState<"setup" | "compare" | "responses" | "gallery">("setup");
   const [runName, setRunName] = useState("Benchmark Run");
   const [modality, setModality] = useState<BenchmarkModality>("text");
   const [datasetId, setDatasetId] = useState<string>("");
-  const [selectedDomain, setSelectedDomain] = useState("all");
   const [casesText, setCasesText] = useState("");
   const [baselineSystem, setBaselineSystem] = useState("You are a precise benchmark assistant.");
   const [baselinePrefix, setBaselinePrefix] = useState("");
@@ -301,6 +225,22 @@ export function BenchmarkLabPage() {
   const [judgeRubric, setJudgeRubric] = useState("Score the response from 0 to 100 for correctness, usefulness, and instruction following. Return strict JSON with keys score and rationale.");
   const [providerKeyInputs, setProviderKeyInputs] = useState<Record<string, string>>({});
   const [providerKeyState, setProviderKeyState] = useState<Record<string, boolean>>({});
+  const [strategyRepoUrl, setStrategyRepoUrl] = useState("");
+  const [strategyLoading, setStrategyLoading] = useState(false);
+  const [strategyAnalysis, setStrategyAnalysis] = useState<BenchmarkStrategyAnalysis | null>(null);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
+  const [selectedReferenceId, setSelectedReferenceId] = useState<string>("swe-bench");
+  const [selectedReferenceTargets, setSelectedReferenceTargets] = useState<string[]>([]);
+  const [collapsedPanels, setCollapsedPanels] = useState<Record<string, boolean>>({
+    runSetup: false,
+    credentials: false,
+    strategy: false,
+    variants: false,
+    targets: false,
+    scoring: false,
+    history: false,
+    results: false,
+  });
 
   useEffect(() => {
     bootstrap();
@@ -330,11 +270,16 @@ export function BenchmarkLabPage() {
   }, [modality]);
 
   useEffect(() => {
-    const tabsNeedingHistory: typeof activeTab[] = ["stability", "regressions", "compare"];
-    if (tabsNeedingHistory.includes(activeTab) && runs.length > 0) {
-      void hydrateRunDetails();
+    if (casesText.trim() || datasets.length === 0) {
+      return;
     }
-  }, [activeTab, hydrateRunDetails, runs]);
+    const seededDataset = datasets.find((dataset) => dataset.modality === modality);
+    if (!seededDataset) {
+      return;
+    }
+    setDatasetId(seededDataset.id);
+    setCasesText(seededDataset.cases.map((item) => item.input).join("\n\n"));
+  }, [casesText, datasets, modality]);
 
   const promptCapabilities = useMemo(
     () =>
@@ -350,309 +295,188 @@ export function BenchmarkLabPage() {
   );
 
   const challengerContext = useMemo(() => {
-    return selectedCapabilities
+    const capabilityContext = selectedCapabilities
       .map((capability) => `## ${capability.name}\n${summarizeCapability(capability)}`)
       .join("\n\n");
-  }, [selectedCapabilities]);
+    const strategyContext = strategyAnalysis?.extracted_context?.trim() ?? "";
+    return [capabilityContext, strategyContext].filter(Boolean).join("\n\n");
+  }, [selectedCapabilities, strategyAnalysis]);
 
   const caseList = useMemo(() => buildCasesFromText(casesText, modality), [casesText, modality]);
-
-  const domainOptions = useMemo(() => {
-    const values = new Set<string>();
-    for (const dataset of datasets) {
-      for (const tag of dataset.tags) {
-        if (!["seeded", "user", "text", "image"].includes(tag)) {
-          values.add(tag);
-        }
-      }
-    }
-    for (const reference of references) {
-      values.add(reference.category.toLowerCase());
-    }
-    return ["all", ...Array.from(values).sort()];
-  }, [datasets, references]);
-
-  const filteredDatasets = useMemo(() => {
-    return datasets.filter((dataset) => {
-      if (dataset.modality !== modality) {
-        return false;
-      }
-      if (selectedDomain === "all") {
-        return true;
-      }
-      return dataset.tags.includes(selectedDomain);
-    });
-  }, [datasets, modality, selectedDomain]);
-
-  const filteredReferences = useMemo(() => {
-    if (selectedDomain === "all") {
-      return references;
-    }
-    return references.filter((reference) => reference.category.toLowerCase() === selectedDomain);
-  }, [references, selectedDomain]);
-
-  const historicalRuns = useMemo(
-    () =>
-      Object.values(runDetails)
-        .slice()
-        .sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at)),
-    [runDetails],
-  );
-
-  const analysisSeries = useMemo(() => {
-    const grouped = new Map<string, AnalysisPoint[]>();
-
-    for (const run of historicalRuns) {
-      const bucket = new Map<string, BenchmarkRunItem[]>();
-      for (const item of run.items) {
-        if (item.status !== "completed") {
-          continue;
-        }
-        const key = `${item.provider_id}::${item.model_id}::${item.variant_name}`;
-        const items = bucket.get(key) ?? [];
-        items.push(item);
-        bucket.set(key, items);
-      }
-
-      for (const [key, items] of bucket.entries()) {
-        const scoreValues = items.map(scoreForItem).filter((value): value is number => value !== null);
-        const latencyValues = items
-          .map((item) => item.latency_ms)
-          .filter((value): value is number => typeof value === "number");
-        const costValues = items
-          .map((item) => item.estimated_cost_usd)
-          .filter((value): value is number => typeof value === "number");
-        const contextValues = items
-          .map((item) => item.context_used_percent)
-          .filter((value): value is number => typeof value === "number");
-        const sample = items[0];
-        const point: AnalysisPoint = {
-          key,
-          label: `${sample.provider_id} / ${sample.model_id} / ${sample.variant_name}`,
-          providerId: sample.provider_id,
-          modelId: sample.model_id,
-          variantName: sample.variant_name,
-          runId: run.id,
-          runName: run.name,
-          createdAt: run.created_at,
-          avgScore: average(scoreValues),
-          avgLatencyMs: average(latencyValues),
-          avgCostUsd: average(costValues),
-          avgContextUsedPercent: average(contextValues),
-          itemCount: items.length,
-        };
-        const series = grouped.get(key) ?? [];
-        series.push(point);
-        grouped.set(key, series);
-      }
-    }
-
-    return Array.from(grouped.values())
-      .filter((series) => series.length > 0)
-      .sort((left, right) => left[0].label.localeCompare(right[0].label));
-  }, [historicalRuns]);
-
-  const stabilityCards = useMemo(() => {
-    return analysisSeries
-      .map((series) => {
-        const latest = series[series.length - 1];
-        const previous = series.slice(0, -1);
-        const scoreStatus = classifyMetric(
-          latest.avgScore,
-          previous.map((point) => point.avgScore).filter((value): value is number => value !== null),
-          "higher_better",
-        );
-        const latencyStatus = classifyMetric(
-          latest.avgLatencyMs,
-          previous.map((point) => point.avgLatencyMs).filter((value): value is number => value !== null),
-          "lower_better",
-        );
-        const costStatus = classifyMetric(
-          latest.avgCostUsd,
-          previous.map((point) => point.avgCostUsd).filter((value): value is number => value !== null),
-          "lower_better",
-        );
-        const contextStatus = classifyMetric(
-          latest.avgContextUsedPercent,
-          previous.map((point) => point.avgContextUsedPercent).filter((value): value is number => value !== null),
-          "lower_better",
-        );
-        const overallStatus = [scoreStatus.status, latencyStatus.status, costStatus.status, contextStatus.status]
-          .sort((left, right) => statusRank(right) - statusRank(left))[0] ?? "unknown";
-
-        return {
-          key: latest.key,
-          label: latest.label,
-          latest,
-          previousCount: previous.length,
-          scoreStatus,
-          latencyStatus,
-          costStatus,
-          contextStatus,
-          overallStatus,
-          recentScores: series.slice(-6).map((point) => point.avgScore),
-        };
-      })
-      .sort((left, right) => statusRank(right.overallStatus) - statusRank(left.overallStatus) || left.label.localeCompare(right.label));
-  }, [analysisSeries]);
-
-  const regressionCards = useMemo(() => {
-    return stabilityCards
-      .flatMap((card) => {
-        const metricEntries = [
-          { metric: "Quality score", details: card.scoreStatus, suffix: "" },
-          { metric: "Latency", details: card.latencyStatus, suffix: " ms" },
-          { metric: "Cost", details: card.costStatus, suffix: " USD" },
-          { metric: "Context used", details: card.contextStatus, suffix: "%" },
-        ];
-        return metricEntries
-          .filter((entry) => entry.details.status === "warn" || entry.details.status === "critical")
-          .map((entry) => ({
-            key: `${card.key}-${entry.metric}`,
-            label: card.label,
-            metric: entry.metric,
-            suffix: entry.suffix,
-            ...entry.details,
-          }));
-      })
-      .sort((left, right) => {
-        const statusDifference = statusRank(right.status) - statusRank(left.status);
-        if (statusDifference !== 0) {
-          return statusDifference;
-        }
-        return Math.abs(right.delta ?? 0) - Math.abs(left.delta ?? 0);
-      });
-  }, [stabilityCards]);
-
-  const freshness = useMemo(() => {
-    if (runs.length === 0) {
-      return { state: "empty" as const, lastRun: null as string | null, ageHours: null as number | null };
-    }
-    const latest = runs.reduce((acc, run) => (Date.parse(run.created_at) > Date.parse(acc.created_at) ? run : acc));
-    const ageMs = Date.now() - Date.parse(latest.created_at);
-    const ageHours = ageMs / 3_600_000;
-    const state = ageHours > 168 ? "stale" : ageHours > 24 ? "warming" : "fresh";
-    return { state, lastRun: latest.created_at, ageHours };
-  }, [runs]);
-
-  const summaryCards = useMemo(() => {
-    if (stabilityCards.length === 0) {
-      return { bestScore: null, biggestRegression: null, mostExpensive: null };
-    }
-    const bestScore = stabilityCards
-      .filter((card) => card.latest.avgScore != null)
-      .sort((left, right) => (right.latest.avgScore ?? 0) - (left.latest.avgScore ?? 0))[0] ?? null;
-
-    const biggestRegression =
-      regressionCards.length > 0
-        ? regressionCards.reduce((acc, item) => (Math.abs(item.delta ?? 0) > Math.abs(acc.delta ?? 0) ? item : acc))
-        : null;
-
-    const mostExpensive = stabilityCards
-      .filter((card) => card.latest.avgCostUsd != null)
-      .sort((left, right) => (right.latest.avgCostUsd ?? 0) - (left.latest.avgCostUsd ?? 0))[0] ?? null;
-
-    return { bestScore, biggestRegression, mostExpensive };
-  }, [regressionCards, stabilityCards]);
-
-  const compareSeries = useMemo(() => {
-    return analysisSeries.map((series) => {
-      const latest = series[series.length - 1];
-      const previous = series.length > 1 ? series[series.length - 2] : null;
-      const baseline = series[0];
-      const scoreDelta = latest.avgScore != null && previous?.avgScore != null ? latest.avgScore - previous.avgScore : null;
-      const peak = series.reduce<AnalysisPoint | null>((acc, point) => {
-        if (point.avgScore == null) return acc;
-        if (!acc || (acc.avgScore ?? -Infinity) < point.avgScore) return point;
-        return acc;
-      }, null);
-      return { key: latest.key, label: latest.label, latest, previous, baseline, scoreDelta, peak };
-    });
-  }, [analysisSeries]);
-
-  const compareSelected = useMemo(
-    () => compareSeries.filter((entry) => compareSelection.includes(entry.key)),
-    [compareSeries, compareSelection],
-  );
-
-  const caseWinners = useMemo(() => {
-    if (compareSelected.length === 0) {
-      return [];
-    }
-    const byCase = new Map<string, { caseName: string; scores: Map<string, number | null> }>();
-    for (const entry of compareSelected) {
-      const run = runDetails[entry.latest.runId];
-      if (!run) continue;
-      for (const item of run.items) {
-        if (
-          item.provider_id !== entry.latest.providerId ||
-          item.model_id !== entry.latest.modelId ||
-          item.variant_name !== entry.latest.variantName
-        ) {
-          continue;
-        }
-        const bucket = byCase.get(item.case_id) ?? { caseName: item.case_name, scores: new Map() };
-        bucket.scores.set(entry.key, scoreForItem(item));
-        byCase.set(item.case_id, bucket);
-      }
-    }
-    return Array.from(byCase.entries()).map(([caseId, bucket]) => {
-      let winnerKey: string | null = null;
-      let winnerScore = -Infinity;
-      for (const [key, score] of bucket.scores) {
-        if (score != null && score > winnerScore) {
-          winnerScore = score;
-          winnerKey = key;
-        }
-      }
-      return { caseId, caseName: bucket.caseName, scores: bucket.scores, winnerKey };
-    });
-  }, [compareSelected, runDetails]);
-
-  const compareHeadline = useMemo(() => {
-    if (compareSelected.length < 2) {
-      return { leading: null, biggestMove: null, peakInRange: null };
-    }
-    const leading = compareSelected
-      .filter((entry) => entry.latest.avgScore != null)
-      .sort((left, right) => (right.latest.avgScore ?? 0) - (left.latest.avgScore ?? 0))[0] ?? null;
-    const biggestMove = compareSelected
-      .filter((entry) => entry.scoreDelta != null)
-      .sort((left, right) => Math.abs(right.scoreDelta ?? 0) - Math.abs(left.scoreDelta ?? 0))[0] ?? null;
-    const peakInRange = compareSelected
-      .filter((entry) => entry.peak?.avgScore != null)
-      .sort((left, right) => (right.peak?.avgScore ?? 0) - (left.peak?.avgScore ?? 0))[0] ?? null;
-    return { leading, biggestMove, peakInRange };
-  }, [compareSelected]);
-
-  useEffect(() => {
-    if (comparePreset == null) {
-      return;
-    }
-    const allKeys = compareSeries.map((entry) => entry.key);
-    if (allKeys.length === 0) {
-      return;
-    }
-    if (comparePreset === "head_to_head") {
-      setCompareSelection(allKeys.slice(0, 2));
-    } else if (comparePreset === "latest_vs_previous") {
-      const withHistory = compareSeries.filter((entry) => entry.previous != null);
-      setCompareSelection(withHistory.length > 0 ? [withHistory[0].key] : allKeys.slice(0, 1));
-    } else if (comparePreset === "all_variants") {
-      setCompareSelection(allKeys);
-    }
-  }, [comparePreset, compareSeries]);
 
   const availableJudgeModels = useMemo(
     () => models.filter((model) => model.supports_judge && model.modality === "text" && model.provider_id === judgeProvider),
     [judgeProvider, models],
   );
 
+  const providerModelCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const model of models) {
+      counts[model.provider_id] = (counts[model.provider_id] ?? 0) + 1;
+    }
+    return counts;
+  }, [models]);
+
+  const selectedReference = useMemo(
+    () => references.find((reference) => reference.id === selectedReferenceId) ?? references[0] ?? null,
+    [references, selectedReferenceId],
+  );
+
+  const selectedReferenceTemplate = useMemo(
+    () => normalizeReferenceTemplate(selectedReference?.id ?? "swe-bench"),
+    [selectedReference],
+  );
+
+  const launchableReferenceModels = useMemo(() => {
+    const modalityFilter = selectedReferenceTemplate.modality;
+    return models.filter((model) => {
+      if (model.modality !== modalityFilter) {
+        return false;
+      }
+      if (model.provider_id === "mock") {
+        return true;
+      }
+      return providerKeyState[model.provider_id] === true;
+    });
+  }, [models, providerKeyState, selectedReferenceTemplate.modality]);
+
+  const comparisonRows = useMemo(() => {
+    if (!currentRun || currentRun.variants.length < 2) {
+      return [];
+    }
+
+    const rows: Array<{
+      key: string;
+      providerId: string;
+      modelId: string;
+      baselineVariant: string;
+      challengerVariant: string;
+      baselineTokens: number;
+      challengerTokens: number;
+      baselineCost: number | null;
+      challengerCost: number | null;
+      baselineLatency: number | null;
+      challengerLatency: number | null;
+      baselineJudge: number | null;
+      challengerJudge: number | null;
+    }> = [];
+
+    const grouped = new Map<string, BenchmarkRunItem[]>();
+    for (const item of currentRun.items) {
+      const key = `${item.provider_id}::${item.model_id}`;
+      const list = grouped.get(key) ?? [];
+      list.push(item);
+      grouped.set(key, list);
+    }
+
+    for (const [key, items] of grouped.entries()) {
+      const byVariant = new Map<string, BenchmarkRunItem[]>();
+      for (const item of items) {
+        const list = byVariant.get(item.variant_name) ?? [];
+        list.push(item);
+        byVariant.set(item.variant_name, list);
+      }
+      const variantNames = Array.from(byVariant.keys());
+      if (variantNames.length < 2) {
+        continue;
+      }
+      const baseline = byVariant.get(variantNames[0]) ?? [];
+      const challenger = byVariant.get(variantNames[1]) ?? [];
+      if (baseline.length === 0 || challenger.length === 0) {
+        continue;
+      }
+
+      rows.push({
+        key,
+        providerId: baseline[0].provider_id,
+        modelId: baseline[0].model_id,
+        baselineVariant: variantNames[0],
+        challengerVariant: variantNames[1],
+        baselineTokens: sum(baseline.map((item) => totalTokens(item))),
+        challengerTokens: sum(challenger.map((item) => totalTokens(item))),
+        baselineCost: average(baseline.map((item) => item.estimated_cost_usd)),
+        challengerCost: average(challenger.map((item) => item.estimated_cost_usd)),
+        baselineLatency: average(baseline.map((item) => item.latency_ms)),
+        challengerLatency: average(challenger.map((item) => item.latency_ms)),
+        baselineJudge: average(baseline.map((item) => item.judge_score?.score)),
+        challengerJudge: average(challenger.map((item) => item.judge_score?.score)),
+      });
+    }
+
+    return rows;
+  }, [currentRun]);
+
+  const runMetricRows = useMemo(() => {
+    if (!currentRun) {
+      return [];
+    }
+    return currentRun.items.map((item) => ({
+      key: item.item_id,
+      label: `${item.provider_id} / ${item.model_id} / ${item.variant_name}`,
+      providerId: item.provider_id,
+      modelId: item.model_id,
+      variantName: item.variant_name,
+      tokens: totalTokens(item),
+      cost: item.estimated_cost_usd ?? 0,
+      latency: item.latency_ms ?? 0,
+      judge: item.judge_score?.score ?? 0,
+      hasJudge: item.judge_score?.score != null,
+    }));
+  }, [currentRun]);
+
+  const metricMaxima = useMemo(() => ({
+    tokens: Math.max(1, ...runMetricRows.map((row) => row.tokens)),
+    cost: Math.max(0.00001, ...runMetricRows.map((row) => row.cost)),
+    latency: Math.max(1, ...runMetricRows.map((row) => row.latency)),
+    judge: Math.max(1, ...runMetricRows.map((row) => row.judge)),
+  }), [runMetricRows]);
+
+  const galleryItems = useMemo(
+    () =>
+      currentRun?.items.filter((item) => item.artifact_refs.length > 0).map((item) => ({
+        item,
+        artifacts: item.artifact_refs,
+      })) ?? [],
+    [currentRun],
+  );
+
+  const imageComparisonGroups = useMemo(() => {
+    const groups = new Map<string, Array<{ item: BenchmarkRunItem; artifacts: BenchmarkRunItem["artifact_refs"] }>>();
+    for (const entry of galleryItems) {
+      const key = entry.item.case_name;
+      const list = groups.get(key) ?? [];
+      list.push(entry);
+      groups.set(key, list);
+    }
+    return Array.from(groups.entries()).map(([caseName, items]) => ({ caseName, items }));
+  }, [galleryItems]);
+
   useEffect(() => {
     if (availableJudgeModels.length > 0 && !availableJudgeModels.some((model) => model.id === judgeModel)) {
       setJudgeModel(availableJudgeModels[0].id);
     }
   }, [availableJudgeModels, judgeModel]);
+
+  useEffect(() => {
+    if (!selectedReference && references.length > 0) {
+      setSelectedReferenceId(references[0].id);
+    }
+  }, [references, selectedReference]);
+
+  useEffect(() => {
+    const launchKeys = launchableReferenceModels.map((model) => targetSelectionKey(model.provider_id, model.id));
+    if (launchKeys.length === 0) {
+      setSelectedReferenceTargets([]);
+      return;
+    }
+    setSelectedReferenceTargets((current) => {
+      const retained = current.filter((key) => launchKeys.includes(key));
+      if (retained.length > 0) {
+        return retained;
+      }
+      return launchKeys.slice(0, Math.min(3, launchKeys.length));
+    });
+  }, [launchableReferenceModels]);
 
   const syncDataset = (selectedId: string) => {
     if (!selectedId) {
@@ -702,6 +526,10 @@ export function BenchmarkLabPage() {
     );
   };
 
+  const togglePanel = (panelId: string) => {
+    setCollapsedPanels((current) => ({ ...current, [panelId]: !current[panelId] }));
+  };
+
   const handleSaveProviderKey = async (providerId: string) => {
     const value = providerKeyInputs[providerId]?.trim();
     if (!value) {
@@ -710,6 +538,159 @@ export function BenchmarkLabPage() {
     await saveProviderToken(`benchmark-${providerId}`, BENCHMARK_TOKEN_KEY, value);
     setProviderKeyState((current) => ({ ...current, [providerId]: true }));
     setProviderKeyInputs((current) => ({ ...current, [providerId]: "" }));
+    if (providerId === "openai" || providerId === "anthropic") {
+      await refreshModels(providerId);
+    }
+  };
+
+  const handleAnalyzeStrategyRepo = async () => {
+    if (!strategyRepoUrl.trim()) {
+      return;
+    }
+    setStrategyLoading(true);
+    setStrategyError(null);
+    try {
+      const analysis = await analyzeBenchmarkStrategyRepo(strategyRepoUrl.trim());
+      setStrategyAnalysis(analysis);
+      setEnableChallenger(true);
+      setChallengerName(`${analysis.repository_full_name} strategy`);
+      if (!challengerPrefix.trim()) {
+        setChallengerPrefix(
+          "Apply the repository-derived strategy context below when composing the answer. Preserve correctness and avoid mentioning the strategy unless the task requires it.",
+        );
+      }
+    } catch (analysisError) {
+      setStrategyAnalysis(null);
+      setStrategyError(analysisError instanceof Error ? analysisError.message : String(analysisError));
+    } finally {
+      setStrategyLoading(false);
+    }
+  };
+
+  const handleUseReferenceBenchmark = (referenceId: string) => {
+    const template = normalizeReferenceTemplate(referenceId);
+    setActiveTab("runner");
+    setRunnerTab("setup");
+    setModality(template.modality);
+    setCasesText(template.text);
+    if (template.datasetHint) {
+      setDatasetId(template.datasetHint);
+    } else {
+      setDatasetId("");
+    }
+    setRunName(`Benchmark from ${referenceId}`);
+  };
+
+  const toggleReferenceTarget = (selectionKey: string) => {
+    setSelectedReferenceTargets((current) =>
+      current.includes(selectionKey)
+        ? current.filter((key) => key !== selectionKey)
+        : [...current, selectionKey],
+    );
+  };
+
+  const buildRunRequest = (
+    nextCases: BenchmarkCase[],
+    nextModality: BenchmarkModality,
+    nextTargets: TargetDraft[],
+    nextRunName?: string,
+    nextDatasetName?: string | null,
+  ): BenchmarkRunRequest | null => {
+    const normalizedTargets: BenchmarkTarget[] = nextTargets
+      .filter((target) => target.providerId && target.modelId)
+      .map((target) => ({
+        provider_id: target.providerId,
+        model_id: target.modelId,
+        modality: nextModality,
+        temperature: nextModality === "text" ? 0.2 : null,
+        max_output_tokens: nextModality === "text" ? 1400 : null,
+        image_size: nextModality === "image" ? "1:1" : null,
+        image_quality: nextModality === "image" ? "medium" : null,
+      }));
+
+    if (nextCases.length === 0 || normalizedTargets.length === 0) {
+      return null;
+    }
+
+    const variants: BenchmarkVariant[] = [
+      {
+        id: "baseline",
+        name: "Baseline",
+        system_prompt: baselineSystem || null,
+        prompt_prefix: baselinePrefix || null,
+        prompt_suffix: baselineSuffix || null,
+        capability_context: null,
+        capability_labels: [],
+      },
+    ];
+
+    if (enableChallenger && nextModality === "text") {
+      variants.push({
+        id: "challenger",
+        name: challengerName || "Capability Variant",
+        system_prompt: challengerSystem || null,
+        prompt_prefix: challengerPrefix || null,
+        prompt_suffix: challengerSuffix || null,
+        capability_context: challengerContext || null,
+        capability_labels: selectedCapabilities.map((capability) => capability.name),
+      });
+    }
+
+    const judge: BenchmarkJudgeConfig | null =
+      judgeEnabled && nextModality === "text"
+        ? {
+            enabled: true,
+            provider_id: judgeProvider,
+            model_id: judgeModel,
+            rubric: judgeRubric,
+          }
+        : null;
+
+    return {
+      name: nextRunName ?? runName,
+      modality: nextModality,
+      dataset_name: nextDatasetName === undefined ? datasetId || null : nextDatasetName,
+      cases: nextCases,
+      variants,
+      targets: normalizedTargets,
+      judge,
+    };
+  };
+
+  const handleLaunchReferenceBenchmark = async () => {
+    if (!selectedReference) {
+      return;
+    }
+
+    const template = normalizeReferenceTemplate(selectedReference.id);
+    const nextCases = buildCasesFromText(template.text, template.modality);
+    const nextTargets: TargetDraft[] = selectedReferenceTargets
+      .map((selectionKey) => {
+        const [providerId, modelId] = selectionKey.split("::");
+        return { providerId, modelId };
+      })
+      .filter((target) => target.providerId && target.modelId);
+
+    const request = buildRunRequest(
+      nextCases,
+      template.modality,
+      nextTargets,
+      `${selectedReference.name} benchmark`,
+      template.datasetHint ?? null,
+    );
+
+    if (!request) {
+      return;
+    }
+
+    setRunName(request.name);
+    setModality(template.modality);
+    setCasesText(template.text);
+    setDatasetId(template.datasetHint ?? "");
+    setTargets(nextTargets);
+    setActiveTab("runner");
+    setRunnerTab(template.modality === "image" ? "gallery" : "compare");
+    await runSuite(request);
   };
 
   const handleSaveDataset = async () => {
@@ -748,61 +729,11 @@ export function BenchmarkLabPage() {
 
   const handleRun = async () => {
     clearError();
-    const normalizedTargets: BenchmarkTarget[] = targets
-      .filter((target) => target.providerId && target.modelId)
-      .map((target) => ({
-        provider_id: target.providerId,
-        model_id: target.modelId,
-        modality,
-        temperature: modality === "text" ? 0.2 : null,
-        max_output_tokens: modality === "text" ? 1400 : null,
-        image_size: modality === "image" ? "1:1" : null,
-        image_quality: modality === "image" ? "medium" : null,
-      }));
-
-    const variants: BenchmarkVariant[] = [
-      {
-        id: "baseline",
-        name: "Baseline",
-        system_prompt: baselineSystem || null,
-        prompt_prefix: baselinePrefix || null,
-        prompt_suffix: baselineSuffix || null,
-        capability_context: null,
-        capability_labels: [],
-      },
-    ];
-
-    if (enableChallenger && modality === "text") {
-      variants.push({
-        id: "challenger",
-        name: challengerName || "Capability Variant",
-        system_prompt: challengerSystem || null,
-        prompt_prefix: challengerPrefix || null,
-        prompt_suffix: challengerSuffix || null,
-        capability_context: challengerContext || null,
-        capability_labels: selectedCapabilities.map((capability) => capability.name),
-      });
+    const request = buildRunRequest(caseList, modality, targets);
+    if (!request) {
+      return;
     }
-
-    const judge: BenchmarkJudgeConfig | null =
-      judgeEnabled && modality === "text"
-        ? {
-            enabled: true,
-            provider_id: judgeProvider,
-            model_id: judgeModel,
-            rubric: judgeRubric,
-          }
-        : null;
-
-    await runSuite({
-      name: runName,
-      modality,
-      dataset_name: datasetId || null,
-      cases: caseList,
-      variants,
-      targets: normalizedTargets,
-      judge,
-    });
+    await runSuite(request);
   };
 
   const handleExportRun = async () => {
@@ -837,26 +768,21 @@ export function BenchmarkLabPage() {
               Compare prompts, capability variants, providers, and models with local run history and exportable artifacts.
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            {(
-              [
-                ["stability", "Stability"],
-                ["regressions", "Regressions"],
-                ["compare", "Compare"],
-                ["runner", "Runner"],
-                ["methodology", "Methodology"],
-                ["references", "References"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setActiveTab(id)}
-                data-testid={`benchmark-tab-${id}`}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${activeTab === id ? "bg-accent-blue text-white" : "bg-[#1a1b23] text-text-secondary"}`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab("runner")}
+              data-testid="benchmark-tab-runner"
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${activeTab === "runner" ? "bg-accent-blue text-white" : "bg-[#1a1b23] text-text-secondary"}`}
+            >
+              Runner
+            </button>
+            <button
+              onClick={() => setActiveTab("references")}
+              data-testid="benchmark-tab-references"
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${activeTab === "references" ? "bg-accent-blue text-white" : "bg-[#1a1b23] text-text-secondary"}`}
+            >
+              Reference Benchmarks
+            </button>
           </div>
         </div>
 
@@ -866,442 +792,181 @@ export function BenchmarkLabPage() {
           </div>
         )}
 
-        <div
-          data-testid="benchmark-status-banner"
-          className={`mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 ${
-            running
-              ? "border-accent-blue/40 bg-accent-blue/10"
-              : freshness.state === "stale"
-                ? "border-amber-500/30 bg-amber-500/10"
-                : freshness.state === "empty"
-                  ? "border-[#2a2b36] bg-[#13141a]"
-                  : "border-emerald-500/30 bg-emerald-500/5"
-          }`}
-        >
-          <div className="flex items-center gap-3 text-xs">
-            <span
-              className={`inline-flex h-2.5 w-2.5 rounded-full ${
-                running
-                  ? "animate-pulse bg-accent-blue"
-                  : freshness.state === "stale"
-                    ? "bg-amber-400"
-                    : freshness.state === "empty"
-                      ? "bg-text-muted"
-                      : "bg-emerald-400"
-              }`}
-            />
-            <span className="font-medium text-text-primary">
-              {running
-                ? "Benchmark run in flight…"
-                : freshness.state === "empty"
-                  ? "No benchmark runs yet"
-                  : freshness.state === "stale"
-                    ? `Signals are stale — last refresh ${Math.floor((freshness.ageHours ?? 0) / 24)} days ago`
-                    : `Last run ${new Date(freshness.lastRun ?? "").toLocaleString()}`}
-            </span>
-            <span className="text-text-muted">
-              {runs.length} runs • {Object.keys(runDetails).length} hydrated
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-[11px] text-text-muted">
-            <span>{stabilityCards.length} model/variant series</span>
-            <span className="text-[#2a2b36]">•</span>
-            <span className={regressionCards.length > 0 ? "text-amber-300" : "text-text-muted"}>
-              {regressionCards.length} active regressions
-            </span>
-          </div>
-        </div>
-
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-text-muted">Domain</span>
-          {domainOptions.map((domain) => (
-            <button
-              key={domain}
-              onClick={() => setSelectedDomain(domain)}
-              className={`rounded-full border px-3 py-1 text-xs ${selectedDomain === domain ? "border-accent-blue bg-accent-blue/15 text-accent-blue" : "border-[#2a2b36] bg-[#13141a] text-text-secondary"}`}
-            >
-              {domain === "all" ? "All" : domain}
-            </button>
-          ))}
-        </div>
-
-        {activeTab === "stability" ? (
-          <div className="space-y-4" data-testid="benchmark-stability">
-            {stabilityCards.length === 0 ? (
-              <div className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-6 text-sm">
-                <p className="text-text-primary font-medium">No benchmark history yet.</p>
-                <p className="text-text-muted mt-1">
-                  Run at least two benchmarks against the same model/variant to unlock stability bands and drift signals.
-                </p>
-                <p className="text-text-muted mt-3 text-xs">
-                  AgentHarbor stores every prompt, parameter, and raw response locally — open the Runner tab to start.
-                </p>
-              </div>
-            ) : (
-              <>
-                <div
-                  data-testid="benchmark-summary-cards"
-                  className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2"
-                >
-                  <div className="rounded-xl border border-emerald-500/20 bg-[#13141a] p-4">
-                    <p className="text-[10px] uppercase tracking-wider text-text-muted">Leading</p>
-                    {summaryCards.bestScore ? (
-                      <>
-                        <p className="mt-1 text-base font-semibold text-text-primary">{summaryCards.bestScore.label}</p>
-                        <p className="text-[11px] text-emerald-300 mt-1">
-                          Score {formatMetric(summaryCards.bestScore.latest.avgScore)}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="mt-1 text-sm text-text-muted">Not enough scored runs yet</p>
-                    )}
-                  </div>
-                  <div className="rounded-xl border border-amber-500/20 bg-[#13141a] p-4">
-                    <p className="text-[10px] uppercase tracking-wider text-text-muted">Biggest move</p>
-                    {summaryCards.biggestRegression ? (
-                      <>
-                        <p className="mt-1 text-base font-semibold text-text-primary">
-                          {summaryCards.biggestRegression.label}
-                        </p>
-                        <p className="text-[11px] text-amber-300 mt-1">
-                          {summaryCards.biggestRegression.metric} {formatDelta(summaryCards.biggestRegression.delta, summaryCards.biggestRegression.suffix)}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="mt-1 text-sm text-text-muted">No regressions in range</p>
-                    )}
-                  </div>
-                  <div className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-4">
-                    <p className="text-[10px] uppercase tracking-wider text-text-muted">Most expensive</p>
-                    {summaryCards.mostExpensive ? (
-                      <>
-                        <p className="mt-1 text-base font-semibold text-text-primary">{summaryCards.mostExpensive.label}</p>
-                        <p className="text-[11px] text-text-secondary mt-1">
-                          ${(summaryCards.mostExpensive.latest.avgCostUsd ?? 0).toFixed(5)} avg / item
-                        </p>
-                      </>
-                    ) : (
-                      <p className="mt-1 text-sm text-text-muted">No cost data yet</p>
-                    )}
-                  </div>
+        {activeTab === "references" ? (
+          <div className="space-y-5">
+            <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-text-primary">Quick Launch</h2>
+                  <p className="mt-1 max-w-2xl text-sm text-text-secondary">
+                    Choose a benchmark family, select multiple live models, and launch a comparison run directly from this page.
+                  </p>
                 </div>
-              </>
-            )}
-            {stabilityCards.length > 0 && (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {stabilityCards.map((card) => (
-                  <div key={card.key} className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-                    <div className="flex items-start justify-between gap-3 mb-4">
-                      <div>
-                        <h2 className="text-base font-semibold text-text-primary">{card.label}</h2>
-                        <p className="text-xs text-text-muted mt-1">
-                          Latest run: {card.latest.runName} • {new Date(card.latest.createdAt).toLocaleString()} • {card.previousCount} historical comparison runs
-                        </p>
-                      </div>
-                      <span className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-wide ${statusTone(card.overallStatus)}`}>
-                        {card.overallStatus}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 text-sm mb-4">
-                      <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                        <p className="text-[11px] text-text-muted mb-1">Quality score</p>
-                        <p className="text-text-primary font-medium">{formatMetric(card.latest.avgScore)}</p>
-                        <p className={`text-[11px] mt-1 ${card.scoreStatus.status === "critical" ? "text-red-300" : card.scoreStatus.status === "warn" ? "text-amber-300" : "text-text-muted"}`}>
-                          {formatDelta(card.scoreStatus.delta)}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                        <p className="text-[11px] text-text-muted mb-1">Latency</p>
-                        <p className="text-text-primary font-medium">{formatMetric(card.latest.avgLatencyMs, " ms")}</p>
-                        <p className={`text-[11px] mt-1 ${card.latencyStatus.status === "critical" ? "text-red-300" : card.latencyStatus.status === "warn" ? "text-amber-300" : "text-text-muted"}`}>
-                          {formatDelta(card.latencyStatus.delta, " ms")}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                        <p className="text-[11px] text-text-muted mb-1">Estimated cost</p>
-                        <p className="text-text-primary font-medium">{card.latest.avgCostUsd != null ? `$${card.latest.avgCostUsd.toFixed(5)}` : "—"}</p>
-                        <p className={`text-[11px] mt-1 ${card.costStatus.status === "critical" ? "text-red-300" : card.costStatus.status === "warn" ? "text-amber-300" : "text-text-muted"}`}>
-                          {formatDelta(card.costStatus.delta)}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                        <p className="text-[11px] text-text-muted mb-1">Context used</p>
-                        <p className="text-text-primary font-medium">{card.latest.avgContextUsedPercent != null ? `${card.latest.avgContextUsedPercent.toFixed(2)}%` : "—"}</p>
-                        <p className={`text-[11px] mt-1 ${card.contextStatus.status === "critical" ? "text-red-300" : card.contextStatus.status === "warn" ? "text-amber-300" : "text-text-muted"}`}>
-                          {formatDelta(card.contextStatus.delta, "%")}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-[11px] text-text-muted mb-2">Recent quality history</p>
-                      <div className="flex items-end gap-1 h-14">
-                        {card.recentScores.map((score, index) => (
-                          <div
-                            key={`${card.key}-score-${index}`}
-                            className="flex-1 rounded-t bg-accent-blue/60"
-                            style={{ height: `${Math.max(10, Math.min(100, score ?? 10))}%` }}
-                            title={score != null ? score.toFixed(1) : "No score"}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : activeTab === "regressions" ? (
-          <div className="space-y-4" data-testid="benchmark-regressions">
-            {regressionCards.length === 0 ? (
-              <div className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-6 text-sm text-text-muted">
-                No active regressions detected in the local run history for the current benchmark series.
-              </div>
-            ) : (
-              regressionCards.map((card) => (
-                <div key={card.key} className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-base font-semibold text-text-primary">{card.label}</h2>
-                      <p className="text-sm text-text-secondary mt-1">{card.metric}</p>
-                    </div>
-                    <span className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-wide ${statusTone(card.status)}`}>
-                      {card.status}
-                    </span>
-                  </div>
-                  <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-                    <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                      <p className="text-[11px] text-text-muted mb-1">Latest</p>
-                      <p className="text-text-primary">{formatMetric(card.latest, card.suffix)}</p>
-                    </div>
-                    <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                      <p className="text-[11px] text-text-muted mb-1">Baseline</p>
-                      <p className="text-text-primary">{formatMetric(card.baseline, card.suffix)}</p>
-                    </div>
-                    <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                      <p className="text-[11px] text-text-muted mb-1">Delta</p>
-                      <p className={card.status === "critical" ? "text-red-300" : "text-amber-300"}>{formatDelta(card.delta, card.suffix)}</p>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        ) : activeTab === "compare" ? (
-          <div className="space-y-4" data-testid="benchmark-compare">
-            <div className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-text-primary">Pick a preset to compare in one click</h2>
-                <span className="text-[11px] text-text-muted">{compareSelected.length} selected of {compareSeries.length}</span>
-              </div>
-              <div className="flex flex-wrap gap-2 mb-4">
-                {(
-                  [
-                    ["head_to_head", "Head to head"],
-                    ["latest_vs_previous", "Latest vs previous"],
-                    ["all_variants", "Every variant"],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    data-testid={`compare-preset-${id}`}
-                    onClick={() => setComparePreset(id)}
-                    disabled={compareSeries.length === 0}
-                    className={`rounded-lg border px-3 py-1.5 text-xs ${
-                      comparePreset === id
-                        ? "border-accent-blue bg-accent-blue/15 text-accent-blue"
-                        : "border-[#2a2b36] bg-[#0e0f13] text-text-secondary hover:bg-[#1a1b23]"
-                    } disabled:opacity-40`}
-                  >
-                    {label}
-                  </button>
-                ))}
                 <button
-                  onClick={() => {
-                    setComparePreset(null);
-                    setCompareSelection([]);
-                  }}
-                  className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] px-3 py-1.5 text-xs text-text-secondary hover:bg-[#1a1b23]"
+                  onClick={() => void handleLaunchReferenceBenchmark()}
+                  disabled={selectedReferenceTargets.length === 0 || running}
+                  className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                 >
-                  Clear
+                  {running ? "Launching..." : "Launch Benchmark"}
                 </button>
               </div>
 
-              {compareSeries.length === 0 ? (
-                <p className="text-sm text-text-muted">
-                  Compare needs at least one model/variant history. Run something in the Runner tab first.
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto">
-                  {compareSeries.map((entry) => {
-                    const checked = compareSelection.includes(entry.key);
-                    return (
-                      <label
-                        key={entry.key}
-                        className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer ${
-                          checked ? "border-accent-blue bg-accent-blue/10" : "border-[#2a2b36] bg-[#0e0f13]"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(event) => {
-                            setComparePreset(null);
-                            setCompareSelection((current) =>
-                              event.target.checked ? [...current, entry.key] : current.filter((id) => id !== entry.key),
-                            );
-                          }}
-                          className="mt-0.5"
-                        />
-                        <span className="flex-1">
-                          <span className="block text-text-primary font-medium">{entry.label}</span>
-                          <span className="block text-text-muted">
-                            Score {formatMetric(entry.latest.avgScore)} • ${(entry.latest.avgCostUsd ?? 0).toFixed(5)}/item
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {compareSelected.length >= 1 && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="rounded-xl border border-emerald-500/20 bg-[#13141a] p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-text-muted">Leading</p>
-                  {compareHeadline.leading ? (
-                    <>
-                      <p className="mt-1 text-base font-semibold text-text-primary">{compareHeadline.leading.label}</p>
-                      <p className="text-[11px] text-emerald-300 mt-1">Score {formatMetric(compareHeadline.leading.latest.avgScore)}</p>
-                    </>
-                  ) : (
-                    <p className="mt-1 text-sm text-text-muted">Pick two or more variants</p>
-                  )}
-                </div>
-                <div className="rounded-xl border border-amber-500/20 bg-[#13141a] p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-text-muted">Biggest move</p>
-                  {compareHeadline.biggestMove ? (
-                    <>
-                      <p className="mt-1 text-base font-semibold text-text-primary">{compareHeadline.biggestMove.label}</p>
-                      <p className="text-[11px] text-amber-300 mt-1">Δ {formatDelta(compareHeadline.biggestMove.scoreDelta)}</p>
-                    </>
-                  ) : (
-                    <p className="mt-1 text-sm text-text-muted">Needs two runs per variant</p>
-                  )}
-                </div>
-                <div className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-text-muted">Peak in range</p>
-                  {compareHeadline.peakInRange?.peak ? (
-                    <>
-                      <p className="mt-1 text-base font-semibold text-text-primary">{compareHeadline.peakInRange.label}</p>
-                      <p className="text-[11px] text-text-secondary mt-1">
-                        Best run {formatMetric(compareHeadline.peakInRange.peak.avgScore)} on {new Date(compareHeadline.peakInRange.peak.createdAt).toLocaleDateString()}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="mt-1 text-sm text-text-muted">No scored history yet</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {compareSelected.length >= 2 && caseWinners.length > 0 && (
-              <div className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-text-primary">Per-case breakdown</h2>
-                  <span className="text-[11px] text-text-muted">★ marks the case winner</span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs">
-                    <thead>
-                      <tr className="text-left text-text-muted">
-                        <th className="py-2 pr-3 font-medium">Case</th>
-                        {compareSelected.map((entry) => (
-                          <th key={entry.key} className="py-2 px-3 font-medium text-text-secondary">
-                            {entry.label}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {caseWinners.map((row) => (
-                        <tr key={row.caseId} className="border-t border-[#2a2b36]">
-                          <td className="py-2 pr-3 text-text-primary">{row.caseName}</td>
-                          {compareSelected.map((entry) => {
-                            const score = row.scores.get(entry.key);
-                            const isWinner = row.winnerKey === entry.key;
-                            return (
-                              <td key={entry.key} className={`py-2 px-3 ${isWinner ? "text-emerald-300 font-medium" : "text-text-secondary"}`}>
-                                {isWinner && <span className="mr-1">★</span>}
-                                {score != null ? score.toFixed(1) : "—"}
-                              </td>
-                            );
-                          })}
-                        </tr>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
+                <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                  <label className="mb-3 block space-y-1">
+                    <span className="text-xs text-text-muted">Benchmark family</span>
+                    <select
+                      value={selectedReferenceId}
+                      onChange={(event) => setSelectedReferenceId(event.target.value)}
+                      className="w-full rounded-lg border border-[#2a2b36] bg-[#13141a] px-3 py-2 text-sm text-text-primary"
+                    >
+                      {references.map((reference) => (
+                        <option key={reference.id} value={reference.id}>
+                          {reference.name}
+                        </option>
                       ))}
-                    </tbody>
-                  </table>
+                    </select>
+                  </label>
+
+                  {selectedReference && (
+                    <div className="space-y-3">
+                      <div>
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted">
+                            {selectedReference.category}
+                          </span>
+                          <span className="rounded-full bg-accent-blue/10 px-2 py-1 text-[10px] uppercase tracking-wide text-accent-blue">
+                            {selectedReferenceTemplate.modality}
+                          </span>
+                        </div>
+                        <p className="text-sm text-text-secondary">{selectedReference.summary}</p>
+                        <p className="mt-2 text-xs text-text-muted">{selectedReference.notes}</p>
+                      </div>
+
+                      <div className="rounded-lg border border-dashed border-[#2a2b36] bg-[#13141a] p-3">
+                        <p className="mb-2 text-[11px] uppercase tracking-wide text-text-muted">Seed prompt</p>
+                        <p className="text-sm leading-6 text-text-secondary">{selectedReferenceTemplate.text}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
-          </div>
-        ) : activeTab === "methodology" ? (
-          <div className="space-y-4" data-testid="benchmark-methodology">
-            <div className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-              <h2 className="text-base font-semibold text-text-primary">How we score every run</h2>
-              <p className="mt-2 text-sm text-text-secondary">
-                AgentHarbor stores the prompt, parameters, and the raw response for every benchmark item — so any score below comes from data
-                you can inspect in the Runner tab.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {METHODOLOGY_ENTRIES.map((entry) => (
-                <div key={entry.id} className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <h3 className="text-sm font-semibold text-text-primary">{entry.name}</h3>
+
+                <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-text-primary">Model Selection</p>
+                      <p className="text-[11px] text-text-muted">
+                        Saved-provider keys unlock live models here. Mock remains available for dry runs.
+                      </p>
+                    </div>
                     <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted">
-                      {entry.category}
+                      {selectedReferenceTargets.length} selected
                     </span>
                   </div>
-                  <p className="text-xs text-text-secondary">{entry.description}</p>
-                  <div className="mt-3 rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Scoring rubric</p>
-                    <p className="text-xs text-text-secondary">{entry.rubric}</p>
+
+                  {launchableReferenceModels.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      {launchableReferenceModels.map((model) => {
+                        const selectionKey = targetSelectionKey(model.provider_id, model.id);
+                        const selected = selectedReferenceTargets.includes(selectionKey);
+                        return (
+                          <label
+                            key={selectionKey}
+                            className={`rounded-lg border p-3 transition-colors ${selected ? "border-accent-blue bg-accent-blue/10" : "border-[#2a2b36] bg-[#13141a]"}`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() => toggleReferenceTarget(selectionKey)}
+                                className="mt-1"
+                              />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-text-primary">
+                                  {model.display_name}
+                                </p>
+                                <p className="text-[11px] text-text-muted">
+                                  {model.provider_id} • {model.context_window ? `${model.context_window.toLocaleString()} ctx` : "context n/a"}
+                                </p>
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-text-muted">
+                      No launchable models yet for this modality. Save a provider key and refresh models first.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {references.map((reference) => (
+                <div key={reference.id} className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <h2 className="text-base font-semibold text-text-primary">{reference.name}</h2>
+                    <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted">
+                      {reference.category}
+                    </span>
                   </div>
-                  <div className="mt-2 rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Example</p>
-                    <p className="text-xs text-text-secondary font-mono">{entry.example}</p>
+                  <p className="text-sm text-text-secondary mb-3">{reference.summary}</p>
+                  <p className="text-xs text-text-muted mb-4">{reference.notes}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => handleUseReferenceBenchmark(reference.id)}
+                      className="rounded-lg bg-accent-blue px-3 py-2 text-xs font-medium text-white"
+                    >
+                      Load In Runner
+                    </button>
+                    <button
+                      onClick={() => setSelectedReferenceId(reference.id)}
+                      className="rounded-lg border border-[#2a2b36] px-3 py-2 text-xs text-text-primary"
+                    >
+                      Select For Launch
+                    </button>
+                    <a href={reference.source_url} target="_blank" rel="noreferrer" className="text-xs text-accent-blue hover:underline">
+                      Open source
+                    </a>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        ) : activeTab === "references" ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredReferences.map((reference) => (
-              <div key={reference.id} className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <h2 className="text-base font-semibold text-text-primary">{reference.name}</h2>
-                  <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted">
-                    {reference.category}
-                  </span>
-                </div>
-                <p className="text-sm text-text-secondary mb-3">{reference.summary}</p>
-                <p className="text-xs text-text-muted mb-4">{reference.notes}</p>
-                <a href={reference.source_url} target="_blank" rel="noreferrer" className="text-xs text-accent-blue hover:underline">
-                  Open source
-                </a>
-              </div>
-            ))}
-          </div>
         ) : (
-          <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(340px,0.7fr)] gap-6">
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                ["setup", "Setup"],
+                ["compare", "Compare"],
+                ["responses", "Responses"],
+                ["gallery", "Gallery"],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setRunnerTab(id as "setup" | "compare" | "responses" | "gallery")}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${runnerTab === id ? "bg-accent-blue text-white" : "bg-[#1a1b23] text-text-secondary hover:bg-[#20222b]"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)] gap-6">
             <div className="space-y-5">
               <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-semibold text-text-primary">Run Setup</h2>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => togglePanel("runSetup")}
+                      className="rounded-full border border-[#2a2b36] px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted"
+                    >
+                      {collapsedPanels.runSetup ? "Expand" : "Collapse"}
+                    </button>
+                    <h2 className="text-sm font-semibold text-text-primary">Run Setup</h2>
+                  </div>
                   <div className="flex items-center gap-2">
                     <button onClick={handleSaveDataset} className="rounded-lg bg-[#1a1b23] px-3 py-1.5 text-xs text-text-primary hover:bg-[#20222b]">
                       Save Dataset
@@ -1321,6 +986,8 @@ export function BenchmarkLabPage() {
                   onChange={handleImportDataset}
                 />
 
+                {!collapsedPanels.runSetup && (
+                  <Fragment>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <label className="space-y-1">
                     <span className="text-xs text-text-muted">Run name</span>
@@ -1349,7 +1016,9 @@ export function BenchmarkLabPage() {
                       className="w-full rounded-lg border border-[#2a2b36] bg-[#0e0f13] px-3 py-2 text-sm text-text-primary"
                     >
                       <option value="">None</option>
-                      {filteredDatasets.map((dataset) => (
+                      {datasets
+                        .filter((dataset) => dataset.modality === modality)
+                        .map((dataset) => (
                           <option key={dataset.id} value={dataset.id}>
                             {dataset.name}
                           </option>
@@ -1371,10 +1040,27 @@ export function BenchmarkLabPage() {
                 <p className="mt-2 text-[11px] text-text-muted">
                   Parsed cases: {caseList.length}
                 </p>
+                  </Fragment>
+                )}
               </section>
 
               <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-                <h2 className="text-sm font-semibold text-text-primary mb-4">Credentials</h2>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => togglePanel("credentials")}
+                      className="rounded-full border border-[#2a2b36] px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted"
+                    >
+                      {collapsedPanels.credentials ? "Expand" : "Collapse"}
+                    </button>
+                    <h2 className="text-sm font-semibold text-text-primary">Credentials</h2>
+                  </div>
+                </div>
+                {!collapsedPanels.credentials && (
+                  <Fragment>
+                <p className="mb-3 text-xs text-text-muted">
+                  Live benchmarking uses these benchmark-specific provider keys. Save a key, then switch your targets away from <span className="text-text-primary">Mock</span>.
+                </p>
                 <div className="space-y-3">
                   {providers
                     .filter((provider) => provider.auth_type === "api-key")
@@ -1387,7 +1073,10 @@ export function BenchmarkLabPage() {
                               {providerKeyState[provider.id] ? "Key saved" : "Key not saved"}
                             </p>
                           </div>
-                          <span className={`h-2.5 w-2.5 rounded-full ${providerKeyState[provider.id] ? "bg-emerald-400" : "bg-amber-400"}`} />
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-text-muted">{formatModelCount(providerModelCounts[provider.id] ?? 0)}</span>
+                            <span className={`h-2.5 w-2.5 rounded-full ${providerKeyState[provider.id] ? "bg-emerald-400" : "bg-amber-400"}`} />
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <input
@@ -1405,17 +1094,137 @@ export function BenchmarkLabPage() {
                           >
                             Save
                           </button>
+                          {(provider.id === "openai" || provider.id === "anthropic") && (
+                            <button
+                              onClick={() => void refreshModels(provider.id)}
+                              disabled={!providerKeyState[provider.id]}
+                              className="rounded-lg border border-[#2a2b36] px-3 py-2 text-xs text-text-primary disabled:opacity-50"
+                            >
+                              Refresh Models
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
                 </div>
-                <p className="mt-3 text-[11px] text-text-muted">
-                  Live benchmark keys are stored separately from general analytics credentials under benchmark-scoped provider ids.
-                </p>
+                  </Fragment>
+                )}
               </section>
 
               <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-                <h2 className="text-sm font-semibold text-text-primary mb-4">Variants</h2>
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => togglePanel("strategy")}
+                      className="rounded-full border border-[#2a2b36] px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted"
+                    >
+                      {collapsedPanels.strategy ? "Expand" : "Collapse"}
+                    </button>
+                    <div>
+                      <h2 className="text-sm font-semibold text-text-primary">GitHub Strategy Comparator</h2>
+                      <p className="text-xs text-text-muted mt-1">
+                        Paste a GitHub repository that claims context reduction, token savings, prompt compression, or retrieval optimization. Benchmark Lab will compare your baseline against a strategy-augmented variant built from that repo’s docs.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {!collapsedPanels.strategy && (
+                  <Fragment>
+                    <div className="flex items-center gap-2 mb-3">
+                      <input
+                        value={strategyRepoUrl}
+                        onChange={(event) => setStrategyRepoUrl(event.target.value)}
+                        placeholder="https://github.com/owner/repo"
+                        className="flex-1 rounded-lg border border-[#2a2b36] bg-[#0e0f13] px-3 py-2 text-sm text-text-primary"
+                      />
+                      <button
+                        onClick={() => void handleAnalyzeStrategyRepo()}
+                        disabled={strategyLoading || !strategyRepoUrl.trim()}
+                        className="rounded-lg bg-accent-blue px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+                      >
+                        {strategyLoading ? "Analyzing..." : "Fetch Strategy"}
+                      </button>
+                    </div>
+
+                    {strategyError && (
+                      <div className="mb-3 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                        {strategyError}
+                      </div>
+                    )}
+
+                    {strategyAnalysis && (
+                      <div className="space-y-4">
+                        <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                          <div className="flex items-center justify-between gap-3 mb-2">
+                            <div>
+                              <p className="text-sm font-medium text-text-primary">{strategyAnalysis.repository_full_name}</p>
+                              <p className="text-[11px] text-text-muted">Fetched from {strategyAnalysis.default_branch} on {new Date(strategyAnalysis.fetched_at).toLocaleString()}</p>
+                            </div>
+                            <span className="rounded-full bg-accent-blue/15 px-2 py-1 text-[10px] uppercase tracking-wide text-accent-blue">
+                              Challenger ready
+                            </span>
+                          </div>
+                          <p className="text-sm text-text-secondary">{strategyAnalysis.summary}</p>
+                        </div>
+
+                        {strategyAnalysis.claims.length > 0 && (
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                            {strategyAnalysis.claims.map((claim) => (
+                              <div key={`${claim.source_path}-${claim.evidence}`} className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
+                                <div className="flex items-center justify-between gap-3 mb-2">
+                                  <p className="text-xs font-medium text-text-primary">{claim.headline}</p>
+                                  {claim.metric && (
+                                    <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-300">
+                                      {claim.metric}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-text-secondary">{claim.evidence}</p>
+                                {claim.source_url && (
+                                  <a href={claim.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[11px] text-accent-blue hover:underline">
+                                    {claim.source_path ?? "Open source file"}
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {strategyAnalysis.documents.length > 0 && (
+                          <div className="rounded-lg border border-dashed border-[#2a2b36] bg-[#0e0f13] p-4">
+                            <p className="text-xs font-medium text-text-primary mb-2">Strategy context that will be injected into the challenger</p>
+                            <div className="space-y-3 max-h-64 overflow-y-auto">
+                              {strategyAnalysis.documents.map((document) => (
+                                <div key={document.path}>
+                                  <p className="text-[11px] uppercase tracking-wide text-text-muted mb-1">{document.path}</p>
+                                  <pre className="whitespace-pre-wrap rounded-lg border border-[#2a2b36] bg-[#13141a] p-3 text-[11px] text-text-secondary">
+                                    {document.excerpt}
+                                  </pre>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Fragment>
+                )}
+              </section>
+
+              <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => togglePanel("variants")}
+                      className="rounded-full border border-[#2a2b36] px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted"
+                    >
+                      {collapsedPanels.variants ? "Expand" : "Collapse"}
+                    </button>
+                    <h2 className="text-sm font-semibold text-text-primary">Variants</h2>
+                  </div>
+                </div>
+                {!collapsedPanels.variants && (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4 space-y-3">
                     <p className="text-sm font-medium text-text-primary">Baseline</p>
@@ -1478,7 +1287,7 @@ export function BenchmarkLabPage() {
                       disabled={!enableChallenger || modality === "image"}
                     />
                     <div className="rounded-lg border border-dashed border-[#2a2b36] p-3">
-                      <p className="text-xs text-text-muted mb-2">Prompt-bearing capabilities for challenger</p>
+                      <p className="text-xs text-text-muted mb-2">Prompt-bearing capabilities for challenger. These stack with any GitHub strategy context fetched above.</p>
                       <div className="max-h-40 overflow-y-auto space-y-2">
                         {promptCapabilities.map((capability) => (
                           <label key={capability.id} className="flex items-start gap-2 text-xs text-text-secondary">
@@ -1498,23 +1307,37 @@ export function BenchmarkLabPage() {
                     </div>
                   </div>
                 </div>
+                )}
               </section>
 
               <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-semibold text-text-primary">Targets</h2>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => togglePanel("targets")}
+                      className="rounded-full border border-[#2a2b36] px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted"
+                    >
+                      {collapsedPanels.targets ? "Expand" : "Collapse"}
+                    </button>
+                    <h2 className="text-sm font-semibold text-text-primary">Targets</h2>
+                  </div>
                   <button onClick={addTarget} className="rounded-lg bg-[#1a1b23] px-3 py-1.5 text-xs text-text-primary hover:bg-[#20222b]">
                     Add Target
                   </button>
                 </div>
-                <div className="space-y-3">
+                {!collapsedPanels.targets && (
+                <Fragment>
+                  <p className="mb-3 text-xs text-text-muted">
+                    For live runs, choose a provider with a saved key and select one of the fetched models. Leaving the target on <span className="text-text-primary">Mock</span> keeps the run synthetic.
+                  </p>
+                  <div className="space-y-3">
                   {targets.map((target, index) => {
                     const availableProviders = providers.filter((provider) =>
                       provider.supported_modalities.includes(modality),
                     );
                     const modelChoices = supportedModels(models, target.providerId, modality);
                     return (
-                      <div key={`${target.providerId}-${index}`} className="grid grid-cols-[1fr_1fr_auto] gap-3">
+                      <div key={`${target.providerId}-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-3">
                         <select
                           value={target.providerId}
                           onChange={(event) => handleTargetChange(index, "providerId", event.target.value)}
@@ -1547,11 +1370,25 @@ export function BenchmarkLabPage() {
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                </Fragment>
+                )}
               </section>
 
               <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
-                <h2 className="text-sm font-semibold text-text-primary mb-4">Scoring</h2>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => togglePanel("scoring")}
+                      className="rounded-full border border-[#2a2b36] px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted"
+                    >
+                      {collapsedPanels.scoring ? "Expand" : "Collapse"}
+                    </button>
+                    <h2 className="text-sm font-semibold text-text-primary">Scoring</h2>
+                  </div>
+                </div>
+                {!collapsedPanels.scoring && (
+                <Fragment>
                 <label className="flex items-center gap-2 text-sm text-text-primary mb-3">
                   <input
                     type="checkbox"
@@ -1595,6 +1432,8 @@ export function BenchmarkLabPage() {
                   disabled={!judgeEnabled || modality === "image"}
                   className="min-h-[90px] w-full rounded-lg border border-[#2a2b36] bg-[#0e0f13] px-3 py-2 text-sm text-text-primary disabled:opacity-50"
                 />
+                </Fragment>
+                )}
               </section>
 
               <div className="flex items-center gap-3">
@@ -1619,37 +1458,49 @@ export function BenchmarkLabPage() {
             <div className="space-y-5">
               <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-semibold text-text-primary">Run History</h2>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => togglePanel("history")}
+                      className="rounded-full border border-[#2a2b36] px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted"
+                    >
+                      {collapsedPanels.history ? "Expand" : "Collapse"}
+                    </button>
+                    <h2 className="text-sm font-semibold text-text-primary">Run History</h2>
+                  </div>
                   <span className="text-xs text-text-muted">{runs.length} runs</span>
                 </div>
+                {!collapsedPanels.history && (
                 <div className="space-y-2 max-h-[280px] overflow-y-auto">
-                  {runs.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-[#2a2b36] bg-[#0e0f13] p-3 text-[11px] text-text-muted">
-                      No runs yet. Press <span className="text-text-primary">Run Benchmark</span> to capture the first prompt, params, and raw responses locally.
-                    </p>
-                  ) : (
-                    runs.map((run) => (
-                      <button
-                        key={run.id}
-                        onClick={() => void loadRun(run.id)}
-                        className={`w-full rounded-lg border px-3 py-3 text-left ${currentRun?.id === run.id ? "border-accent-blue bg-accent-blue/10" : "border-[#2a2b36] bg-[#0e0f13]"}`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium text-text-primary">{run.name}</span>
-                          <span className="text-[10px] uppercase tracking-wide text-text-muted">{run.status}</span>
-                        </div>
-                        <p className="mt-1 text-[11px] text-text-muted">
-                          {run.modality} • {run.item_count} items • {new Date(run.created_at).toLocaleString()}
-                        </p>
-                      </button>
-                    ))
-                  )}
+                  {runs.map((run) => (
+                    <button
+                      key={run.id}
+                      onClick={() => void loadRun(run.id)}
+                      className={`w-full rounded-lg border px-3 py-3 text-left ${currentRun?.id === run.id ? "border-accent-blue bg-accent-blue/10" : "border-[#2a2b36] bg-[#0e0f13]"}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-text-primary">{run.name}</span>
+                        <span className="text-[10px] uppercase tracking-wide text-text-muted">{run.status}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-text-muted">
+                        {run.modality} • {run.item_count} items • {new Date(run.created_at).toLocaleString()}
+                      </p>
+                    </button>
+                  ))}
                 </div>
+                )}
               </section>
 
               <section className="rounded-xl border border-[#2a2b36] bg-[#13141a] p-5">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-semibold text-text-primary">Results</h2>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => togglePanel("results")}
+                      className="rounded-full border border-[#2a2b36] px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted"
+                    >
+                      {collapsedPanels.results ? "Expand" : "Collapse"}
+                    </button>
+                    <h2 className="text-sm font-semibold text-text-primary">Results</h2>
+                  </div>
                   {currentRun && (
                     <span className="text-xs text-text-muted">
                       {currentRun.status} • {currentRun.items.length} items
@@ -1657,60 +1508,245 @@ export function BenchmarkLabPage() {
                   )}
                 </div>
 
-                {!currentRun ? (
+                {collapsedPanels.results ? null : !currentRun ? (
                   <p className="text-sm text-text-muted">Run a benchmark or load a previous run to inspect outputs.</p>
                 ) : (
                   <div className="space-y-4 max-h-[920px] overflow-y-auto" data-testid="benchmark-results">
-                    <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
-                      <div className="flex items-center justify-between gap-3 mb-3">
-                        <p className="text-sm font-medium text-text-primary">Methodology</p>
-                        <span className="text-[11px] text-text-muted">
-                          {currentRun.cases.length} cases • {currentRun.targets.length} targets • {currentRun.variants.length} variants
-                        </span>
+                    {runnerTab === "setup" && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                          <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                            <p className="text-[11px] uppercase tracking-wide text-text-muted">Run status</p>
+                            <p className="mt-2 text-lg font-semibold text-text-primary">{currentRun.status}</p>
+                            <p className="mt-1 text-xs text-text-muted">{currentRun.items.length} result items</p>
+                          </div>
+                          <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                            <p className="text-[11px] uppercase tracking-wide text-text-muted">Total tokens</p>
+                            <p className="mt-2 text-lg font-semibold text-text-primary">
+                              {sum(currentRun.items.map((item) => totalTokens(item))).toLocaleString()}
+                            </p>
+                            <p className="mt-1 text-xs text-text-muted">Across all providers and variants</p>
+                          </div>
+                          <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                            <p className="text-[11px] uppercase tracking-wide text-text-muted">Average cost</p>
+                            <p className="mt-2 text-lg font-semibold text-text-primary">
+                              ${average(currentRun.items.map((item) => item.estimated_cost_usd))?.toFixed(5) ?? "0.00000"}
+                            </p>
+                            <p className="mt-1 text-xs text-text-muted">Per result item</p>
+                          </div>
+                          <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                            <p className="text-[11px] uppercase tracking-wide text-text-muted">Average latency</p>
+                            <p className="mt-2 text-lg font-semibold text-text-primary">
+                              {Math.round(average(currentRun.items.map((item) => item.latency_ms)) ?? 0)} ms
+                            </p>
+                            <p className="mt-1 text-xs text-text-muted">Per result item</p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-dashed border-[#2a2b36] bg-[#0e0f13] p-4">
+                          <p className="text-sm font-medium text-text-primary">Next views</p>
+                          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                            <button
+                              onClick={() => setRunnerTab("compare")}
+                              className="rounded-lg border border-[#2a2b36] bg-[#13141a] px-4 py-3 text-left"
+                            >
+                              <p className="text-sm font-medium text-text-primary">Compare</p>
+                              <p className="mt-1 text-xs text-text-muted">Bar charts and baseline-vs-challenger deltas.</p>
+                            </button>
+                            <button
+                              onClick={() => setRunnerTab("responses")}
+                              className="rounded-lg border border-[#2a2b36] bg-[#13141a] px-4 py-3 text-left"
+                            >
+                              <p className="text-sm font-medium text-text-primary">Responses</p>
+                              <p className="mt-1 text-xs text-text-muted">Rendered model answers, judge output, and notes.</p>
+                            </button>
+                            <button
+                              onClick={() => setRunnerTab("gallery")}
+                              className="rounded-lg border border-[#2a2b36] bg-[#13141a] px-4 py-3 text-left"
+                            >
+                              <p className="text-sm font-medium text-text-primary">Gallery</p>
+                              <p className="mt-1 text-xs text-text-muted">Side-by-side image generations and artifacts.</p>
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-3 text-[11px] text-text-secondary mb-3">
-                        <div>Run: {currentRun.name}</div>
-                        <div>Status: {currentRun.status}</div>
-                        <div>Modality: {currentRun.modality}</div>
-                        <div>Dataset: {currentRun.dataset_name || "ad hoc"}</div>
-                        <div>Created: {new Date(currentRun.created_at).toLocaleString()}</div>
-                        <div>Judge: {currentRun.judge_config?.enabled ? `${currentRun.judge_config.provider_id} / ${currentRun.judge_config.model_id}` : "disabled"}</div>
-                      </div>
-                      <div className="space-y-2">
-                        {currentRun.targets.map((target, index) => (
-                          <div key={`${target.provider_id}-${target.model_id}-${index}`} className="rounded-lg border border-[#2a2b36] bg-[#13141a] p-3 text-[11px] text-text-secondary">
-                            <p className="text-text-primary font-medium mb-1">{target.provider_id} / {target.model_id}</p>
-                            <p>
-                              temperature: {formatMetric(target.temperature)} • max output: {formatMetric(target.max_output_tokens)} • image size: {target.image_size || "—"} • image quality: {target.image_quality || "—"}
+                    )}
+
+                    {runnerTab === "compare" && (
+                      <div className="space-y-4">
+                        {runMetricRows.length > 0 && (
+                          <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                            <div className="mb-3">
+                              <p className="text-sm font-medium text-text-primary">Model comparison</p>
+                              <p className="text-[11px] text-text-muted">Visual comparison across tokens, cost, latency, and judge score.</p>
+                            </div>
+                            <div className="space-y-4">
+                              {runMetricRows.map((row) => (
+                                <div key={row.key} className="rounded-lg border border-[#2a2b36] bg-[#13141a] p-4">
+                                  <div className="mb-3 flex items-center justify-between gap-3">
+                                    <div>
+                                      <p className="text-sm font-medium text-text-primary">{row.providerId} / {row.modelId}</p>
+                                      <p className="text-[11px] text-text-muted">{row.variantName}</p>
+                                    </div>
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-3">
+                                    <div>
+                                      <div className="mb-1 flex items-center justify-between text-[11px] text-text-secondary">
+                                        <span>Tokens</span>
+                                        <span>{row.tokens}</span>
+                                      </div>
+                                      <div className="h-2 rounded-full bg-[#0e0f13]">
+                                        <div className="h-2 rounded-full bg-accent-blue" style={{ width: metricWidth(row.tokens, metricMaxima.tokens) }} />
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="mb-1 flex items-center justify-between text-[11px] text-text-secondary">
+                                        <span>Cost</span>
+                                        <span>${row.cost.toFixed(5)}</span>
+                                      </div>
+                                      <div className="h-2 rounded-full bg-[#0e0f13]">
+                                        <div className="h-2 rounded-full bg-emerald-400" style={{ width: metricWidth(row.cost, metricMaxima.cost) }} />
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="mb-1 flex items-center justify-between text-[11px] text-text-secondary">
+                                        <span>Latency</span>
+                                        <span>{Math.round(row.latency)} ms</span>
+                                      </div>
+                                      <div className="h-2 rounded-full bg-[#0e0f13]">
+                                        <div className="h-2 rounded-full bg-amber-400" style={{ width: metricWidth(row.latency, metricMaxima.latency) }} />
+                                      </div>
+                                    </div>
+                                    {row.hasJudge && (
+                                      <div>
+                                        <div className="mb-1 flex items-center justify-between text-[11px] text-text-secondary">
+                                          <span>Judge</span>
+                                          <span>{row.judge.toFixed(1)}/100</span>
+                                        </div>
+                                        <div className="h-2 rounded-full bg-[#0e0f13]">
+                                          <div className="h-2 rounded-full bg-fuchsia-400" style={{ width: metricWidth(row.judge, metricMaxima.judge) }} />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                    {comparisonRows.length > 0 && (
+                      <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <div>
+                            <p className="text-sm font-medium text-text-primary">Side-by-side comparison</p>
+                            <p className="text-[11px] text-text-muted">
+                              Baseline vs strategy-augmented challenger across the current run.
                             </p>
                           </div>
-                        ))}
-                        {currentRun.variants.map((variant) => (
-                          <details key={variant.id} className="rounded-lg border border-[#2a2b36] bg-[#13141a] p-3">
-                            <summary className="cursor-pointer text-[11px] font-medium text-text-primary">
-                              Variant: {variant.name}
-                            </summary>
-                            <div className="mt-2 space-y-2 text-[11px] text-text-secondary">
-                              <p>System prompt: {variant.system_prompt || "—"}</p>
-                              <p>Prompt prefix: {variant.prompt_prefix || "—"}</p>
-                              <p>Prompt suffix: {variant.prompt_suffix || "—"}</p>
-                              <p>Capabilities: {variant.capability_labels.length > 0 ? variant.capability_labels.join(", ") : "none"}</p>
-                              {variant.capability_context ? (
-                                <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap rounded border border-[#2a2b36] bg-[#0e0f13] p-2 text-text-muted">
-                                  {variant.capability_context}
-                                </pre>
-                              ) : null}
+                        </div>
+                        <div className="grid grid-cols-1 gap-3">
+                          {comparisonRows.map((row) => (
+                            <div key={row.key} className="rounded-lg border border-[#2a2b36] bg-[#13141a] p-4">
+                              <div className="flex items-center justify-between gap-3 mb-3">
+                                <div>
+                                  <p className="text-sm font-medium text-text-primary">{row.providerId} / {row.modelId}</p>
+                                  <p className="text-[11px] text-text-muted">{row.baselineVariant} vs {row.challengerVariant}</p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
+                                  <p className="text-[11px] uppercase tracking-wide text-text-muted mb-2">{row.baselineVariant}</p>
+                                  <div className="space-y-1 text-text-secondary">
+                                    <div>Total tokens: <span className="text-text-primary">{row.baselineTokens}</span></div>
+                                    <div>Avg cost: <span className="text-text-primary">{row.baselineCost != null ? `$${row.baselineCost.toFixed(5)}` : "—"}</span></div>
+                                    <div>Avg latency: <span className="text-text-primary">{row.baselineLatency != null ? `${Math.round(row.baselineLatency)} ms` : "—"}</span></div>
+                                    <div>Avg judge: <span className="text-text-primary">{row.baselineJudge != null ? `${row.baselineJudge.toFixed(1)}/100` : "—"}</span></div>
+                                  </div>
+                                </div>
+                                <div className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
+                                  <p className="text-[11px] uppercase tracking-wide text-text-muted mb-2">{row.challengerVariant}</p>
+                                  <div className="space-y-1 text-text-secondary">
+                                    <div>Total tokens: <span className="text-text-primary">{row.challengerTokens}</span></div>
+                                    <div>Avg cost: <span className="text-text-primary">{row.challengerCost != null ? `$${row.challengerCost.toFixed(5)}` : "—"}</span></div>
+                                    <div>Avg latency: <span className="text-text-primary">{row.challengerLatency != null ? `${Math.round(row.challengerLatency)} ms` : "—"}</span></div>
+                                    <div>Avg judge: <span className="text-text-primary">{row.challengerJudge != null ? `${row.challengerJudge.toFixed(1)}/100` : "—"}</span></div>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                                <div className={`${row.challengerTokens <= row.baselineTokens ? "text-emerald-300" : "text-amber-300"}`}>
+                                  Token delta: {formatDelta(row.challengerTokens - row.baselineTokens)}
+                                </div>
+                                <div className={`${(row.challengerCost ?? 0) <= (row.baselineCost ?? 0) ? "text-emerald-300" : "text-amber-300"}`}>
+                                  Cost delta: {formatDelta((row.challengerCost ?? 0) - (row.baselineCost ?? 0))}
+                                </div>
+                                <div className={`${(row.challengerLatency ?? 0) <= (row.baselineLatency ?? 0) ? "text-emerald-300" : "text-amber-300"}`}>
+                                  Latency delta: {formatDelta((row.challengerLatency ?? 0) - (row.baselineLatency ?? 0))} ms
+                                </div>
+                                <div className={`${(row.challengerJudge ?? 0) >= (row.baselineJudge ?? 0) ? "text-emerald-300" : "text-amber-300"}`}>
+                                  Judge delta: {formatDelta((row.challengerJudge ?? 0) - (row.baselineJudge ?? 0))}
+                                </div>
+                              </div>
                             </div>
-                          </details>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
+                      </div>
+                    )}
 
-                    {currentRun.items.map((item) => (
-                      <div key={item.item_id} className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                    {runnerTab === "gallery" && (
+                      imageComparisonGroups.length > 0 ? (
+                        <div className="space-y-4">
+                          {imageComparisonGroups.map((group) => (
+                            <div key={group.caseName} className="rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
+                              <div className="mb-4">
+                                <p className="text-sm font-medium text-text-primary">{group.caseName}</p>
+                                <p className="text-[11px] text-text-muted">Rendered side-by-side for visual comparison across models and variants.</p>
+                              </div>
+                              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                                {group.items.map(({ item, artifacts }) => (
+                                  <div key={item.item_id} className="rounded-lg border border-[#2a2b36] bg-[#13141a] p-3">
+                                    <div className="mb-3 flex items-center justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-text-primary">{item.provider_id} / {item.model_id}</p>
+                                        <p className="text-[11px] text-text-muted">{item.variant_name}</p>
+                                      </div>
+                                      <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted">
+                                        {item.status}
+                                      </span>
+                                    </div>
+                                    <div className="space-y-3">
+                                      {artifacts.map((artifact) => (
+                                        <div key={artifact.path} className="overflow-hidden rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-3">
+                                          {artifact.preview_data_url ? (
+                                            <img src={artifact.preview_data_url} alt={artifact.label} className="max-h-[420px] w-full rounded-lg object-contain" />
+                                          ) : null}
+                                          <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] text-text-secondary sm:grid-cols-3">
+                                            <div>Latency: {formatMetric(item.latency_ms, " ms")}</div>
+                                            <div>Cost: {item.estimated_cost_usd != null ? `$${item.estimated_cost_usd.toFixed(5)}` : "—"}</div>
+                                            <div>Context: {item.context_used_percent != null ? `${item.context_used_percent}%` : "—"}</div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-text-muted">No generated image artifacts in the current run yet.</p>
+                      )
+                    )}
+
+                    {runnerTab === "responses" && currentRun.items.map((item) => (
+
+                      <div key={item.item_id} className="min-w-0 overflow-hidden rounded-lg border border-[#2a2b36] bg-[#0e0f13] p-4">
                         <div className="flex items-start justify-between gap-3 mb-3">
-                          <div>
-                            <p className="text-sm font-medium text-text-primary">{item.case_name}</p>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-text-primary">{item.case_name}</p>
                             <p className="text-[11px] text-text-muted">
                               {item.provider_id} / {item.model_id} / {item.variant_name}
                             </p>
@@ -1720,7 +1756,7 @@ export function BenchmarkLabPage() {
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px] text-text-secondary">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3 text-[11px] text-text-secondary">
                           <div>Latency: {formatMetric(item.latency_ms, " ms")}</div>
                           <div>Estimated cost: {item.estimated_cost_usd != null ? `$${item.estimated_cost_usd.toFixed(5)}` : "—"}</div>
                           <div>Input tokens: {item.token_counts.input_tokens}</div>
@@ -1730,9 +1766,17 @@ export function BenchmarkLabPage() {
                         </div>
 
                         {item.output_text && (
-                          <pre className="mb-3 max-h-48 overflow-y-auto rounded-lg border border-[#2a2b36] bg-[#13141a] p-3 text-xs text-text-secondary whitespace-pre-wrap">
-                            {item.output_text}
-                          </pre>
+                          <div className="mb-3 grid grid-cols-1 gap-3">
+                            <div className="rounded-lg border border-[#2a2b36] bg-[#13141a] p-3">
+                              <p className="mb-2 text-xs font-medium text-text-primary">Rendered response</p>
+                              <div className="space-y-2">
+                                {renderResponseBlocks(item.output_text)}
+                              </div>
+                            </div>
+                            <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-[#2a2b36] bg-[#13141a] p-3 text-xs text-text-secondary">
+                              {item.output_text}
+                            </pre>
+                          </div>
                         )}
 
                         {item.artifact_refs.length > 0 && (
@@ -1782,7 +1826,7 @@ export function BenchmarkLabPage() {
                           </div>
                         )}
 
-                        <div className="grid grid-cols-[120px_120px_1fr] gap-2">
+                        <div className="grid grid-cols-1 gap-2 xl:grid-cols-[120px_160px_minmax(0,1fr)]">
                           <select
                             value={item.manual_review.rating ?? ""}
                             onChange={(event) =>
@@ -1828,6 +1872,7 @@ export function BenchmarkLabPage() {
                 )}
               </section>
             </div>
+          </div>
           </div>
         )}
 

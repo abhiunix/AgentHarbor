@@ -41,6 +41,7 @@ AgentHarbor is a native tray app for macOS and Windows that sits quietly in your
 - **Presets** — bundle any set of capabilities for one-click deploy; ships with `Full-Stack Web` and `Data Science` examples.
 - **Drift detection** — detects when a teammate or another tool changes a managed file and shows a side-by-side diff with Accept or Restore.
 - **Cost engine** — per-model API-equivalent costs for Claude (Opus / Sonnet / Haiku) and Codex (GPT-5 / 4 / 3.5), token-deduplicated across session windows.
+- **Benchmark Lab** — run the same prompt across live or mock models, compare tokens/cost/latency/judge scores, launch reference benchmark packs across multiple models, and benchmark GitHub-linked context-reduction strategies side by side.
 - **Secrets manager** — stores sensitive env vars in the macOS Keychain and injects them into MCP `env` blocks at deploy time.
 - **Auto-update** — Tauri updater checks GitHub Releases every 4 hours; in-app banner with one-click install and optional 24 h snooze.
 - **Native macOS** — Keychain integration, system tray popover with click-through, optional menu-bar-only mode, native notifications.
@@ -113,7 +114,7 @@ The icon swaps to its red variant and appends `!` whenever the active provider i
 | [Getting Started](docs/getting-started.md) | Install, first launch, connect providers, first deploy |
 | [Analytics & Tray](docs/analytics.md) | Menu-bar metrics, tray popover, LimitState ladder, per-provider pages |
 | [Deploying Capabilities & Agents](docs/deploying-capabilities.md) | Deploy wizard, presets, backups, drift detection, removing capabilities |
-| [Dan Features & Benchmarking Roadmap](docs/dan_features.md) | Research-backed roadmap for model comparison, benchmark lab, and provider expansion |
+| [Dan Features & Benchmarking Roadmap](docs/dan_features.md) | Current live Benchmark Lab workflow, GitHub strategy comparator, research references, and roadmap |
 | [Dan Features (Claude edition)](docs/dan_features-claude.md) | Deeper companion: codebase audit, 2025–2026 eval landscape, concrete Benchmark Lab architecture, short-duration backlog |
 | [Build & Release](docs/build-and-release.md) | Local dev, signed builds, release checklist |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
