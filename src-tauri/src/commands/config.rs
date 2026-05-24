@@ -77,9 +77,9 @@ pub struct SecretsInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsSettings {
     pub refresh_interval_minutes: u64,
-    /// Show Anthropic internal / experimental usage buckets (omelette, tangelo, …) in Claude analytics.
-    #[serde(default)]
-    pub show_internal_usage_buckets: bool,
+    /// Show Anthropic experimental usage windows (omelette, tangelo, …) in Claude analytics.
+    #[serde(default, alias = "show_internal_usage_buckets")]
+    pub claude_experimental_features: bool,
     /// Emit native macOS notifications when usage limits change state.
     #[serde(default = "default_limit_notifications_enabled")]
     pub limit_notifications_enabled: bool,
@@ -93,7 +93,7 @@ impl Default for AnalyticsSettings {
     fn default() -> Self {
         Self {
             refresh_interval_minutes: 5,
-            show_internal_usage_buckets: false,
+            claude_experimental_features: false,
             limit_notifications_enabled: true,
         }
     }

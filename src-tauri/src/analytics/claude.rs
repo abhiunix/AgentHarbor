@@ -1083,7 +1083,7 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
 
     let show_internal = crate::commands::config::load_settings()
         .analytics
-        .show_internal_usage_buckets;
+        .claude_experimental_features;
 
     // Build rate limits
     let mut rate_limits = Vec::new();

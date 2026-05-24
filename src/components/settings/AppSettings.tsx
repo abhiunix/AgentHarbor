@@ -579,13 +579,13 @@ export function AppSettings() {
           />
         </SettingRow>
         <SettingRow
-          label="Internal usage buckets"
-          description="Show experimental Anthropic usage windows (omelette, tangelo, …) on Claude analytics — for debugging"
+          label="Claude experimental features"
+          description="Show Anthropic experimental usage windows (omelette, tangelo, …) on Claude analytics"
         >
           <Toggle
-            checked={settings.analytics?.show_internal_usage_buckets ?? false}
+            checked={settings.analytics?.claude_experimental_features ?? false}
             onChange={(checked) =>
-              handleAnalyticsChange({ show_internal_usage_buckets: checked })
+              handleAnalyticsChange({ claude_experimental_features: checked })
             }
           />
         </SettingRow>
