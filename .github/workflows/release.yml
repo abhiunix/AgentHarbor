@@ -30,10 +30,14 @@ jobs:
           FEATS=""
           FIXES=""
           if [ -n "$PREV_TAG" ]; then
+            # Match both unscoped (feat:) and scoped (feat(scope):) commits.
+            # Keep the scope visible in the bullet as a bold prefix.
             FEATS=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s" --no-merges \
-              | grep "^feat:" | sed 's/^feat: /- /' || true)
+              | grep -E "^feat(\(.+\))?!?: " \
+              | sed -E 's/^feat\((.+)\)!?: /- **\1:** /; s/^feat!?: /- /' || true)
             FIXES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s" --no-merges \
-              | grep "^fix:" | sed 's/^fix: /- /' || true)
+              | grep -E "^fix(\(.+\))?!?: " \
+              | sed -E 's/^fix\((.+)\)!?: /- **\1:** /; s/^fix!?: /- /' || true)
           fi
 
           {
