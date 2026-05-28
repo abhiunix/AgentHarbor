@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agentharbor"
-version = "1.0.129"
+version = "1.0.130"
 dependencies = [
  "base64 0.22.1",
  "chrono",

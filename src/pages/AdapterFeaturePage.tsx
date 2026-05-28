@@ -43,9 +43,6 @@ const CursorPermissionsPage = lazy(() =>
 const CursorHooksPage = lazy(() =>
   import("./CursorHooksPage").then((m) => ({ default: m.CursorHooksPage }))
 );
-const CursorTranscriptsPage = lazy(() =>
-  import("./CursorTranscriptsPage").then((m) => ({ default: m.CursorTranscriptsPage }))
-);
 const CursorPlansPage = lazy(() =>
   import("./CursorPlansPage").then((m) => ({ default: m.CursorPlansPage }))
 );
@@ -124,7 +121,7 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
     plans: CursorPlansPage as LazyPage,
     attribution: AiAttributionPage as LazyPage,
     "analytics-v2": CursorAnalyticsV2Page as LazyPage,
-    transcripts: CursorTranscriptsPage as LazyPage,
+    transcripts: TranscriptsPage as LazyPage,
   },
   windsurf: {
     "global-config": AdapterGlobalConfigPage as LazyPage,

@@ -18,7 +18,7 @@ import { AdapterFeaturePage } from "./pages/AdapterFeaturePage";
 import { useRegistryStore } from "./stores/registryStore";
 import { useAgentStore } from "./stores/agentStore";
 import { usePresetStore } from "./stores/presetStore";
-import { syncRegistryNow, getSettings, startRegistryPolling, getSyncStatus } from "./lib/tauri";
+import { syncRegistryNow, getSettings, startRegistryPolling, getSyncStatus, pruneTranscriptBackups } from "./lib/tauri";
 import { startUpdatePolling, stopUpdatePolling } from "./stores/updateStore";
 import { initDebateRunListeners } from "./stores/debateRunStore";
 import type { SyncConfig } from "./lib/tauri";
@@ -41,6 +41,11 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     startUpdatePolling();
     return () => stopUpdatePolling();
+  }, []);
+
+  // Delete transcript secret-scrub backups older than 7 days (fire-and-forget).
+  useEffect(() => {
+    pruneTranscriptBackups().catch(() => {});
   }, []);
 
   // Attach debate:* listeners ONCE for the app's lifetime so an in-flight debate

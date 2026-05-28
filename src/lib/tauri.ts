@@ -926,6 +926,7 @@ export interface TranscriptSession {
 export interface TranscriptMessage {
   role: string;
   content: string;
+  line_index: number;
 }
 
 export async function listTranscriptSessions(): Promise<TranscriptSession[]> {
@@ -938,6 +939,69 @@ export async function readTranscript(filePath: string, limit?: number, offset?: 
 
 export async function searchTranscripts(query: string): Promise<TranscriptSession[]> {
   return invoke<TranscriptSession[]>("search_transcripts", { query });
+}
+
+export interface MatchLocation {
+  line_index: number;
+  byte_offset: number;
+  preview: string;
+  role: string;
+}
+
+export interface ReplaceResult {
+  count: number;
+  backup_path: string | null;
+}
+
+export async function readTranscriptRaw(filePath: string): Promise<string> {
+  return invoke<string>("read_transcript_raw", { filePath });
+}
+
+export async function searchTranscriptMatches(filePath: string, query: string): Promise<MatchLocation[]> {
+  return invoke<MatchLocation[]>("search_transcript_matches", { filePath, query });
+}
+
+export async function replaceInTranscript(
+  filePath: string,
+  find: string,
+  replace: string,
+  createBackup: boolean
+): Promise<ReplaceResult> {
+  return invoke<ReplaceResult>("replace_in_transcript", { filePath, find, replace, createBackup });
+}
+
+export async function saveTranscriptRaw(
+  filePath: string,
+  content: string,
+  createBackup: boolean
+): Promise<string | null> {
+  return invoke<string | null>("save_transcript_raw", { filePath, content, createBackup });
+}
+
+export async function updateTranscriptMessage(
+  filePath: string,
+  lineIndex: number,
+  newText: string,
+  createBackup: boolean
+): Promise<string | null> {
+  return invoke<string | null>("update_transcript_message", {
+    filePath,
+    lineIndex,
+    newText,
+    createBackup,
+  });
+}
+
+export async function openTranscriptInTextEditor(filePath: string): Promise<void> {
+  return invoke<void>("open_in_text_editor", { filePath });
+}
+
+export async function deleteTranscriptBackup(backupPath: string): Promise<void> {
+  return invoke<void>("delete_transcript_backup", { backupPath });
+}
+
+export async function pruneTranscriptBackups(): Promise<number> {
+  return invoke<number>("prune_transcript_backups");
 }
 
 // --- Extensions ---

@@ -72,7 +72,11 @@ use commands::global_config::{
 use commands::usage::{read_project_usage_files, list_projects_with_mcp};
 use commands::session_stats::get_claude_session_stats;
 use commands::prompt_history::{get_prompt_history, search_prompt_history, get_prompt_stats};
-use commands::transcripts::{list_transcript_sessions, read_transcript, search_transcripts};
+use commands::transcripts::{
+    delete_transcript_backup, list_transcript_sessions, prune_transcript_backups, read_transcript,
+    open_in_text_editor, read_transcript_raw, replace_in_transcript, save_transcript_raw,
+    search_transcript_matches, search_transcripts, update_transcript_message,
+};
 use commands::extensions::{
     list_claude_plugins, list_cursor_extensions, list_cursor_plugins, toggle_claude_plugin,
 };
@@ -329,6 +333,14 @@ pub fn run() {
             list_transcript_sessions,
             read_transcript,
             search_transcripts,
+            read_transcript_raw,
+            search_transcript_matches,
+            replace_in_transcript,
+            save_transcript_raw,
+            update_transcript_message,
+            open_in_text_editor,
+            delete_transcript_backup,
+            prune_transcript_backups,
             list_claude_plugins,
             list_cursor_extensions,
             list_cursor_plugins,
