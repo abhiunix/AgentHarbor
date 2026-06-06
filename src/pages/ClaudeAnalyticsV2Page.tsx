@@ -3,6 +3,7 @@
  * Zero-config: OAuth token auto-detected, local JSONL/stats always available.
  */
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
@@ -543,7 +544,7 @@ function ActivityCalendar({ tokenTimeseries }: { tokenTimeseries: TokenTimePoint
 
 // ── Connection Flow Screen ──────────────────────────────────────────────────
 
-function ConnectionFlow({ onConnected, onLocalOnly }: { onConnected: () => void; onLocalOnly: () => void }) {
+function ConnectionFlow({ onConnected, onLocalOnly, autoStartOAuth = false }: { onConnected: () => void; onLocalOnly: () => void; autoStartOAuth?: boolean }) {
   const [showKeychainWarning, setShowKeychainWarning] = useState(false);
   const [keychainLoading, setKeychainLoading] = useState(false);
   const [keychainError, setKeychainError] = useState<string | null>(null);
@@ -570,6 +571,30 @@ function ConnectionFlow({ onConnected, onLocalOnly }: { onConnected: () => void;
     }
   };
 
+  const startOAuth = useCallback(async () => {
+    setTokenError(null);
+    try {
+      const url = await invoke<string>("claude_start_oauth");
+      try {
+        const { openUrl } = await import("@tauri-apps/plugin-opener");
+        await openUrl(url);
+      } catch {
+        window.open(url, "_blank");
+      }
+      setShowManualToken(true);
+    } catch (err) {
+      setTokenError(String(err));
+    }
+  }, []);
+
+  // When arriving via the tray "Reconnect" button, kick off the browser
+  // OAuth immediately so the user lands straight on the paste-code step.
+  useEffect(() => {
+    if (autoStartOAuth) {
+      startOAuth();
+    }
+  }, [autoStartOAuth, startOAuth]);
+
   return (
     <div className="flex items-center justify-center py-16">
       <div className="max-w-lg w-full px-4">
@@ -582,59 +607,23 @@ function ConnectionFlow({ onConnected, onLocalOnly }: { onConnected: () => void;
         </div>
 
         <div className="space-y-3">
-          {/* Option A: Import from Keychain (recommended) */}
+          {/* Option A: Sign In via Browser OAuth (recommended) */}
           <div className="bg-[#1a1b23] rounded-lg border border-accent-blue/30 p-4">
-            <div className="flex items-start gap-3">
-              <div className="text-lg mt-0.5">&#128273;</div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-medium text-text-primary">Import from Keychain</h3>
-                  <Badge text="RECOMMENDED" color="bg-accent-blue/20 text-accent-blue" />
-                </div>
-                <p className="text-[11px] text-text-muted mb-3">
-                  If you've used Claude Code on this machine, your credentials are already stored securely
-                  in macOS Keychain. This will trigger a one-time system password or Touch ID prompt.
-                </p>
-                {keychainError && <p className="text-[10px] text-red-400 mb-2">{keychainError}</p>}
-                <button
-                  onClick={() => setShowKeychainWarning(true)}
-                  disabled={keychainLoading}
-                  className="px-4 py-2 bg-accent-blue text-white rounded-lg text-xs font-medium hover:bg-accent-blue/90 transition-colors"
-                >
-                  {keychainLoading ? "Importing..." : "Import from Keychain \u2192"}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Option B: Sign In via Browser OAuth */}
-          <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
             <div className="flex items-start gap-3">
               <div className="text-lg mt-0.5">&#127760;</div>
               <div className="flex-1">
-                <h3 className="text-sm font-medium text-text-primary mb-1">Sign In to Claude</h3>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-medium text-text-primary">Sign In to Claude</h3>
+                  <Badge text="RECOMMENDED" color="bg-accent-blue/20 text-accent-blue" />
+                </div>
                 {!showManualToken ? (
                   <>
                     <p className="text-[11px] text-text-muted mb-3">
                       Opens Claude's authorization page in your browser. After signing in, copy the code and paste it here.
                     </p>
                     <button
-                      onClick={async () => {
-                        setTokenError(null);
-                        try {
-                          const url = await invoke<string>("claude_start_oauth");
-                          try {
-                            const { openUrl } = await import("@tauri-apps/plugin-opener");
-                            await openUrl(url);
-                          } catch {
-                            window.open(url, "_blank");
-                          }
-                          setShowManualToken(true);
-                        } catch (err) {
-                          setTokenError(String(err));
-                        }
-                      }}
-                      className="px-4 py-2 bg-[#2a2b36] text-text-primary rounded-lg text-xs font-medium hover:bg-[#33344a] transition-colors"
+                      onClick={startOAuth}
+                      className="px-4 py-2 bg-accent-blue text-white rounded-lg text-xs font-medium hover:bg-accent-blue/90 transition-colors"
                     >
                       Sign In with Claude &rarr;
                     </button>
@@ -690,6 +679,31 @@ function ConnectionFlow({ onConnected, onLocalOnly }: { onConnected: () => void;
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+
+          {/* Option B: Import from Keychain (easy import) */}
+          <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
+            <div className="flex items-start gap-3">
+              <div className="text-lg mt-0.5">&#128273;</div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-medium text-text-primary">Import from Keychain</h3>
+                  <Badge text="EASY IMPORT" color="bg-[#2a2b36] text-text-secondary" />
+                </div>
+                <p className="text-[11px] text-text-muted mb-3">
+                  If you've used Claude Code on this machine, your credentials are already stored securely
+                  in macOS Keychain. This will trigger a one-time system password or Touch ID prompt.
+                </p>
+                {keychainError && <p className="text-[10px] text-red-400 mb-2">{keychainError}</p>}
+                <button
+                  onClick={() => setShowKeychainWarning(true)}
+                  disabled={keychainLoading}
+                  className="px-4 py-2 bg-[#2a2b36] text-text-primary rounded-lg text-xs font-medium hover:bg-[#33344a] transition-colors"
+                >
+                  {keychainLoading ? "Importing..." : "Import from Keychain →"}
+                </button>
               </div>
             </div>
           </div>
@@ -763,9 +777,16 @@ type AuthState = "checking" | "not-connected" | "connected" | "local-only";
 const CLAUDE_AUTH_KEY = "claude-analytics-authenticated";
 
 function ClaudeAnalyticsV2Inner() {
+  // Tray "Reconnect" deep-link: ?reconnect=1 forces the connect screen and
+  // kicks off browser OAuth immediately.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const wantsReconnect = searchParams.get("reconnect") === "1";
+
   // Check if user previously authenticated — if so, try silent check; otherwise show Connect page
   const wasAuthenticated = localStorage.getItem(CLAUDE_AUTH_KEY) === "true";
-  const [authState, setAuthState] = useState<AuthState>(wasAuthenticated ? "checking" : "not-connected");
+  const [authState, setAuthState] = useState<AuthState>(
+    wantsReconnect ? "not-connected" : wasAuthenticated ? "checking" : "not-connected"
+  );
   const [overview, setOverview] = useState<Overview | null>(null);
   const [tokenTs, setTokenTs] = useState<TokenTimePoint[]>([]);
   const [_modelTs, setModelTs] = useState<ModelTimePoint[]>([]);
@@ -784,7 +805,7 @@ function ClaudeAnalyticsV2Inner() {
 
   // Silent credential check — only runs if user previously authenticated (avoids keychain prompt on first visit)
   useEffect(() => {
-    if (!wasAuthenticated) return;
+    if (!wasAuthenticated || wantsReconnect) return;
     (async () => {
       try {
         const result = await invoke<{ found: boolean; method: string }>("claude_check_silent_credentials");
@@ -877,9 +898,11 @@ function ClaudeAnalyticsV2Inner() {
   if (authState === "not-connected") {
     return (
       <ConnectionFlow
+        autoStartOAuth={wantsReconnect}
         onConnected={() => {
           setOverview(null);
           localStorage.setItem(CLAUDE_AUTH_KEY, "true");
+          if (wantsReconnect) setSearchParams({}, { replace: true });
           setAuthState("connected");
         }}
         onLocalOnly={() => {
