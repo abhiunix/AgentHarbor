@@ -250,12 +250,18 @@ function RateLimitBar({ rl }: { rl: RateLimitWindow }) {
 
 function DisconnectedCard({
   provider,
+  onReconnect,
 }: {
   provider: TrayProviderSummary;
+  onReconnect?: () => void;
 }) {
   const iconImg = getAdapterIconImg(provider.provider_id);
 
   const handleConnect = async () => {
+    if (onReconnect) {
+      onReconnect();
+      return;
+    }
     const route = PROVIDER_ROUTES[provider.provider_id];
     if (route) {
       await emitTo("main", "navigate-to", route);
@@ -887,11 +893,13 @@ function GeminiCard({ provider }: { provider: TrayProviderSummary }) {
 
 export function TrayProviderCard({
   provider,
+  onReconnect,
 }: {
   provider: TrayProviderSummary;
+  onReconnect?: () => void;
 }) {
   if (!provider.connected) {
-    return <DisconnectedCard provider={provider} />;
+    return <DisconnectedCard provider={provider} onReconnect={onReconnect} />;
   }
 
   const iconImg = getAdapterIconImg(provider.provider_id);
@@ -968,6 +976,7 @@ export function TrayProviderCard({
           <LimitStateBanner
             limitState={provider.limit_state}
             variant="compact"
+            onReconnect={onReconnect}
           />
         </div>
       ) : null}

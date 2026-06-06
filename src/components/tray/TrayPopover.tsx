@@ -439,6 +439,16 @@ export function TrayPopover() {
     }
   };
 
+  // Reconnect from a provider's auth/limit banner: open that provider's
+  // analytics page with ?reconnect=1 so it goes straight to browser OAuth,
+  // then close the popover.
+  const handleReconnect = async (providerId: string) => {
+    const tab = PROVIDER_TABS.find((t) => t.id === providerId);
+    if (tab) {
+      await navigateAndHide(`${tab.route}?reconnect=1`);
+    }
+  };
+
   const handleShowApp = async () => {
     setShowSettingsMenu(false);
     try {
@@ -551,7 +561,10 @@ export function TrayPopover() {
         {/* Provider card — scrollable */}
         <div className="flex-1 overflow-y-auto px-2 py-1.5">
           {activeProvider ? (
-            <TrayProviderCard provider={activeProvider} />
+            <TrayProviderCard
+              provider={activeProvider}
+              onReconnect={() => handleReconnect(activeProvider.provider_id)}
+            />
           ) : (
             <div className="rounded-lg border border-[#2a2b36] bg-[#1a1b23]/60 p-3">
               <p className="text-[#9394a1] text-xs">
