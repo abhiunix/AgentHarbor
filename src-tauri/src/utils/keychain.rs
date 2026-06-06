@@ -6,6 +6,15 @@ use std::sync::Mutex;
 
 const SERVICE_NAME: &str = "com.agentharbor.app";
 
+/// Secret names that AgentHarbor features depend on. These always appear in the
+/// Secrets Manager (even when unset), can be edited/revealed, but cannot be
+/// deleted. Keep in sync with the consumers (debate.rs, CapabilityEditor, etc.).
+pub const RESERVED_SECRETS: [&str; 3] = ["GITHUB_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
+
+pub fn is_reserved(key: &str) -> bool {
+    RESERVED_SECRETS.contains(&key)
+}
+
 /// Process-lifetime cache for successful keychain reads.
 ///
 /// macOS prompts the user every time an unsigned (or re-built dev) binary
@@ -107,6 +116,9 @@ pub fn get_secret(key: &str) -> Result<Option<String>, String> {
 }
 
 pub fn delete_secret(key: &str) -> Result<(), String> {
+    if is_reserved(key) {
+        return Err(format!("'{}' is a reserved secret and cannot be deleted.", key));
+    }
     match get_entry(key)?.delete_credential() {
         Ok(_) => {}
         Err(keyring::Error::NoEntry) => {}
@@ -136,4 +148,24 @@ pub fn list_secrets() -> Vec<String> {
 /// for actual value access call `get_secret`.
 pub fn is_known(key: &str) -> bool {
     load_secret_keys().contains(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reserved_secrets_are_recognized() {
+        assert!(is_reserved("GITHUB_TOKEN"));
+        assert!(is_reserved("ANTHROPIC_API_KEY"));
+        assert!(is_reserved("OPENAI_API_KEY"));
+        assert!(!is_reserved("MY_CUSTOM_KEY"));
+    }
+
+    #[test]
+    fn delete_reserved_secret_is_rejected() {
+        // Returns early before touching the keychain.
+        let err = delete_secret("GITHUB_TOKEN").unwrap_err();
+        assert!(err.contains("reserved"));
+    }
 }

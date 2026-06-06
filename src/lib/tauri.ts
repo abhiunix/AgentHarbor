@@ -646,6 +646,7 @@ export async function deleteMemoryFile(filePath: string): Promise<void> {
 export interface SecretInfo {
   key: string;
   has_value: boolean;
+  reserved: boolean;
 }
 
 export async function storeSecret(key: string, value: string): Promise<void> {

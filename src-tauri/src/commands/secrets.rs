@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct SecretInfo {
     pub key: String,
     pub has_value: bool,
+    pub reserved: bool,
 }
 
 #[tauri::command]
@@ -24,16 +25,33 @@ pub fn delete_secret(key: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn list_secrets() -> Vec<SecretInfo> {
-    keychain::list_secrets()
-        .into_iter()
-        .map(|key| SecretInfo {
+    let stored: Vec<String> = keychain::list_secrets();
+
+    // Reserved secrets always appear, even when unset, and sort first.
+    let mut out: Vec<SecretInfo> = keychain::RESERVED_SECRETS
+        .iter()
+        .map(|&key| SecretInfo {
+            key: key.to_string(),
+            has_value: keychain::is_known(key),
+            reserved: true,
+        })
+        .collect();
+
+    for key in stored {
+        if keychain::is_reserved(&key) {
+            continue;
+        }
+        out.push(SecretInfo {
             key,
             has_value: true,
-        })
-        .collect()
+            reserved: false,
+        });
+    }
+
+    out
 }
 
 #[tauri::command]
 pub fn get_secrets_count() -> u32 {
-    keychain::list_secrets().len() as u32
+    list_secrets().iter().filter(|s| s.has_value).count() as u32
 }

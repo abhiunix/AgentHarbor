@@ -76,6 +76,14 @@ export function SecretsManager({ isOpen, onClose }: SecretsManagerProps) {
   };
 
   const handleEdit = async (key: string) => {
+    const existing = secrets.find((s) => s.key === key);
+    // Unset (e.g. a reserved secret with no value yet) — start with an empty
+    // field instead of probing the keychain for a value that isn't there.
+    if (existing && !existing.has_value) {
+      setEditingKey(key);
+      setEditValue("");
+      return;
+    }
     try {
       const value = await getSecret(key);
       setEditingKey(key);
@@ -168,9 +176,27 @@ export function SecretsManager({ isOpen, onClose }: SecretsManagerProps) {
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-mono text-text-primary font-medium">
-                            {secret.key}
-                          </p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-mono text-text-primary font-medium">
+                              {secret.key}
+                            </p>
+                            {secret.reserved && (
+                              <span
+                                title="Required by AgentHarbor features — can be edited but not deleted"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-accent-blue/15 border border-accent-blue/30 text-accent-blue"
+                              >
+                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0-1.105.895-2 2-2m-8 2V7a4 4 0 118 0m-9 4h10a1 1 0 011 1v7a1 1 0 01-1 1H6a1 1 0 01-1-1v-7a1 1 0 011-1z" />
+                                </svg>
+                                Reserved
+                              </span>
+                            )}
+                            {!secret.has_value && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-white/5 border border-border text-text-muted">
+                                Not set
+                              </span>
+                            )}
+                          </div>
                           {revealedKey === secret.key && revealedValue !== null && (
                             <pre className="mt-2 text-xs font-mono bg-app-bg p-2 rounded text-text-secondary break-all whitespace-pre-wrap">
                               {revealedValue}
@@ -204,24 +230,28 @@ export function SecretsManager({ isOpen, onClose }: SecretsManagerProps) {
                         </div>
                         {editingKey !== secret.key && (
                           <div className="flex items-center gap-1 ml-2">
-                            <button
-                              onClick={() => handleReveal(secret.key)}
-                              className="px-2 py-1 text-xs text-text-muted hover:text-text-primary hover:bg-white/5 rounded"
-                            >
-                              {revealedKey === secret.key ? "Hide" : "Reveal"}
-                            </button>
+                            {secret.has_value && (
+                              <button
+                                onClick={() => handleReveal(secret.key)}
+                                className="px-2 py-1 text-xs text-text-muted hover:text-text-primary hover:bg-white/5 rounded"
+                              >
+                                {revealedKey === secret.key ? "Hide" : "Reveal"}
+                              </button>
+                            )}
                             <button
                               onClick={() => handleEdit(secret.key)}
                               className="px-2 py-1 text-xs text-accent-blue hover:bg-accent-blue/10 rounded"
                             >
-                              Edit
+                              {secret.has_value ? "Edit" : "Set"}
                             </button>
-                            <button
-                              onClick={() => handleDeleteClick(secret.key)}
-                              className="px-2 py-1 text-xs text-accent-red hover:bg-accent-red/10 rounded"
-                            >
-                              Delete
-                            </button>
+                            {!secret.reserved && (
+                              <button
+                                onClick={() => handleDeleteClick(secret.key)}
+                                className="px-2 py-1 text-xs text-accent-red hover:bg-accent-red/10 rounded"
+                              >
+                                Delete
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
