@@ -3,6 +3,8 @@ import {
   getPromptHistory,
   searchPromptHistory,
   getPromptStats,
+  buildResumeCommand,
+  startClaudeSession,
 } from "../lib/tauri";
 import type { PromptEntry, PromptStats } from "../lib/tauri";
 import { ProjectScopeSelector } from "../components/common/ProjectScopeSelector";
@@ -49,6 +51,7 @@ export function PromptsPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [copiedCmdIdx, setCopiedCmdIdx] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchPrompts = useCallback(
@@ -132,6 +135,27 @@ export function PromptsPage() {
       setTimeout(() => setCopiedIdx(null), 1500);
     } catch {
       /* clipboard not available */
+    }
+  };
+
+  const copyResumeCommand = async (entry: PromptEntry, idx: number) => {
+    if (!entry.session_id) return;
+    try {
+      const cmd = await buildResumeCommand(entry.session_id, entry.project);
+      await navigator.clipboard.writeText(cmd);
+      setCopiedCmdIdx(idx);
+      setTimeout(() => setCopiedCmdIdx(null), 1500);
+    } catch {
+      /* clipboard not available */
+    }
+  };
+
+  const startSession = async (entry: PromptEntry) => {
+    if (!entry.session_id) return;
+    try {
+      await startClaudeSession(entry.session_id, entry.project);
+    } catch (e) {
+      setError(typeof e === "string" ? e : "Failed to start session");
     }
   };
 
@@ -223,6 +247,71 @@ export function PromptsPage() {
                           {entry.project_name || entry.project}
                         </span>
                       )}
+                      {entry.session_id && (
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => startSession(entry)}
+                            className="text-xs font-medium bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 px-2 py-0.5 rounded-full whitespace-nowrap flex items-center gap-1"
+                            title="Open a terminal and resume this session"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                              />
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                              />
+                            </svg>
+                            Start this session
+                          </button>
+                          <button
+                            onClick={() => copyResumeCommand(entry, idx)}
+                            className="text-text-muted hover:text-text-primary p-0.5"
+                            title="Copy the claude --resume command"
+                          >
+                            {copiedCmdIdx === idx ? (
+                              <svg
+                                className="w-3.5 h-3.5 text-green-400"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                            ) : (
+                              <svg
+                                className="w-3.5 h-3.5"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <p
                       className={`text-sm text-text-primary whitespace-pre-wrap break-words ${needsTruncation ? "cursor-pointer" : ""}`}
@@ -240,41 +329,43 @@ export function PromptsPage() {
                     )}
                   </div>
 
-                  <button
-                    onClick={() => copyToClipboard(entry.display, idx)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-text-primary p-1 shrink-0"
-                    title="Copy prompt"
-                  >
-                    {copiedIdx === idx ? (
-                      <svg
-                        className="w-4 h-4 text-green-400"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    ) : (
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                        />
-                      </svg>
-                    )}
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => copyToClipboard(entry.display, idx)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-text-primary p-1"
+                      title="Copy prompt"
+                    >
+                      {copiedIdx === idx ? (
+                        <svg
+                          className="w-4 h-4 text-green-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      ) : (
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             );
