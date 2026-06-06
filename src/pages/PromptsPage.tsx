@@ -248,7 +248,7 @@ export function PromptsPage() {
                         </span>
                       )}
                       {entry.session_id && (
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => startSession(entry)}
                             className="text-xs font-medium bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 px-2 py-0.5 rounded-full whitespace-nowrap flex items-center gap-1"
@@ -277,37 +277,84 @@ export function PromptsPage() {
                           </button>
                           <button
                             onClick={() => copyResumeCommand(entry, idx)}
-                            className="text-text-muted hover:text-text-primary p-0.5"
+                            className="text-xs font-medium bg-app-card-hover text-text-secondary hover:text-text-primary border border-border px-2 py-0.5 rounded-full whitespace-nowrap flex items-center gap-1"
                             title="Copy the claude --resume command"
                           >
                             {copiedCmdIdx === idx ? (
-                              <svg
-                                className="w-3.5 h-3.5 text-green-400"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M5 13l4 4L19 7"
-                                />
-                              </svg>
+                              <>
+                                <svg
+                                  className="w-3 h-3 text-green-400"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M5 13l4 4L19 7"
+                                  />
+                                </svg>
+                                Copied
+                              </>
                             ) : (
-                              <svg
-                                className="w-3.5 h-3.5"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                />
-                              </svg>
+                              <>
+                                <svg
+                                  className="w-3 h-3"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                  />
+                                </svg>
+                                Copy resume command
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(entry.display, idx)}
+                            className="text-xs font-medium bg-app-card-hover text-text-secondary hover:text-text-primary border border-border px-2 py-0.5 rounded-full whitespace-nowrap flex items-center gap-1"
+                            title="Copy prompt"
+                          >
+                            {copiedIdx === idx ? (
+                              <>
+                                <svg
+                                  className="w-3 h-3 text-green-400"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M5 13l4 4L19 7"
+                                  />
+                                </svg>
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <svg
+                                  className="w-3 h-3"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                  />
+                                </svg>
+                                Copy prompt
+                              </>
                             )}
                           </button>
                         </div>
@@ -327,44 +374,6 @@ export function PromptsPage() {
                         show more
                       </button>
                     )}
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => copyToClipboard(entry.display, idx)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-text-primary p-1"
-                      title="Copy prompt"
-                    >
-                      {copiedIdx === idx ? (
-                        <svg
-                          className="w-4 h-4 text-green-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                          />
-                        </svg>
-                      )}
-                    </button>
                   </div>
                 </div>
               </div>
