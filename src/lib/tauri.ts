@@ -912,6 +912,14 @@ export async function getPromptStats(): Promise<PromptStats> {
   return invoke<PromptStats>("get_prompt_stats");
 }
 
+export async function buildResumeCommand(sessionId: string, project?: string): Promise<string> {
+  return invoke<string>("build_resume_command", { sessionId, project: project ?? null });
+}
+
+export async function startClaudeSession(sessionId: string, project?: string): Promise<void> {
+  return invoke("start_claude_session", { sessionId, project: project ?? null });
+}
+
 // --- Transcripts ---
 
 export interface TranscriptSession {

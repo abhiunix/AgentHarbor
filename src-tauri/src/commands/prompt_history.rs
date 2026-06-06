@@ -101,6 +101,31 @@ pub fn search_prompt_history(query: String) -> Result<Vec<PromptEntry>, String> 
     Ok(results)
 }
 
+/// Build the `claude --resume <session-id>` command for a session.
+fn resume_command(session_id: &str, project: Option<&str>) -> String {
+    let resume = format!("claude --resume {}", session_id);
+    match project {
+        Some(p) if !p.is_empty() => format!("cd {} && {}", shell_quote(p), resume),
+        _ => resume,
+    }
+}
+
+/// Single-quote a path for POSIX shells, escaping embedded single quotes.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+#[tauri::command]
+pub fn build_resume_command(session_id: String, project: Option<String>) -> String {
+    resume_command(&session_id, project.as_deref())
+}
+
+#[tauri::command]
+pub fn start_claude_session(session_id: String, project: Option<String>) -> Result<(), String> {
+    let command = resume_command(&session_id, project.as_deref());
+    crate::utils::platform::launch_in_terminal(&command)
+}
+
 #[tauri::command]
 pub fn get_prompt_stats() -> Result<PromptStats, String> {
     let all = read_all_prompts()?;

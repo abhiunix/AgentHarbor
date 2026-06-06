@@ -71,7 +71,7 @@ use commands::global_config::{
 };
 use commands::usage::{read_project_usage_files, list_projects_with_mcp};
 use commands::session_stats::get_claude_session_stats;
-use commands::prompt_history::{get_prompt_history, search_prompt_history, get_prompt_stats};
+use commands::prompt_history::{get_prompt_history, search_prompt_history, get_prompt_stats, build_resume_command, start_claude_session};
 use commands::transcripts::{
     delete_transcript_backup, list_transcript_sessions, prune_transcript_backups, read_transcript,
     open_in_text_editor, read_transcript_raw, replace_in_transcript, save_transcript_raw,
@@ -330,6 +330,8 @@ pub fn run() {
             get_prompt_history,
             search_prompt_history,
             get_prompt_stats,
+            build_resume_command,
+            start_claude_session,
             list_transcript_sessions,
             read_transcript,
             search_transcripts,
