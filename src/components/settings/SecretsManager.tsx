@@ -94,7 +94,7 @@ export function SecretsManager({ isOpen, onClose }: SecretsManagerProps) {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingKey || !editValue.trim()) return;
+    if (!editingKey) return;
     setSaving(true);
     try {
       await storeSecret(editingKey, editValue.trim());
