@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   getRecommendations,
   hasAnthropicApiKey,
@@ -10,6 +9,7 @@ import {
   type RecommendationsPayload,
   type DiffEntry,
 } from "../lib/tauri";
+import { SecretsManager } from "../components/settings/SecretsManager";
 
 const PRIORITY_STYLES: Record<string, string> = {
   high: "bg-accent-red-dim text-accent-red",
@@ -26,8 +26,13 @@ const TYPE_BADGES: Record<string, string> = {
   custom: "bg-app-card-hover text-text-secondary",
 };
 
-function MissingKeyNotice({ onRecheck }: { onRecheck: () => void }) {
-  const navigate = useNavigate();
+function MissingKeyNotice({
+  onRecheck,
+  onOpenSecrets,
+}: {
+  onRecheck: () => void;
+  onOpenSecrets: () => void;
+}) {
   return (
     <div className="max-w-xl mx-auto mt-12 p-6 bg-app-card border border-border rounded-lg">
       <h2 className="text-lg font-semibold text-text-primary mb-2">
@@ -37,14 +42,14 @@ function MissingKeyNotice({ onRecheck }: { onRecheck: () => void }) {
         AI recommendations use Claude to analyze your installed tools, projects,
         and registry. Add a secret named{" "}
         <span className="font-mono text-text-primary">ANTHROPIC_API_KEY</span>{" "}
-        in Settings → Manage Secrets. The value is stored in your OS Keychain.
+        in the Secrets Manager. The value is stored in your OS Keychain.
       </p>
       <div className="flex items-center gap-2">
         <button
-          onClick={() => navigate("/settings")}
+          onClick={onOpenSecrets}
           className="px-4 py-2 bg-accent-blue text-white text-sm font-medium rounded-md hover:opacity-90"
         >
-          Open Settings
+          Open Secrets Manager
         </button>
         <button
           onClick={onRecheck}
@@ -148,6 +153,7 @@ export function RecommendationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<DeployToastState | null>(null);
+  const [secretsOpen, setSecretsOpen] = useState(false);
   const [previewDiff, setPreviewDiff] = useState<{
     rec: Recommendation;
     entries: DiffEntry[];
@@ -264,8 +270,22 @@ export function RecommendationsPage() {
     );
   }
 
+  const closeSecretsAndRecheck = () => {
+    setSecretsOpen(false);
+    checkKey();
+    if (hasKey) load(true);
+  };
+
   if (!hasKey) {
-    return <MissingKeyNotice onRecheck={checkKey} />;
+    return (
+      <>
+        <MissingKeyNotice
+          onRecheck={checkKey}
+          onOpenSecrets={() => setSecretsOpen(true)}
+        />
+        <SecretsManager isOpen={secretsOpen} onClose={closeSecretsAndRecheck} />
+      </>
+    );
   }
 
   return (
@@ -321,8 +341,14 @@ export function RecommendationsPage() {
 
         {/* Error */}
         {error && (
-          <div className="mb-4 p-3 bg-accent-red-dim border border-accent-red/30 rounded-md text-sm text-accent-red">
-            {error}
+          <div className="mb-4 p-3 bg-accent-red-dim border border-accent-red/30 rounded-md text-sm text-accent-red flex items-start justify-between gap-3">
+            <span>{error}</span>
+            <button
+              onClick={() => setSecretsOpen(true)}
+              className="shrink-0 px-2.5 py-1 text-xs font-medium rounded bg-accent-red/15 border border-accent-red/40 text-accent-red hover:bg-accent-red/25"
+            >
+              Open Secrets Manager
+            </button>
           </div>
         )}
 
@@ -428,6 +454,15 @@ export function RecommendationsPage() {
           {toast.text}
         </div>
       )}
+
+      <SecretsManager
+        isOpen={secretsOpen}
+        onClose={() => {
+          setSecretsOpen(false);
+          checkKey();
+          load(true);
+        }}
+      />
     </div>
   );
 }

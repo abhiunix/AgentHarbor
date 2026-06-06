@@ -43,7 +43,10 @@ struct AnthropicResponse {
 }
 
 pub fn has_api_key() -> bool {
-    matches!(keychain::get_secret(ANTHROPIC_KEY_NAME), Ok(Some(_)))
+    matches!(
+        keychain::get_secret(ANTHROPIC_KEY_NAME),
+        Ok(Some(ref v)) if !v.trim().is_empty()
+    )
 }
 
 pub fn complete(system_prompt: &str, user_prompt: &str) -> Result<String, String> {
@@ -90,11 +93,7 @@ pub fn complete(system_prompt: &str, user_prompt: &str) -> Result<String, String
     let status = resp.status();
     if !status.is_success() {
         let body_text = resp.text().unwrap_or_default();
-        return Err(format!(
-            "Anthropic API returned {}: {}",
-            status.as_u16(),
-            body_text
-        ));
+        return Err(humanize_api_error(status.as_u16(), &body_text));
     }
 
     let parsed: AnthropicResponse = resp
@@ -109,6 +108,38 @@ pub fn complete(system_prompt: &str, user_prompt: &str) -> Result<String, String
         .ok_or_else(|| "Anthropic response had no text content".to_string())?;
 
     Ok(text)
+}
+
+/// Turn a raw Anthropic HTTP error into a short, human-readable message.
+/// The raw body (e.g. `{"type":"error","error":{"type":"authentication_error",
+/// "message":"invalid x-api-key"}}`) is useless to end users.
+fn humanize_api_error(status: u16, body: &str) -> String {
+    // Best-effort: pull the structured error type/message if present.
+    let err_type = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.get("type")).and_then(|t| t.as_str()).map(String::from));
+
+    match status {
+        401 | 403 => {
+            "Your ANTHROPIC_API_KEY is invalid or unauthorized. Open the Secrets Manager and update it (get a key at console.anthropic.com).".to_string()
+        }
+        429 => {
+            "Anthropic is rate-limiting requests right now. Wait a moment and try again.".to_string()
+        }
+        529 => {
+            "Anthropic's API is temporarily overloaded. Try again in a bit.".to_string()
+        }
+        500..=599 => {
+            "Anthropic's API is having trouble right now. Try again shortly.".to_string()
+        }
+        400 if err_type.as_deref() == Some("invalid_request_error") => {
+            "Anthropic rejected the request as invalid. If this persists, please report it.".to_string()
+        }
+        _ => format!(
+            "Anthropic API error ({}). Check your ANTHROPIC_API_KEY in the Secrets Manager and try again.",
+            status
+        ),
+    }
 }
 
 /// Extract the first JSON array from a string. The model sometimes wraps its
@@ -174,5 +205,19 @@ mod tests {
     fn test_extract_json_array_none() {
         assert_eq!(extract_json_array("no brackets here"), None);
         assert_eq!(extract_json_array("only [ open"), None);
+    }
+
+    #[test]
+    fn test_humanize_api_error_401() {
+        let raw = r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#;
+        let msg = humanize_api_error(401, raw);
+        assert!(msg.contains("invalid or unauthorized"));
+        assert!(!msg.contains("x-api-key")); // no raw body leaked
+    }
+
+    #[test]
+    fn test_humanize_api_error_429_and_5xx() {
+        assert!(humanize_api_error(429, "").contains("rate-limiting"));
+        assert!(humanize_api_error(503, "").contains("trouble"));
     }
 }
