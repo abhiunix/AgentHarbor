@@ -692,8 +692,10 @@ impl AgentAdapter for CursorAdapter {
             }
         }
 
-        // -- Skills: SKILL.md + supporting files (skipped in global deploy mode)
-        if !is_global {
+        // -- Skills: SKILL.md + supporting files. Deploy both project
+        // (<project>/.cursor/skills) and global (~/.cursor/skills);
+        // skills_dir resolves via project_path (home dir in global mode).
+        {
             for cap in capabilities {
                 if let UniversalCapability::Skill(skill) = cap {
                     let artifact = skill.id.artifact_name(&skill.name);
@@ -972,12 +974,14 @@ impl AgentAdapter for CursorAdapter {
         let mcp_files = self.deploy_mcp_servers(project_path, capabilities, &mut mcp_config)?;
         all_files.extend(mcp_files);
 
+        // Skills deploy both project (<project>/.cursor/skills) and global
+        // (~/.cursor/skills); skills_dir resolves via project_path.
+        let skill_files = self.deploy_skills(project_path, capabilities)?;
+        all_files.extend(skill_files);
+
         if !is_global {
             let rule_files = self.deploy_rules(project_path, capabilities)?;
             all_files.extend(rule_files);
-
-            let skill_files = self.deploy_skills(project_path, capabilities)?;
-            all_files.extend(skill_files);
 
             let hook_files = self.deploy_hooks(project_path, capabilities)?;
             all_files.extend(hook_files);
@@ -1094,8 +1098,37 @@ impl AgentAdapter for CursorAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AgentColor, AgentModel, Hook, McpServer, MemoryScope, Rule, ToolAccess, Visibility};
+    use crate::models::{AgentColor, AgentModel, Hook, McpServer, MemoryScope, Rule, Skill, SkillFile, ToolAccess, Visibility};
     use tempfile::TempDir;
+
+    fn create_test_skill() -> UniversalCapability {
+        UniversalCapability::Skill(Skill {
+            id: CompositeId::new("community", "test-skill").unwrap(),
+            name: "Test Skill".to_string(),
+            description: "Test skill".to_string(),
+            version: "1.0.0".to_string(),
+            author: "test".to_string(),
+            visibility: Visibility::Public,
+            tags: vec![],
+            scope: String::new(),
+            files: vec![SkillFile {
+                path: "SKILL.md".to_string(),
+                content: "# Test Skill\nDo the thing.".to_string(),
+            }],
+            env: std::collections::HashMap::new(),
+            compatible_agents: vec!["cursor".to_string()],
+            allowed_tools: None,
+            model: None,
+            context: None,
+            agent: None,
+            argument_hint: None,
+            license: None,
+            category: None,
+            author_github: None,
+            source_info: None,
+            stats: None,
+        })
+    }
 
     fn create_test_mcp() -> UniversalCapability {
         UniversalCapability::Mcp(McpServer {
@@ -1183,6 +1216,29 @@ mod tests {
             prompt: "You are a test agent.".to_string(),
             examples: vec![],
         }
+    }
+
+    #[test]
+    fn test_global_skill_diff_produces_entries() {
+        // Issue #2: skills must deploy in global mode (~/.cursor/skills),
+        // not be silently skipped. In global mode project_path is the home dir
+        // and options carries { "global": true }.
+        let home = TempDir::new().unwrap();
+        let adapter = CursorAdapter::new();
+        let skill = create_test_skill();
+        let options = json!({ "global": true });
+
+        let diffs = adapter
+            .diff(home.path(), &[skill], &[], Some(&options))
+            .unwrap();
+
+        let skill_md = diffs
+            .iter()
+            .find(|d| d.file_path.ends_with("SKILL.md"))
+            .expect("global skill deploy should produce a SKILL.md diff entry");
+        assert!(skill_md
+            .file_path
+            .starts_with(home.path().join(".cursor").join("skills")));
     }
 
     #[test]

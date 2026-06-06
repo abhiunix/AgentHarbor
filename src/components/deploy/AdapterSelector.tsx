@@ -140,7 +140,7 @@ export function AdapterSelector({
             <span className="text-lg">🌐</span>
             <div>
               <p className="text-sm font-medium text-accent-blue">Global Deploy Mode</p>
-              <p className="text-xs text-text-muted">Capabilities will be written to your system-wide IDE configs. Agents, skills, hooks, and plugins are project-scoped and excluded.</p>
+              <p className="text-xs text-text-muted">Capabilities will be written to your system-wide IDE configs. Skills deploy to your global skills folder. Agents, hooks, and plugins are project-scoped and excluded.</p>
             </div>
           </div>
         )}

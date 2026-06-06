@@ -940,8 +940,10 @@ impl AgentAdapter for ClaudeCodeAdapter {
             }
         }
 
-        // -- Skills (project-scoped, skipped for global deploy)
-        if !is_global {
+        // -- Skills: project → <project>/.claude/skills; global → ~/.claude/skills.
+        // skills_dir(project_path) already resolves correctly because project_path
+        // is the home dir in global mode.
+        {
         for cap in capabilities {
             if let UniversalCapability::Skill(skill) = cap {
                 let artifact = skill.id.artifact_name(&skill.name);
@@ -987,7 +989,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
                 }
             }
         }
-        } // end if !is_global (skills)
+        } // end skills
 
         // -- Hooks: adapter_configs["claude-code"].files (Custom-style) + build proposed settings for legacy
         // (project-scoped, skipped for global deploy)
@@ -1273,10 +1275,12 @@ impl AgentAdapter for ClaudeCodeAdapter {
         let rule_files = self.deploy_rules(project_path, capabilities, is_global)?;
         all_files.extend(rule_files);
 
-        if !is_global {
-            let skill_files = self.deploy_skills(project_path, capabilities)?;
-            all_files.extend(skill_files);
+        // Skills deploy both project (<project>/.claude/skills) and global
+        // (~/.claude/skills); skills_dir resolves via project_path.
+        let skill_files = self.deploy_skills(project_path, capabilities)?;
+        all_files.extend(skill_files);
 
+        if !is_global {
             let hook_files = self.deploy_hooks(project_path, capabilities, &mut settings, &settings_path)?;
             all_files.extend(hook_files);
 
@@ -1622,6 +1626,29 @@ mod tests {
         assert!(content.contains("name: Test Skill"));
         assert!(content.contains("description:"));
         assert!(content.contains("Test Skill\nDo the thing."));
+    }
+
+    #[test]
+    fn test_global_skill_diff_produces_entries() {
+        // Issue #2: skills must deploy in global mode (~/.claude/skills),
+        // not be silently skipped. In global mode preview_deploy passes the
+        // home dir as project_path with claude_settings_target = "user".
+        let home = TempDir::new().unwrap();
+        let adapter = ClaudeCodeAdapter::new();
+        let skill = create_test_skill();
+        let options = json!({ "claude_settings_target": "user" });
+
+        let diffs = adapter
+            .diff(home.path(), &[skill], &[], Some(&options))
+            .unwrap();
+
+        let skill_md = diffs
+            .iter()
+            .find(|d| d.file_path.ends_with("SKILL.md"))
+            .expect("global skill deploy should produce a SKILL.md diff entry");
+        assert!(skill_md
+            .file_path
+            .starts_with(home.path().join(".claude").join("skills")));
     }
 
     #[test]
