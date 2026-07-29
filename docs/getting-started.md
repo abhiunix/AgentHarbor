@@ -27,6 +27,8 @@ xattr -cr /Applications/AgentHarbor.app
 
 On first launch you'll see four provider tabs: **Claude Code**, **Cursor**, **Codex**, and **Gemini CLI**. Each one is initially **Disconnected**; AgentHarbor never reads tokens silently — you connect explicitly.
 
+<img src="assets/onboarding-connect.png" alt="First launch — provider tabs in the Disconnected state" width="720">
+
 ### Connect Claude Code
 
 AgentHarbor honours the same OAuth credentials that the `claude` CLI uses. Order of preference:
@@ -63,6 +65,8 @@ Open the **Library** tab, pick something simple like a single MCP server (e.g. *
 2. Create a backup of any existing config (so you can undo).
 3. Write the new config atomically.
 4. Stamp `<!-- AgentHarbor -->` markers in `CLAUDE.md` / `AGENTS.md` so it can detect drift later.
+
+<img src="assets/deploy-wizard-diff.png" alt="Deploy wizard preview step showing the diff before writing" width="720">
 
 See [Deploying Capabilities & Agents](./deploying-capabilities.md) for the full flow, presets, and undo.
 

@@ -14,7 +14,11 @@ AgentHarbor's menu-bar icon, popover, and per-provider analytics pages all draw 
 
 The icon swaps to its red `*-active.png` variant and an `!` is appended to the title when the active provider's `LimitState` is **Reached**, **ApiDisabled**, **SubscriptionIssue**, **BillablePaused**, **RateLimited**, or **Unauthenticated**. Clicking another tab in the popover changes the active provider; the title updates immediately.
 
+<img src="assets/tray-icon-macos.png" alt="macOS menu bar showing the AgentHarbor icon with the active session percentage" width="480">
+
 ## Tray popover
+
+<img src="assets/tray-popover.png" alt="Tray popover with per-provider quota bars, spend, and session stats" width="480">
 
 The header strip shows:
 
