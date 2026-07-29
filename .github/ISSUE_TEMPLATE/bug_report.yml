@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in AgentHarbor isn't working as documented
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please check [Troubleshooting](https://github.com/abhiunix/AgentHarbor/blob/main/docs/troubleshooting.md) first — several common issues have one-line fixes.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - Windows 10/11 (x64)
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Settings → Updates shows the current version, or check the DMG/installer filename.
+      placeholder: "e.g. 1.0.132"
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider affected
+      multiple: true
+      options:
+        - Claude Code
+        - Cursor
+        - Codex (OpenAI)
+        - Gemini CLI
+        - Windsurf
+        - None / app-wide
+    validations:
+      required: true
+  - type: input
+    id: tray-state
+    attributes:
+      label: Tray state at the time
+      description: What did the menu-bar / tray icon show? (e.g. "42%", "$12 with red icon and !", "no icon")
+      placeholder: "e.g. red icon with ! and 100%"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / errors
+      description: Any error text from the app, or relevant console output. Redact tokens and account IDs before pasting.
+      render: text
