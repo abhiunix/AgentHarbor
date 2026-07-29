@@ -26,6 +26,8 @@ The wizard has 4 steps:
    - Backup banner ("A backup of these files will be created before writing").
 4. **Success** — list of files written, "Open in Finder" links, and an **Undo Deploy** button (see Backups below).
 
+<img src="assets/deploy-wizard-diff.png" alt="Deploy wizard preview step showing a split diff with per-file strategy" width="720">
+
 ### What gets written
 
 | Adapter | Path |
@@ -60,11 +62,15 @@ Every deploy writes a manifest under:
   <relative paths of pre-deploy file copies>
 ```
 
+<img src="assets/deploy-success-undo.png" alt="Deploy success screen with the Undo Deploy button" width="720">
+
 The success screen has an **Undo Deploy** button that restores from the most recent backup. From the project detail view you can also list, restore, or delete older backups. A launch-time cleanup keeps the per-project backup count bounded.
 
 ## Drift detection
 
 Once deployed, AgentHarbor stores hashes of every managed file. On project open it compares those hashes against the current files and shows a **Drift** badge if anything was changed externally (a teammate edited `CLAUDE.md`, you tweaked `.cursorrules` directly, etc.).
+
+<img src="assets/drift-review.png" alt="Drift review modal with a side-by-side diff and Accept/Restore actions" width="720">
 
 The **Drift Review** modal shows side-by-side diffs and offers two actions per file:
 

@@ -6,7 +6,9 @@
 
 **One tray app to manage all your AI coding agents.**
 
-Manage configurations, track usage, deploy capabilities, and keep every AI tool in sync — all from one native app.
+For developers running Claude Code, Cursor, Codex, Gemini CLI, or Windsurf: track usage and spend, manage configurations, deploy capabilities, and keep every tool in sync — all from one native app.
+
+<p align="center"><img src="docs/assets/demo.gif" alt="AgentHarbor demo — live tray limits and one-click deploy" width="720"></p>
 
 [![GitHub release](https://img.shields.io/github/v/release/abhiunix/AgentHarbor?label=latest&color=blue)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![Total Downloads](https://img.shields.io/github/downloads/abhiunix/AgentHarbor/total?label=downloads&color=green)](https://github.com/abhiunix/AgentHarbor/releases)
@@ -28,7 +30,22 @@ Manage configurations, track usage, deploy capabilities, and keep every AI tool 
 
 ## What is it?
 
-AgentHarbor is a native tray app for macOS and Windows that sits quietly in your menu bar / system tray while you code. It shows you real-time rate limits, session usage, and monthly spend for every AI provider you use — without opening a browser or running CLI commands. When you want to deploy an MCP server, rule, skill, or sub-agent across Claude Code, Cursor, and Windsurf at once, a guided wizard handles the diffs, backups, and atomic writes for you.
+AgentHarbor is an AI coding agent manager — a native tray app for macOS and Windows that sits quietly in your menu bar / system tray while you code. It shows you real-time rate limits, session usage, and monthly spend for every AI provider you use — without opening a browser or running CLI commands. When you want to deploy an MCP server, rule, skill, or sub-agent across Claude Code, Cursor, and Windsurf at once, a guided wizard handles the diffs, backups, and atomic writes for you.
+
+---
+
+## Why AgentHarbor?
+
+Tools like [ccusage](https://github.com/ryoppippi/ccusage) and [Claude Code Usage Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) do one job very well: if you want a terminal-based Claude Code usage monitor, use them. AgentHarbor is built for a different job — an always-on desktop app that watches **all** your providers and also manages the config files they read.
+
+| | AgentHarbor | ccusage | Claude Code Usage Monitor |
+|---|---|---|---|
+| Interface | Native tray app (macOS / Windows) | CLI | Terminal UI |
+| Providers | Claude Code, Cursor, Codex, Gemini CLI, Windsurf | Claude Code | Claude Code |
+| Spend tracking | Per-provider, incl. API-equivalent cost engine | Claude Code cost reports | Claude Code cost projections |
+| MCP / rules / skills / sub-agent deploy | ✅ guided wizard with diffs, backups, undo | — | — |
+| Drift detection | ✅ hash-based, with side-by-side review | — | — |
+| Local-only (no telemetry) | ✅ | ✅ | ✅ |
 
 ---
 
@@ -39,7 +56,7 @@ AgentHarbor is a native tray app for macOS and Windows that sits quietly in your
 - **Deploy wizard** — syntax-highlighted split/unified diffs, per-file `Replace / Merge / Append` strategy, automatic backups before every write.
 - **Undo Deploy** — one click restores the pre-deploy snapshot from the backup store.
 - **Presets** — bundle any set of capabilities for one-click deploy; ships with `Full-Stack Web` and `Data Science` examples.
-- **Drift detection** — detects when a teammate or another tool changes a managed file and shows a side-by-side diff with Accept or Restore.
+- **Drift detection** — keeps MCP config sync honest across editors: detects when a teammate or another tool changes a managed file and shows a side-by-side diff with Accept or Restore.
 - **Cost engine** — per-model API-equivalent costs for Claude (Opus / Sonnet / Haiku) and Codex (GPT-5 / 4 / 3.5), token-deduplicated across session windows.
 - **Secrets manager** — stores sensitive env vars in the macOS Keychain and injects them into MCP `env` blocks at deploy time.
 - **Auto-update** — Tauri updater checks GitHub Releases every 4 hours; in-app banner with one-click install and optional 24 h snooze.
@@ -60,6 +77,8 @@ AgentHarbor is a native tray app for macOS and Windows that sits quietly in your
 | VS Code | *Coming soon* | | |
 | Amp | *Coming soon* | | |
 | Kiro | *Coming soon* | | |
+
+Cursor spend tracking covers the full picture — plan-included, bonus, and on-demand usage — not just a single total. See [Analytics & Tray](docs/analytics.md) for how each metric is derived.
 
 ---
 

@@ -50,3 +50,6 @@ CLAUDE_debate_*.md
 # macOS installer artifacts (never commit)
 *.dmg
 rw.*.dmg
+
+# Launch marketing drafts — working docs, not product content
+marketing/
