@@ -8,7 +8,9 @@
 
 For developers running Claude Code, Cursor, Codex, Gemini CLI, or Windsurf: track usage and spend, manage configurations, deploy capabilities, and keep every tool in sync — all from one native app.
 
+<!-- TODO: uncomment once docs/assets/demo.gif is recorded — do not ship a broken hero image
 <p align="center"><img src="docs/assets/demo.gif" alt="AgentHarbor demo — live tray limits and one-click deploy" width="720"></p>
+-->
 
 [![GitHub release](https://img.shields.io/github/v/release/abhiunix/AgentHarbor?label=latest&color=blue)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![Total Downloads](https://img.shields.io/github/downloads/abhiunix/AgentHarbor/total?label=downloads&color=green)](https://github.com/abhiunix/AgentHarbor/releases)
@@ -73,8 +75,10 @@ Tools like [ccusage](https://github.com/ryoppippi/ccusage) and [Claude Code Usag
 | **Codex (OpenAI)** | Full | Primary 5h, Weekly 7d, per-model $ | MCP, skills |
 | **Gemini CLI** | Quota | Pro → Flash → Flash Lite tier waterfall | Skills, hooks, agents |
 | **Windsurf** | Config | — | MCP, rules |
+| **GitHub Copilot** | — | — | Skills |
+| **VS Code** | — | — | Skills |
+| **Antigravity** | — | — | Skills |
 | JetBrains | *Coming soon* | | |
-| VS Code | *Coming soon* | | |
 | Amp | *Coming soon* | | |
 | Kiro | *Coming soon* | | |
 
@@ -128,7 +132,7 @@ The icon swaps to its red variant and appends `!` whenever the active provider i
 
 | Document | Contents |
 |---|---|
-| [Features](docs/features.md) | Visual tour of every major feature with screenshot placeholders |
+| [Features](docs/features.md) | Visual tour of every major feature |
 | [Getting Started](docs/getting-started.md) | Install, first launch, connect providers, first deploy |
 | [Analytics & Tray](docs/analytics.md) | Menu-bar metrics, tray popover, LimitState ladder, per-provider pages |
 | [Deploying Capabilities & Agents](docs/deploying-capabilities.md) | Deploy wizard, presets, backups, drift detection, removing capabilities |
