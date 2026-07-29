@@ -14,6 +14,7 @@ User and contributor docs for AgentHarbor — a macOS and Windows desktop app fo
 
 ## Quick links
 
+- Website: [agentharbor.openxsecurity.com](https://agentharbor.openxsecurity.com).
 - Latest signed DMG: see the [latest GitHub release](https://github.com/abhiunix/AgentHarbor/releases/latest).
 - Changelog: per-release notes on the [releases page](https://github.com/abhiunix/AgentHarbor/releases).
 - Source: [`../src/`](../src/) (frontend) and [`../src-tauri/src/`](../src-tauri/src/) (Rust backend).

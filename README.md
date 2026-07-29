@@ -22,7 +22,7 @@ For developers running Claude Code, Cursor, Codex, Gemini CLI, or Windsurf: trac
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 
-[**Download**](https://github.com/abhiunix/AgentHarbor/releases/latest) · [**Getting Started**](docs/getting-started.md) · [**Features**](docs/features.md) · [**Docs**](docs/)
+[**Website**](https://agentharbor.openxsecurity.com) · [**Download**](https://github.com/abhiunix/AgentHarbor/releases/latest) · [**Getting Started**](docs/getting-started.md) · [**Features**](docs/features.md) · [**Docs**](docs/)
 
 </div>
 
