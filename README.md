@@ -212,8 +212,6 @@ agentharbor/
   </picture>
 </a>
 
-<sub>Self-hosted chart, refreshed daily by [a workflow](.github/workflows/star-history.yml) — no third-party image service.</sub>
-
 </div>
 
 ---
