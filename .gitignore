@@ -53,3 +53,5 @@ rw.*.dmg
 
 # Launch marketing drafts — working docs, not product content
 marketing/
+.agents/
+skills-lock.json
