@@ -12,6 +12,7 @@ For developers running Claude Code, Cursor, Codex, Gemini CLI, or Windsurf: trac
 <p align="center"><img src="docs/assets/demo.gif" alt="AgentHarbor demo — live tray limits and one-click deploy" width="720"></p>
 -->
 
+[![GitHub stars](https://img.shields.io/github/stars/abhiunix/AgentHarbor?style=social)](https://github.com/abhiunix/AgentHarbor/stargazers)
 [![GitHub release](https://img.shields.io/github/v/release/abhiunix/AgentHarbor?label=latest&color=blue)](https://github.com/abhiunix/AgentHarbor/releases/latest)
 [![Total Downloads](https://img.shields.io/github/downloads/abhiunix/AgentHarbor/total?label=downloads&color=green)](https://github.com/abhiunix/AgentHarbor/releases)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](https://github.com/abhiunix/AgentHarbor/releases/latest)
@@ -201,6 +202,7 @@ agentharbor/
 
 ---
 
+<!-- TODO: re-enable once api.star-history.com recovers (returning 500/503 for all repos as of 2026-07-30)
 ## Star History
 
 <div align="center">
@@ -216,6 +218,7 @@ agentharbor/
 </div>
 
 ---
+-->
 
 ## Contributing
 
