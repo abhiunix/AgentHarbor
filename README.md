@@ -9,6 +9,7 @@
 For developers running Claude Code, Cursor, Codex, Gemini CLI, or Windsurf: track usage and spend, manage configurations, deploy capabilities, and keep every tool in sync — all from one native app.
 
 <p align="center"><img src="docs/assets/demo.gif" alt="Live per-provider rate limits and spend in the AgentHarbor tray popover (stylized)" width="720"></p>
+<p align="center"><sub><a href="docs/assets/agentharbor-launch-1080p.mp4">▶ Watch the 36-second launch video</a></sub></p>
 
 [![GitHub stars](https://img.shields.io/github/stars/abhiunix/AgentHarbor?style=social)](https://github.com/abhiunix/AgentHarbor/stargazers)
 [![GitHub release](https://img.shields.io/github/v/release/abhiunix/AgentHarbor?label=latest&color=blue)](https://github.com/abhiunix/AgentHarbor/releases/latest)
