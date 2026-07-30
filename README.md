@@ -202,23 +202,22 @@ agentharbor/
 
 ---
 
-<!-- TODO: re-enable once api.star-history.com recovers (returning 500/503 for all repos as of 2026-07-30)
 ## Star History
 
 <div align="center">
 
-<a href="https://star-history.com/#abhiunix/agentharbor&Date">
+<a href="https://github.com/abhiunix/AgentHarbor/stargazers">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=abhiunix/agentharbor&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=abhiunix/agentharbor&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=abhiunix/agentharbor&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history-dark.svg" />
+    <img alt="Cumulative GitHub stars over time" src="docs/assets/star-history.svg" width="720" />
   </picture>
 </a>
+
+<sub>Self-hosted chart, refreshed daily by [a workflow](.github/workflows/star-history.yml) — no third-party image service.</sub>
 
 </div>
 
 ---
--->
 
 ## Contributing
 
