@@ -4,10 +4,8 @@ pub mod agent;
 
 pub use composite_id::{CompositeId, CompositeIdError};
 pub use capability::{
-    CapabilityMetadata,
     CapabilitySource,
     CapabilityStats,
-    CapabilityType,
     Custom,
     EnvVariable,
     Hook,
@@ -23,7 +21,6 @@ pub use capability::{
 pub use agent::{
     AgentColor,
     AgentDefinition,
-    AgentExample,
     AgentModel,
     MemoryScope,
     ToolAccess,

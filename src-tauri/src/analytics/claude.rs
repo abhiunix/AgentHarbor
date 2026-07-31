@@ -675,10 +675,10 @@ fn iso_in_future(s: &str) -> bool {
 }
 
 fn subscription_is_healthy(status: Option<&str>) -> bool {
-    match status.map(|s| s.to_lowercase()).as_deref() {
-        None | Some("active") | Some("trialing") => true,
-        _ => false,
-    }
+    matches!(
+        status.map(|s| s.to_lowercase()).as_deref(),
+        None | Some("active") | Some("trialing")
+    )
 }
 
 /// Derive limit / billing health for tray + notifications.
@@ -754,8 +754,8 @@ fn derive_claude_limit_state(
         let blocked = claude_account::first_blocked_org(acc);
         let candidates: Vec<&claude_account::AccountOrg> = matched
             .into_iter()
-            .chain(parent.into_iter())
-            .chain(blocked.into_iter())
+            .chain(parent)
+            .chain(blocked)
             .collect();
 
         // Use the active profile org name in the user-facing message — even
@@ -1408,7 +1408,7 @@ fn enrich_with_today_stats(extra: &mut HashMap<String, serde_json::Value>) {
                 let path = entry.path();
                 if path.is_dir() {
                     collect_jsonl_files(&path, out);
-                } else if path.extension().map_or(false, |e| e == "jsonl") {
+                } else if path.extension().is_some_and(|e| e == "jsonl") {
                     out.push(path);
                 }
             }

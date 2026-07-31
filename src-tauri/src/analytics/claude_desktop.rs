@@ -3,7 +3,6 @@
 //! Only changes provider_id to "claude-desktop".
 
 use crate::analytics::types::*;
-use std::collections::HashMap;
 
 // ── Public API ──────────────────────────────────────────────────────────────
 

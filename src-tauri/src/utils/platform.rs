@@ -105,7 +105,7 @@ pub fn open_in_ide(ide: &str, path: &str) -> Result<(), String> {
             .args(["-a", app_name, path])
             .spawn()
             .map_err(|e| format!("Failed to open {}: {}", app_name, e))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]

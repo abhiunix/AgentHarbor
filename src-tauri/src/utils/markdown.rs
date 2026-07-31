@@ -220,7 +220,7 @@ fn parse_memory(s: &str) -> Result<MemoryScope, MarkdownError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::AgentExample;
+    
 
     fn create_test_agent() -> AgentDefinition {
         AgentDefinition {

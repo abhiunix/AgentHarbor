@@ -285,7 +285,7 @@ impl AgentAdapter for CodexAdapter {
             Ok(DeployResult::success(all_files))
         } else {
             Ok(DeployResult {
-                success: all_files.len() > 0,
+                success: !all_files.is_empty(),
                 files_written: all_files,
                 errors: all_errors,
             })

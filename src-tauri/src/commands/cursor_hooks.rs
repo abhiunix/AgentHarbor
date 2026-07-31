@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -74,7 +74,7 @@ fn resolve_hooks_path(project_path: Option<&str>) -> Result<(PathBuf, bool), Str
     }
 }
 
-fn read_hooks_file(path: &PathBuf) -> Result<Vec<CursorHook>, String> {
+fn read_hooks_file(path: &Path) -> Result<Vec<CursorHook>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -84,7 +84,7 @@ fn read_hooks_file(path: &PathBuf) -> Result<Vec<CursorHook>, String> {
     Ok(hooks_file.hooks)
 }
 
-fn write_hooks_file(path: &PathBuf, hooks: &[CursorHook]) -> Result<(), String> {
+fn write_hooks_file(path: &Path, hooks: &[CursorHook]) -> Result<(), String> {
     let hooks_file = HooksFile {
         hooks: hooks.to_vec(),
     };

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -38,14 +38,14 @@ fn metadata_to_iso8601(metadata: &fs::Metadata) -> String {
     metadata
         .modified()
         .ok()
-        .and_then(|t| {
+        .map(|t| {
             let dt: DateTime<Utc> = t.into();
-            Some(dt.to_rfc3339())
+            dt.to_rfc3339()
         })
         .unwrap_or_default()
 }
 
-fn entry_from_path(path: &PathBuf, name: &str, is_legacy: bool) -> Option<WindsurfRuleEntry> {
+fn entry_from_path(path: &Path, name: &str, is_legacy: bool) -> Option<WindsurfRuleEntry> {
     let metadata = fs::metadata(path).ok()?;
     Some(WindsurfRuleEntry {
         name: name.to_string(),
@@ -56,7 +56,7 @@ fn entry_from_path(path: &PathBuf, name: &str, is_legacy: bool) -> Option<Windsu
     })
 }
 
-fn atomic_write(path: &PathBuf, content: &str) -> Result<(), String> {
+fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;

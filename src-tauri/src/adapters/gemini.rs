@@ -100,9 +100,7 @@ impl GeminiAdapter {
 
             if !mcp.env.is_empty() {
                 let env_map: HashMap<String, String> = mcp
-                    .env
-                    .iter()
-                    .map(|(k, _)| (k.clone(), format!("${{{}}}", k)))
+                    .env.keys().map(|k| (k.clone(), format!("${{{}}}", k)))
                     .collect();
                 server_config["env"] = json!(env_map);
             }
@@ -805,7 +803,7 @@ mod tests {
 
     #[test]
     fn test_default_impl() {
-        let adapter = GeminiAdapter::default();
+        let adapter = GeminiAdapter;
         assert_eq!(adapter.id(), "gemini");
     }
 }

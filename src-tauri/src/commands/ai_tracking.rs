@@ -115,10 +115,8 @@ pub fn get_ai_commit_scores(limit: Option<usize>, offset: Option<usize>) -> Resu
         .map_err(|e| format!("Query failed: {}", e))?;
 
     let mut results = Vec::new();
-    for row in rows {
-        if let Ok(commit) = row {
-            results.push(commit);
-        }
+    for commit in rows.flatten() {
+        results.push(commit);
     }
     Ok(results)
 }
@@ -200,10 +198,8 @@ pub fn get_conversation_summaries(limit: Option<usize>, offset: Option<usize>) -
         .map_err(|e| format!("Query failed: {}", e))?;
 
     let mut results = Vec::new();
-    for row in rows {
-        if let Ok(summary) = row {
-            results.push(summary);
-        }
+    for summary in rows.flatten() {
+        results.push(summary);
     }
     Ok(results)
 }
@@ -235,10 +231,8 @@ pub fn get_ai_file_type_breakdown() -> Result<Vec<FileTypeBreakdown>, String> {
         .map_err(|e| format!("Query failed: {}", e))?;
 
     let mut results = Vec::new();
-    for row in rows {
-        if let Ok(entry) = row {
-            results.push(entry);
-        }
+    for entry in rows.flatten() {
+        results.push(entry);
     }
     Ok(results)
 }
@@ -269,10 +263,8 @@ pub fn get_ai_tracking_model_breakdown() -> Result<HashMap<String, u64>, String>
         .map_err(|e| format!("Query failed: {}", e))?;
 
     let mut map = HashMap::new();
-    for row in rows {
-        if let Ok((model, count)) = row {
-            map.insert(model, count);
-        }
+    for (model, count) in rows.flatten() {
+        map.insert(model, count);
     }
     Ok(map)
 }

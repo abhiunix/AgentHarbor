@@ -231,8 +231,7 @@ pub fn execute_tool(name: &str, input: &Value, project_dir: &str) -> Result<Stri
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32)
                 .unwrap_or(GREP_DEFAULT_MAX_RESULTS)
-                .min(GREP_HARD_CAP_RESULTS)
-                .max(1);
+                .clamp(1, GREP_HARD_CAP_RESULTS);
             grep_impl(project_dir, pattern, path, max_results)
         }
     }
@@ -251,7 +250,7 @@ fn resolve_within_project(project_dir: &str, rel: &str) -> Result<PathBuf, Strin
         .map_err(|e| format!("project_unavailable: {}", e))?;
     // Strip a leading `/` or `\` so absolute-looking inputs from the model
     // still join inside the project.
-    let trimmed = rel.trim_start_matches(|c: char| c == '/' || c == '\\');
+    let trimmed = rel.trim_start_matches(['/', '\\']);
     let target = if trimmed.is_empty() {
         project.clone()
     } else {
@@ -269,7 +268,7 @@ fn resolve_within_project(project_dir: &str, rel: &str) -> Result<PathBuf, Strin
 /// True if a path entry should be ignored by list/grep walks based on its
 /// file/dir basename.
 fn is_skipped_name(name: &str) -> bool {
-    SKIP_NAMES.iter().any(|s| *s == name)
+    SKIP_NAMES.contains(&name)
 }
 
 // ── read_file ───────────────────────────────────────────────────────────────

@@ -307,8 +307,8 @@ pub fn import_data(data: ExportData, rename_conflicts: bool) -> ImportResult {
         success: total > 0 && conflicts.iter().all(|c| c.message.starts_with("Renamed")),
         message,
         capabilities_imported: caps_imported,
-        agents_imported: agents_imported,
-        presets_imported: presets_imported,
+        agents_imported,
+        presets_imported,
         conflicts,
     }
 }

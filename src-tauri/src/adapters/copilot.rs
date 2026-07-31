@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -222,7 +221,7 @@ impl AgentAdapter for CopilotAdapter {
             Ok(DeployResult::success(all_files))
         } else {
             Ok(DeployResult {
-                success: all_files.len() > 0,
+                success: !all_files.is_empty(),
                 files_written: all_files,
                 errors: all_errors,
             })

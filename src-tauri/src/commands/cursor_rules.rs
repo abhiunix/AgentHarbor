@@ -44,11 +44,7 @@ fn parse_mdc_content(raw: &str) -> (String, String, bool, String) {
         let frontmatter = &after_open[..close_idx];
         let after_close = &after_open[close_idx + 4..]; // skip "\n---"
         // Body is everything after the closing ---, stripping one leading newline
-        body = if after_close.starts_with('\n') {
-            after_close[1..].to_string()
-        } else {
-            after_close.to_string()
-        };
+        body = after_close.strip_prefix('\n').unwrap_or(after_close).to_string();
 
         // Parse frontmatter lines
         for line in frontmatter.lines() {
