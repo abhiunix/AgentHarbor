@@ -136,6 +136,8 @@ The icon swaps to its red variant and appends `!` whenever the active provider i
 | [Getting Started](docs/getting-started.md) | Install, first launch, connect providers, first deploy |
 | [Analytics & Tray](docs/analytics.md) | Menu-bar metrics, tray popover, LimitState ladder, per-provider pages |
 | [Deploying Capabilities & Agents](docs/deploying-capabilities.md) | Deploy wizard, presets, backups, drift detection, removing capabilities |
+| [Dan Features & Benchmarking Roadmap](docs/dan_features.md) | Research-backed roadmap for model comparison, benchmark lab, and provider expansion |
+| [Dan Features (Claude edition)](docs/dan_features-claude.md) | Deeper companion: codebase audit, 2025–2026 eval landscape, concrete Benchmark Lab architecture, short-duration backlog |
 | [Build & Release](docs/build-and-release.md) | Local dev, signed builds, release checklist |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Regression Checklist](docs/regression-checklist.md) | QA checklist before every release |
