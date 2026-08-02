@@ -59,7 +59,7 @@ Tools like [ccusage](https://github.com/ryoppippi/ccusage) and [Claude Code Usag
 - **Limit-state ladder** — tracks `Unauthenticated → ApiDisabled → BillablePaused → SubscriptionIssue → RateLimited → Reached → Approaching → Healthy` and surfaces native macOS notifications on transitions.
 - **Deploy wizard** — syntax-highlighted split/unified diffs, per-file `Replace / Merge / Append` strategy, automatic backups before every write.
 - **Undo Deploy** — one click restores the pre-deploy snapshot from the backup store.
-- **Presets** — bundle any set of capabilities for one-click deploy; ships with `Full-Stack Web` and `Data Science` examples.
+- **Presets** — bundle any set of capabilities for one-click deploy and reuse them across projects.
 - **Drift detection** — keeps MCP config sync honest across editors: detects when a teammate or another tool changes a managed file and shows a side-by-side diff with Accept or Restore.
 - **Cost engine** — per-model API-equivalent costs for Claude (Opus / Sonnet / Haiku) and Codex (GPT-5 / 4 / 3.5), token-deduplicated across session windows.
 - **Secrets manager** — stores sensitive env vars in the macOS Keychain and injects them into MCP `env` blocks at deploy time.

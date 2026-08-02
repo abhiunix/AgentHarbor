@@ -48,7 +48,7 @@ AgentHarbor hashes every managed file. When a teammate or another tool edits one
 
 ## Presets
 
-Bundle any set of capabilities for one-click deploy. Ships with **Full-Stack Web** and **Data Science** examples; your own presets are editable inline.
+Bundle any set of capabilities for one-click deploy; presets are editable inline and reusable across projects.
 
 <img src="assets/presets.png" alt="Presets view with bundled and custom presets" width="720">
 
