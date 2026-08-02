@@ -53,3 +53,9 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 [dev-dependencies]
 tempfile = "3"
 
+
+# Optimize dependencies in dev builds (serde_json/chrono parse 402MB+ of
+# session JSONLs; opt-level 0 makes analytics 10-30x slower than release).
+# Our own crate stays at opt-level 0 for fast incremental compiles.
+[profile.dev.package."*"]
+opt-level = 2
