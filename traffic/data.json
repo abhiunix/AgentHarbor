@@ -199,5 +199,16 @@
       "forks": 1,
       "issues": 8
     }
+  },
+  "window": {
+    "asOf": "2026-08-02",
+    "views": {
+      "count": 103,
+      "uniques": 19
+    },
+    "clones": {
+      "count": 128,
+      "uniques": 71
+    }
   }
 }
