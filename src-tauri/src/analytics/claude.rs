@@ -797,7 +797,15 @@ fn derive_claude_limit_state(
 
     if let Some(o) = org {
         if let Some(ref st) = o.subscription_status {
-            if !subscription_is_healthy(Some(st.as_str())) {
+            // `subscription_status` tracks the web (Stripe) subscription only.
+            // Store-billed plans (Google Play / App Store) report "canceled"
+            // here even while the plan is active and paid, so the field is
+            // not authoritative for them.
+            let store_billed = o.billing_type.as_deref().is_some_and(|b| {
+                let b = b.to_ascii_lowercase();
+                b.contains("google_play") || b.contains("app_store") || b.contains("apple")
+            });
+            if !store_billed && !subscription_is_healthy(Some(st.as_str())) {
                 return LimitState::SubscriptionIssue {
                     status: st.clone(),
                     org_name: o.name.clone().unwrap_or_else(|| org_display.clone()),
@@ -1659,6 +1667,44 @@ mod derive_limit_state_tests {
         assert!(matches!(
             s,
             LimitState::SubscriptionIssue { ref status, .. } if status == "past_due"
+        ));
+    }
+
+    #[test]
+    fn store_billed_canceled_subscription_is_not_an_issue() {
+        // Google Play-billed Max plan: Anthropic reports the Stripe-side
+        // subscription_status as "canceled" while the plan is active.
+        let profile: ClaudeProfileResponse = serde_json::from_value(serde_json::json!({
+            "account": { "has_claude_max": true },
+            "organization": {
+                "uuid": "org-1",
+                "name": "abhi's Organization",
+                "organization_type": "claude_max",
+                "billing_type": "google_play_subscription",
+                "rate_limit_tier": "default_claude_max_5x",
+                "subscription_status": "canceled"
+            }
+        }))
+        .unwrap();
+        let s = derive_claude_limit_state(&None, &Some(profile), &None, &[], None, None, PlanTier::Max);
+        assert!(matches!(s, LimitState::Healthy));
+    }
+
+    #[test]
+    fn stripe_billed_canceled_subscription_still_flags() {
+        let profile: ClaudeProfileResponse = serde_json::from_value(serde_json::json!({
+            "organization": {
+                "uuid": "org-1",
+                "name": "Acme",
+                "billing_type": "stripe_subscription",
+                "subscription_status": "canceled"
+            }
+        }))
+        .unwrap();
+        let s = derive_claude_limit_state(&None, &Some(profile), &None, &[], None, None, PlanTier::Pro);
+        assert!(matches!(
+            s,
+            LimitState::SubscriptionIssue { ref status, .. } if status == "canceled"
         ));
     }
 
