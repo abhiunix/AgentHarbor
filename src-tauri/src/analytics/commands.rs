@@ -915,7 +915,7 @@ fn build_tray_summary() -> TraySummary {
         gemini_h.join().unwrap_or_else(|_| disconnected("gemini", "Gemini CLI")),
     ];
 
-    let providers: Vec<TrayProviderSummary> = analytics_list
+    let mut providers: Vec<TrayProviderSummary> = analytics_list
         .into_iter()
         .map(|p| TrayProviderSummary {
             provider_id: p.provider_id,
@@ -932,6 +932,16 @@ fn build_tray_summary() -> TraySummary {
             limit_state: p.limit_state,
         })
         .collect();
+
+    // Live running-agent count — computed per summary build (cheap PID probes),
+    // not taken from the cached analytics snapshot.
+    if let Some(p) = providers.iter_mut().find(|p| p.provider_id == "claude-code") {
+        let n = crate::commands::claude_history::get_claude_active_sessions()
+            .map(|s| s.iter().filter(|x| x.is_running).count())
+            .unwrap_or(0);
+        p.extra
+            .insert("active_agent_count".into(), serde_json::json!(n));
+    }
 
     let connected_count = providers.iter().filter(|p| p.connected).count() as u32;
 

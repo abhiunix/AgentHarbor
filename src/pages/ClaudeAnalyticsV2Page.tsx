@@ -1001,7 +1001,7 @@ function ClaudeAnalyticsV2Inner() {
               {overview.active_session_count > 0 && (
                 <span className="ml-2">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse mr-1" />
-                  <span className="text-emerald-400">{overview.active_session_count} active</span>
+                  <span className="text-emerald-400">{overview.active_session_count} active agent{overview.active_session_count !== 1 ? "s" : ""}</span>
                 </span>
               )}
             </p>
