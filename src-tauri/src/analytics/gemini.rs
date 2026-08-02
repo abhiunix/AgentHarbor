@@ -23,7 +23,7 @@ lazy_static::lazy_static! {
     static ref GEMINI_CACHE: Mutex<Option<GeminiCacheEntry>> = Mutex::new(None);
 }
 
-const GEMINI_CACHE_TTL_SECS: u64 = 300;
+const GEMINI_CACHE_TTL_SECS: u64 = 60;
 
 // ── OAuth constants ─────────────────────────────────────────────────────────
 

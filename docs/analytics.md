@@ -1,6 +1,6 @@
 # Analytics & Tray
 
-AgentHarbor's menu-bar icon, popover, and per-provider analytics pages all draw from the same in-memory cache that's refreshed every ~120 s in the background (faster when limits are tight). This page describes what each surface shows and why.
+AgentHarbor's menu-bar icon, popover, and per-provider analytics pages all draw from the same in-memory cache that's refreshed every ~60 s in the background (faster when limits are tight). This page describes what each surface shows and why.
 
 ## Menu-bar icon
 

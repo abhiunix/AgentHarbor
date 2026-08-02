@@ -4,7 +4,7 @@ A visual tour of AgentHarbor's major features. Each section links to the guide t
 
 ## Live tray analytics
 
-The menu-bar icon shows the most relevant metric for the active provider — session percentage for Claude Code and Codex, spend for Cursor and Claude Enterprise, quota tier for Gemini CLI — refreshed every ~120 s.
+The menu-bar icon shows the most relevant metric for the active provider — session percentage for Claude Code and Codex, spend for Cursor and Claude Enterprise, quota tier for Gemini CLI — refreshed every ~60 s.
 
 <img src="assets/tray-icon-macos.png" alt="macOS menu bar showing the AgentHarbor icon with the active session percentage" width="480">
 

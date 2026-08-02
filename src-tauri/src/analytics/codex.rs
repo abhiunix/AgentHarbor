@@ -24,7 +24,7 @@ lazy_static::lazy_static! {
     static ref CACHE: Mutex<Option<CacheEntry>> = Mutex::new(None);
 }
 
-const CACHE_TTL_SECS: u64 = 300; // 5 minutes
+const CACHE_TTL_SECS: u64 = 60;
 
 #[derive(Deserialize, Debug)]
 struct CodexAuthTokens {

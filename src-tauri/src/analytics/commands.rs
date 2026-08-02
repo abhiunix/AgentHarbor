@@ -37,7 +37,7 @@ lazy_static::lazy_static! {
     static ref TRAY_ACTIVE_PROVIDER: StdMutex<Option<String>> = StdMutex::new(None);
 }
 
-const TRAY_REFRESH_INTERVAL_SECS: u64 = 120;
+const TRAY_REFRESH_INTERVAL_SECS: u64 = 60;
 const PRIMARY_PROVIDER_IDS: [&str; 4] = ["claude-code", "cursor", "codex", "gemini"];
 
 const CLAUDE_CODE_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/claude-code.png");
