@@ -335,6 +335,117 @@ fn date_from_timestamp(ts: &str) -> String {
     }
 }
 
+// ── Activity stats (derived from JSONLs) ────────────────────────────────────
+// Claude Code stopped updating ~/.claude/stats-cache.json (last write mid-2026),
+// so streaks/peak-hour/session tiles froze. Derive them from the session JSONLs
+// instead, in local time; the cache file remains only a fallback and the source
+// of model_usage / cost fields we don't re-derive here.
+
+fn derive_session_stats_from_records(
+    records: &[usage::ProjectUsageRecord],
+    cache: Option<&session_stats::SessionStats>,
+) -> Option<session_stats::SessionStats> {
+    use chrono::Timelike;
+    if records.is_empty() {
+        return None;
+    }
+
+    let mut hour_counts = vec![0u64; 24];
+    // local date -> (message_count, tool_call_count, distinct session ids)
+    let mut daily: std::collections::BTreeMap<String, (u64, u64, std::collections::HashSet<String>)> =
+        Default::default();
+    // session id -> (first seen, last seen, message count)
+    let mut sessions: HashMap<
+        String,
+        (chrono::DateTime<chrono::Local>, chrono::DateTime<chrono::Local>, u64),
+    > = HashMap::new();
+    let mut first_ts: Option<chrono::DateTime<chrono::Local>> = None;
+
+    for r in records {
+        let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&r.timestamp) else {
+            continue;
+        };
+        let local = ts.with_timezone(&chrono::Local);
+        hour_counts[local.time().hour() as usize] += 1;
+        let day = daily.entry(local.format("%Y-%m-%d").to_string()).or_default();
+        day.0 += 1;
+        day.1 += r.tools_used.len() as u64;
+        if let Some(ref sid) = r.session_id {
+            day.2.insert(sid.clone());
+            let s = sessions.entry(sid.clone()).or_insert((local, local, 0));
+            if local < s.0 {
+                s.0 = local;
+            }
+            if local > s.1 {
+                s.1 = local;
+            }
+            s.2 += 1;
+        }
+        if first_ts.is_none_or(|f| local < f) {
+            first_ts = Some(local);
+        }
+    }
+    if daily.is_empty() {
+        return None;
+    }
+
+    let daily_activity: Vec<session_stats::DailyActivity> = daily
+        .into_iter()
+        .map(|(date, (m, t, s))| session_stats::DailyActivity {
+            date,
+            message_count: m,
+            session_count: s.len() as u64,
+            tool_call_count: t,
+        })
+        .collect();
+
+    let longest_session = sessions
+        .iter()
+        .max_by_key(|(_, (a, b, _))| (*b - *a).num_milliseconds())
+        .map(|(sid, (a, b, m))| session_stats::LongestSession {
+            session_id: sid.clone(),
+            duration: (*b - *a).num_milliseconds().max(0) as u64,
+            message_count: *m,
+            timestamp: a.to_rfc3339(),
+        });
+
+    Some(session_stats::SessionStats {
+        total_sessions: sessions.len() as u64,
+        total_messages: records.len() as u64,
+        longest_session,
+        hour_counts,
+        daily_activity,
+        model_usage: cache.map(|c| c.model_usage.clone()).unwrap_or_default(),
+        first_session_date: first_ts.map(|f| f.format("%Y-%m-%d").to_string()),
+        total_cost_usd: cache.map(|c| c.total_cost_usd).unwrap_or(0.0),
+    })
+}
+
+lazy_static::lazy_static! {
+    // The "today" range loads only recently-touched JSONLs (mtime floor), which
+    // would corrupt streak/active-day math — so it derives from its own cached
+    // full-corpus scan instead.
+    static ref ACTIVITY_STATS: Mutex<Option<CacheEntry<session_stats::SessionStats>>> =
+        Mutex::new(None);
+}
+
+fn full_corpus_activity_stats(
+    cache: Option<&session_stats::SessionStats>,
+) -> Option<session_stats::SessionStats> {
+    if let Some(ref entry) = *ACTIVITY_STATS.lock().unwrap() {
+        if entry.fetched_at.elapsed() < Duration::from_secs(300) {
+            return Some(entry.data.clone());
+        }
+    }
+    let records = usage::read_project_usage_files_with_mtime_floor(None).unwrap_or_default();
+    let derived = derive_session_stats_from_records(&records, cache)?;
+    *ACTIVITY_STATS.lock().unwrap() = Some(CacheEntry {
+        data: derived.clone(),
+        fetched_at: Instant::now(),
+    });
+    Some(derived)
+}
+
 // ── Build Overview ──────────────────────────────────────────────────────────
 
 fn build_overview(time_range: &str) -> ClaudeV2Overview {
@@ -349,8 +460,21 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
     let plan = analytics.status.plan_name.clone();
     let org_name = analytics.status.org_name.clone();
 
-    // 2. Session stats
-    let stats = session_stats::get_claude_session_stats().unwrap_or_else(|_| session_stats::SessionStats {
+    // 2. JSONL records
+    let all_records = load_project_usage_for_time_range(time_range);
+    let records = filter_records_by_time(&all_records, time_range);
+
+    // 3. Session/activity stats — derived from the JSONLs (stats-cache.json is
+    // no longer updated by Claude Code; it only supplies model_usage / cost).
+    // The "today" range loads a floored subset, so it uses its own full scan.
+    let cache_stats = session_stats::get_claude_session_stats().ok();
+    let stats = if time_range == "today" {
+        full_corpus_activity_stats(cache_stats.as_ref())
+    } else {
+        derive_session_stats_from_records(&all_records, cache_stats.as_ref())
+    }
+    .or(cache_stats)
+    .unwrap_or_else(|| session_stats::SessionStats {
         total_sessions: 0,
         total_messages: 0,
         longest_session: None,
@@ -362,10 +486,6 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
     });
 
     let total_tool_calls: u64 = stats.daily_activity.iter().map(|d| d.tool_call_count).sum();
-
-    // 3. JSONL records
-    let all_records = load_project_usage_for_time_range(time_range);
-    let records = filter_records_by_time(&all_records, time_range);
 
     // Aggregate tokens
     let mut total_input = 0u64;
@@ -1036,4 +1156,54 @@ pub async fn export_claude_v2_csv(time_range: String, _project_filter: Option<St
     }
 
     Ok(csv)
+}
+
+#[cfg(test)]
+mod activity_stats_tests {
+    use super::*;
+
+    fn rec(ts: &str, sid: &str, tools: usize) -> usage::ProjectUsageRecord {
+        usage::ProjectUsageRecord {
+            uuid: format!("u-{ts}"),
+            timestamp: ts.to_string(),
+            model: Some("claude-test".into()),
+            usage: None,
+            project_path: None,
+            session_id: Some(sid.to_string()),
+            git_branch: None,
+            tools_used: vec!["Bash".to_string(); tools],
+            has_thinking: false,
+            message_type: None,
+            claude_version: None,
+        }
+    }
+
+    #[test]
+    fn derives_daily_activity_sessions_and_hours_from_records() {
+        let records = vec![
+            rec("2026-08-01T10:00:00Z", "s1", 2),
+            rec("2026-08-01T10:30:00Z", "s1", 0),
+            rec("2026-08-01T11:00:00Z", "s2", 1),
+            rec("2026-08-02T09:00:00Z", "s3", 0),
+        ];
+        let stats = derive_session_stats_from_records(&records, None).unwrap();
+        assert_eq!(stats.total_messages, 4);
+        assert_eq!(stats.total_sessions, 3);
+        assert_eq!(stats.daily_activity.len(), 2);
+        assert_eq!(stats.daily_activity[0].message_count, 3);
+        assert_eq!(stats.daily_activity[0].session_count, 2);
+        assert_eq!(stats.daily_activity[0].tool_call_count, 3);
+        assert_eq!(stats.daily_activity[1].session_count, 1);
+        assert_eq!(stats.hour_counts.iter().sum::<u64>(), 4);
+        // longest session: s1 spans 30 minutes
+        let ls = stats.longest_session.unwrap();
+        assert_eq!(ls.session_id, "s1");
+        assert_eq!(ls.duration, 30 * 60 * 1000);
+        assert_eq!(ls.message_count, 2);
+    }
+
+    #[test]
+    fn empty_records_fall_back_to_none() {
+        assert!(derive_session_stats_from_records(&[], None).is_none());
+    }
 }
