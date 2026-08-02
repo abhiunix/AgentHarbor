@@ -2,6 +2,8 @@
 
 <img src="src/assets/icon.png" alt="AgentHarbor" width="120" />
 
+**English** | [Español](README.es-ES.md)
+
 # AgentHarbor
 
 **One tray app to manage all your AI coding agents.**

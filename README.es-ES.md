@@ -1,8 +1,8 @@
-
-
 <div align="center">
 
 <img src="src/assets/icon.png" alt="AgentHarbor" width="120" />
+
+[English](README.md) | **Español**
 
 # AgentHarbor
 
@@ -60,7 +60,7 @@ Herramientas como [ccusage](https://github.com/ryoppippi/ccusage) y [Claude Code
 - **Asistente de despliegue** — diferencias divididas/unificadas con resaltado de sintaxis, estrategia `Replace / Merge / Append` por archivo, copias de seguridad automáticas antes de cada escritura.
 - **Deshacer despliegue** — un clic restaura la instantánea anterior al despliegue desde el almacén de copias de seguridad.
 - **Presets** — empaqueta cualquier conjunto de capacidades para despliegue con un clic; incluye ejemplos de `Full-Stack Web` y `Data Science`.
-- **Detección de desviaciones (drift)** — mantiene sincro la configuración de MCP entre editores: detecta cuando un compañero u otra herramienta modifica un archivo gestionado y muestra una diferencia lado a lado con opciones de Aceptar o Restaurar.
+- **Detección de desviaciones (drift)** — mantiene sincronizada la configuración de MCP entre editores: detecta cuando un compañero u otra herramienta modifica un archivo gestionado y muestra una diferencia lado a lado con opciones de Aceptar o Restaurar.
 - **Motor de costos** — costos equivalentes a API por modelo para Claude (Opus / Sonnet / Haiku) y Codex (GPT-5 / 4 / 3.5), con deduplicación de tokens entre ventanas de sesión.
 - **Gestor de secretos** — almacena variables de entorno sensibles en el Llavero de macOS y las inyecta en los bloques `env` de MCP al momento del despliegue.
 - **Actualización automática** — el actualizador de Tauri verifica GitHub Releases cada 4 horas; banner dentro de la app con instalación en un clic y opción de posponer 24 h.
@@ -90,7 +90,7 @@ El seguimiento de gastos de Cursor abarca la imagen completa: uso incluido en el
 
 ## Instalación
 
-> **macOS 13+ · Apple Silicon** · Firmado con Apple Developer ID y notificado.
+> **macOS 13+ · Apple Silicon** · Firmado con Apple Developer ID y notarizado por Apple.
 
 1. **Descarga el último DMG:** [**AgentHarbor — último lanzamiento**](https://github.com/abhiunix/AgentHarbor/releases/latest)
    - Elige `AgentHarbor_<version>_aarch64.dmg`.
@@ -173,7 +173,7 @@ npm run tauri dev          # desarrollo con recarga en vivo
 npm run test:regression    # tsc + vite build + cargo test
 ```
 
-Para compilaciones de lanzamiento firmadas/notificadas, consulta [`docs/build-and-release.md`](docs/build-and-release.md).
+Para compilaciones de lanzamiento firmadas/notarizadas, consulta [`docs/build-and-release.md`](docs/build-and-release.md).
 
 ### Estructura del proyecto
 
