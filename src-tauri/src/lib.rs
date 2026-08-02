@@ -176,6 +176,24 @@ fn update_tray_visibility(app: tauri::AppHandle, show: bool) -> Result<(), Strin
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// `tauri dev` runs the bare binary outside an .app bundle, so macOS falls back
+/// to the generic exec icon in the Dock. Set it from the bundled PNG at runtime.
+/// Release builds read the icon from the bundle and must not carry this.
+#[cfg(all(debug_assertions, target_os = "macos"))]
+fn set_dev_dock_icon() {
+    use objc2::{AnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let data = NSData::with_bytes(include_bytes!("../icons/128x128@2x.png"));
+    if let Some(img) = NSImage::initWithData(NSImage::alloc(), &data) {
+        unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&img)) };
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -186,6 +204,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            set_dev_dock_icon();
+
             let settings = get_settings();
             if settings.general.show_in_menu_bar {
                 let _ = tray::setup_tray(app.handle(), true);
