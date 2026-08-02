@@ -65,6 +65,25 @@ struct UsageWindow {
 }
 
 #[derive(Deserialize, Debug)]
+struct ApiLimitScopeName {
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ApiLimitScope {
+    model: Option<ApiLimitScopeName>,
+    surface: Option<ApiLimitScopeName>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ApiLimitEntry {
+    kind: Option<String>,
+    percent: Option<f64>,
+    resets_at: Option<String>,
+    scope: Option<ApiLimitScope>,
+}
+
+#[derive(Deserialize, Debug)]
 struct ExtraUsage {
     is_enabled: Option<bool>,
     monthly_limit: Option<f64>,
@@ -89,6 +108,10 @@ struct ClaudeUsageResponse {
     iguana_necktie: Option<UsageWindow>,
     #[serde(default)]
     omelette_promotional: Option<UsageWindow>,
+    /// Modern generic shape: per-model windows appear here as `weekly_scoped`
+    /// entries while the named `seven_day_*` fields above are null.
+    #[serde(default)]
+    limits: Option<Vec<ApiLimitEntry>>,
     extra_usage: Option<ExtraUsage>,
 }
 
@@ -643,6 +666,80 @@ fn parse_window(
     })
 }
 
+/// Build rate-limit windows from a usage response. Prefers the modern
+/// `limits[]` array (which carries per-model `weekly_scoped` windows, e.g.
+/// "Fable (7d)"); falls back to the legacy named fields when absent.
+fn build_rate_limits(u: &ClaudeUsageResponse, show_internal: bool) -> Vec<RateLimitWindow> {
+    let mut rate_limits = Vec::new();
+
+    if let Some(ref entries) = u.limits {
+        for e in entries {
+            let Some(pct) = e.percent else { continue };
+            let (label, window_seconds) = match e.kind.as_deref() {
+                Some("session") => ("Session (5h)".to_string(), Some(18000)),
+                Some("weekly_all") => ("Weekly (All)".to_string(), Some(604800)),
+                Some("weekly_scoped") => {
+                    let name = e
+                        .scope
+                        .as_ref()
+                        .and_then(|s| s.model.as_ref().or(s.surface.as_ref()))
+                        .and_then(|n| n.display_name.clone())
+                        .unwrap_or_else(|| "Model".to_string());
+                    (format!("{name} (7d)"), Some(604800))
+                }
+                // Unreleased experiment kinds — ignore rather than chase.
+                _ => continue,
+            };
+            rate_limits.push(RateLimitWindow {
+                provider_id: "claude-code".into(),
+                label,
+                used_percent: pct,
+                remaining_percent: (100.0 - pct).max(0.0),
+                resets_at: e.resets_at.clone(),
+                resets_in_seconds: None,
+                window_seconds,
+            });
+        }
+    }
+
+    if rate_limits.is_empty() {
+        if let Some(w) = parse_window(&u.five_hour, "Session (5h)", Some(18000)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day, "Weekly (All)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day_opus, "Opus (7d)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day_sonnet, "Sonnet (7d)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day_oauth_apps, "OAuth Apps (7d)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if let Some(w) = parse_window(&u.seven_day_cowork, "Cowork (7d)", Some(604800)) {
+            rate_limits.push(w);
+        }
+        if show_internal {
+            if let Some(w) = parse_window(&u.seven_day_omelette, "Omelette (7d)", Some(604800)) {
+                rate_limits.push(w);
+            }
+            if let Some(w) = parse_window(&u.tangelo, "Tangelo", Some(604800)) {
+                rate_limits.push(w);
+            }
+            if let Some(w) = parse_window(&u.iguana_necktie, "Iguana Necktie", Some(604800)) {
+                rate_limits.push(w);
+            }
+            if let Some(w) = parse_window(&u.omelette_promotional, "Promotional", Some(18000)) {
+                rate_limits.push(w);
+            }
+        }
+    }
+
+    rate_limits
+}
+
 // ── Limit state derivation ─────────────────────────────────────────────────
 
 fn label_to_scope(label: &str) -> LimitScope {
@@ -1093,42 +1190,11 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         .analytics
         .claude_experimental_features;
 
-    // Build rate limits
-    let mut rate_limits = Vec::new();
-    if let Some(ref u) = usage {
-        if let Some(w) = parse_window(&u.five_hour, "Session (5h)", Some(18000)) {
-            rate_limits.push(w);
-        }
-        if let Some(w) = parse_window(&u.seven_day, "Weekly (All)", Some(604800)) {
-            rate_limits.push(w);
-        }
-        if let Some(w) = parse_window(&u.seven_day_opus, "Opus (7d)", Some(604800)) {
-            rate_limits.push(w);
-        }
-        if let Some(w) = parse_window(&u.seven_day_sonnet, "Sonnet (7d)", Some(604800)) {
-            rate_limits.push(w);
-        }
-        if let Some(w) = parse_window(&u.seven_day_oauth_apps, "OAuth Apps (7d)", Some(604800)) {
-            rate_limits.push(w);
-        }
-        if let Some(w) = parse_window(&u.seven_day_cowork, "Cowork (7d)", Some(604800)) {
-            rate_limits.push(w);
-        }
-        if show_internal {
-            if let Some(w) = parse_window(&u.seven_day_omelette, "Omelette (7d)", Some(604800)) {
-                rate_limits.push(w);
-            }
-            if let Some(w) = parse_window(&u.tangelo, "Tangelo", Some(604800)) {
-                rate_limits.push(w);
-            }
-            if let Some(w) = parse_window(&u.iguana_necktie, "Iguana Necktie", Some(604800)) {
-                rate_limits.push(w);
-            }
-            if let Some(w) = parse_window(&u.omelette_promotional, "Promotional", Some(18000)) {
-                rate_limits.push(w);
-            }
-        }
-    }
+    // Build rate limits (modern limits[] first, legacy named fields fallback)
+    let rate_limits = usage
+        .as_ref()
+        .map(|u| build_rate_limits(u, show_internal))
+        .unwrap_or_default();
 
     let had_oauth_401 = oauth401.is_some();
     // Classify plan before deriving limit state so we can suppress plan-irrelevant flags.
@@ -1706,6 +1772,47 @@ mod derive_limit_state_tests {
             s,
             LimitState::SubscriptionIssue { ref status, .. } if status == "canceled"
         ));
+    }
+
+    #[test]
+    fn modern_limits_array_builds_scoped_windows() {
+        // Live response shape (2026-08): legacy seven_day_* null, windows in limits[]
+        let usage: ClaudeUsageResponse = serde_json::from_value(serde_json::json!({
+            "five_hour": { "utilization": 39.0, "resets_at": "2026-08-02T15:50:00Z" },
+            "seven_day": { "utilization": 38.0, "resets_at": "2026-08-06T00:00:00Z" },
+            "seven_day_opus": null,
+            "seven_day_sonnet": null,
+            "limits": [
+                { "kind": "session", "group": "session", "percent": 39, "severity": "normal",
+                  "resets_at": "2026-08-02T15:50:00Z", "scope": null, "is_active": false },
+                { "kind": "weekly_all", "group": "weekly", "percent": 38,
+                  "resets_at": "2026-08-06T00:00:00Z", "scope": null },
+                { "kind": "weekly_scoped", "group": "weekly", "percent": 57,
+                  "resets_at": "2026-08-05T23:59:59Z",
+                  "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null },
+                  "is_active": true },
+                { "kind": "mystery_experiment", "percent": 12 }
+            ]
+        }))
+        .unwrap();
+        let windows = build_rate_limits(&usage, false);
+        let labels: Vec<&str> = windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, vec!["Session (5h)", "Weekly (All)", "Fable (7d)"]);
+        assert!((windows[2].used_percent - 57.0).abs() < 1e-6);
+        assert_eq!(windows[2].window_seconds, Some(604800));
+    }
+
+    #[test]
+    fn legacy_named_fields_build_windows_when_limits_absent() {
+        let usage: ClaudeUsageResponse = serde_json::from_value(serde_json::json!({
+            "five_hour": { "utilization": 42.0, "resets_at": "2026-08-02T15:50:00Z" },
+            "seven_day": { "utilization": 18.0, "resets_at": "2026-08-06T00:00:00Z" },
+            "seven_day_opus": { "utilization": 61.0, "resets_at": "2026-08-06T00:00:00Z" }
+        }))
+        .unwrap();
+        let windows = build_rate_limits(&usage, false);
+        let labels: Vec<&str> = windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, vec!["Session (5h)", "Weekly (All)", "Opus (7d)"]);
     }
 
     #[test]
