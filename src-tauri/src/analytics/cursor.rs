@@ -449,8 +449,9 @@ fn fetch_cursor_analytics_uncached() -> ProviderAnalytics {
             &serde_json::json!({"teamId": tid}),
             Some(post_headers),
         ) {
+            // get-hard-limit returns dollars, unlike team_usage which is cents
             if let Some(limit) = hl.hard_limit {
-                extra.insert("team_hard_limit_usd".into(), serde_json::json!(limit / 100.0));
+                extra.insert("team_hard_limit_usd".into(), serde_json::json!(limit));
             }
             if let Some(dyn_flag) = hl.is_dynamic_team_limit {
                 extra.insert("team_hard_limit_dynamic".into(), serde_json::json!(dyn_flag));

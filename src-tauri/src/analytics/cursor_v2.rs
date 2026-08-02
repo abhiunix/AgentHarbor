@@ -146,7 +146,7 @@ pub struct UsageEventsResponse {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CursorHardLimit {
-    pub hard_limit: Option<f64>,  // cents
+    pub hard_limit: Option<f64>,  // dollars (unlike team_usage amounts, which are cents)
     pub is_dynamic_team_limit: Option<bool>,
 }
 
