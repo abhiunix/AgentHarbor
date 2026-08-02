@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">AgentHarbor app icon</title>
+  <desc id="desc">A blue-to-cyan letter A combined with an anchor on a rounded dark background.</desc>
+  <defs>
+    <radialGradient id="background" cx="50%" cy="43%" r="76%">
+      <stop offset="0" stop-color="#111A2C"/>
+      <stop offset="0.6" stop-color="#0A111F"/>
+      <stop offset="1" stop-color="#050912"/>
+    </radialGradient>
+    <linearGradient id="mark" gradientUnits="userSpaceOnUse" x1="512" y1="165" x2="512" y2="875">
+      <stop offset="0" stop-color="#3B70F6"/>
+      <stop offset="0.55" stop-color="#3775F2"/>
+      <stop offset="0.76" stop-color="#2AADEB"/>
+      <stop offset="1" stop-color="#28D9E9"/>
+    </linearGradient>
+    <filter id="softGlow" x="-12%" y="-12%" width="124%" height="124%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.20  0 0 0 0 0.48  0 0 0 0 0.96  0 0 0 0.12 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- The corners outside this rounded square remain transparent. -->
+  <rect width="1024" height="1024" rx="205" fill="url(#background)"/>
+
+  <g fill="url(#mark)" filter="url(#softGlow)" shape-rendering="geometricPrecision">
+    <!-- A -->
+    <path d="
+      M 244 592
+      L 408 248
+      C 431 199 463 170 512 170
+      C 561 170 593 199 616 248
+      L 780 592
+      L 689 639
+      L 526 296
+      C 522 287 517 282 512 282
+      C 507 282 502 287 498 296
+      L 335 639
+      Z"/>
+
+    <!-- Anchor body and flukes -->
+    <path d="
+      M 470 566
+      L 554 566
+      L 554 747
+      C 554 763 565 773 580 769
+      C 641 753 696 734 708 712
+      C 714 702 707 694 698 694
+      C 688 694 686 683 695 677
+      L 771 631
+      C 782 625 792 631 792 644
+      L 792 695
+      C 792 744 752 779 710 801
+      C 666 824 610 836 569 852
+      L 512 871
+      L 455 852
+      C 414 836 358 824 314 801
+      C 272 779 232 744 232 695
+      L 232 644
+      C 232 631 242 625 253 631
+      L 329 677
+      C 338 683 336 694 326 694
+      C 317 694 310 702 316 712
+      C 328 734 383 753 444 769
+      C 459 773 470 763 470 747
+      Z"/>
+
+    <!-- Anchor ring -->
+    <path fill-rule="evenodd" clip-rule="evenodd" d="
+      M 512 445
+      A 74 74 0 1 1 512 593
+      A 74 74 0 1 1 512 445
+      Z
+      M 512 485
+      A 34 34 0 1 0 512 553
+      A 34 34 0 1 0 512 485
+      Z"/>
+  </g>
+</svg>
