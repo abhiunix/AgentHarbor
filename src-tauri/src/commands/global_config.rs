@@ -22,6 +22,10 @@ fn claude_memory_path() -> Option<PathBuf> {
 }
 
 fn global_config_path(adapter_id: &str) -> Option<PathBuf> {
+    // Claude Desktop lives under the data dir, not home.
+    if adapter_id == "claude-desktop" {
+        return claude_desktop_config_path();
+    }
     let home = home_dir()?;
     match adapter_id {
         "claude-code" => Some(home.join(".claude.json")),
