@@ -17,6 +17,9 @@ use std::sync::Mutex;
 struct ClaudeCacheEntry {
     data: ProviderAnalytics,
     fetched_at: std::time::Instant,
+    /// Fingerprint of the credential the snapshot was fetched with — a
+    /// mismatch means the user switched accounts and the entry is dead.
+    cred_fp: u64,
 }
 
 struct AccountSnapshot {
@@ -351,6 +354,26 @@ fn try_refresh_access_token() -> Option<String> {
 /// vault, a still-valid in-app token could make `/oauth/*` succeed while the
 /// CLI shows `401 Invalid authentication credentials` for the on-disk token.
 /// So: **credentials file → app vault → refresh.**
+/// Cheap, side-effect-free fingerprint of whichever credential would be used
+/// right now (credentials file first, then the stored token — same order as
+/// `resolve_access_token_silent`, minus writes and refresh). Changes on
+/// logout/login with a different account, so caches can invalidate
+/// immediately instead of serving the previous account's snapshot.
+pub fn current_credential_fingerprint() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    if let Ok(creds) = read_auto_credentials() {
+        if let Some(t) = creds.access_token.filter(|t| !t.is_empty()) {
+            t.hash(&mut h);
+            return h.finish();
+        }
+    }
+    if let Ok(Some(t)) = token_store::get_provider_token("claude-code", "access-token") {
+        t.hash(&mut h);
+    }
+    h.finish()
+}
+
 fn resolve_access_token_silent() -> Result<(String, String), String> {
     // 1. ~/.claude/.credentials.json — same file the CLI uses
     if let Ok(creds) = read_auto_credentials() {
@@ -994,23 +1017,36 @@ fn derive_claude_limit_state(
 /// Results are cached for 300s to avoid repeated API calls (60s when limits
 /// are tight, so the user sees recovery faster after reset).
 pub fn fetch_claude_analytics() -> ProviderAnalytics {
+    let cred_fp = current_credential_fingerprint();
+    let mut switched_account = false;
     if let Ok(guard) = CLAUDE_CACHE.lock() {
         if let Some(ref entry) = *guard {
-            let ttl_secs = if entry
-                .data
-                .limit_state
-                .as_ref()
-                .map(|s| s.prefers_fast_refresh())
-                .unwrap_or(false)
-            {
-                CLAUDE_CACHE_TTL_SHORT_SECS
+            if entry.cred_fp == cred_fp {
+                let ttl_secs = if entry
+                    .data
+                    .limit_state
+                    .as_ref()
+                    .map(|s| s.prefers_fast_refresh())
+                    .unwrap_or(false)
+                {
+                    CLAUDE_CACHE_TTL_SHORT_SECS
+                } else {
+                    CLAUDE_CACHE_TTL_SECS
+                };
+                let effective_ttl = ttl_secs.min(CLAUDE_CACHE_MAX_STALE_SECS);
+                if entry.fetched_at.elapsed().as_secs() < effective_ttl {
+                    return entry.data.clone();
+                }
             } else {
-                CLAUDE_CACHE_TTL_SECS
-            };
-            let effective_ttl = ttl_secs.min(CLAUDE_CACHE_MAX_STALE_SECS);
-            if entry.fetched_at.elapsed().as_secs() < effective_ttl {
-                return entry.data.clone();
+                switched_account = true;
             }
+        }
+    }
+    // The previous account's payload must not bleed into the new account's
+    // limit-state derivation.
+    if switched_account {
+        if let Ok(mut guard) = LAST_ACCOUNT_CACHE.lock() {
+            *guard = None;
         }
     }
 
@@ -1022,6 +1058,7 @@ pub fn fetch_claude_analytics() -> ProviderAnalytics {
             *guard = Some(ClaudeCacheEntry {
                 data: result.clone(),
                 fetched_at: std::time::Instant::now(),
+                cred_fp,
             });
         }
     }

@@ -184,14 +184,21 @@ pub struct ClaudeV2Overview {
 struct CacheEntry<T> {
     data: T,
     fetched_at: Instant,
+    /// Credential fingerprint at fetch time — an account switch invalidates
+    /// the entry immediately (see `claude::current_credential_fingerprint`).
+    cred_fp: u64,
 }
 
 impl<T> CacheEntry<T> {
     fn new(data: T) -> Self {
-        Self { data, fetched_at: Instant::now() }
+        Self {
+            data,
+            fetched_at: Instant::now(),
+            cred_fp: claude::current_credential_fingerprint(),
+        }
     }
-    fn is_valid(&self, ttl_seconds: u64) -> bool {
-        self.fetched_at.elapsed() < Duration::from_secs(ttl_seconds)
+    fn is_valid(&self, ttl_seconds: u64, current_fp: u64) -> bool {
+        self.cred_fp == current_fp && self.fetched_at.elapsed() < Duration::from_secs(ttl_seconds)
     }
 }
 
@@ -439,10 +446,7 @@ fn full_corpus_activity_stats(
     }
     let records = usage::read_project_usage_files_with_mtime_floor(None).unwrap_or_default();
     let derived = derive_session_stats_from_records(&records, cache)?;
-    *ACTIVITY_STATS.lock().unwrap() = Some(CacheEntry {
-        data: derived.clone(),
-        fetched_at: Instant::now(),
-    });
+    *ACTIVITY_STATS.lock().unwrap() = Some(CacheEntry::new(derived.clone()));
     Some(derived)
 }
 
@@ -997,9 +1001,10 @@ fn build_message_log(page: u32, page_size: u32, project_filter: Option<&str>) ->
 pub async fn get_claude_v2_overview(time_range: String, force_refresh: bool) -> Result<ClaudeV2Overview, String> {
     // Fast path: return cached data without blocking
     if !force_refresh {
+        let fp = claude::current_credential_fingerprint();
         if let Ok(cache) = CACHE.lock() {
             if let Some(entry) = cache.overview.get(&time_range) {
-                if entry.is_valid(cache.ttl_seconds) {
+                if entry.is_valid(cache.ttl_seconds, fp) {
                     return Ok(entry.data.clone());
                 }
             }
@@ -1028,9 +1033,10 @@ pub async fn get_claude_v2_token_timeseries(
     let key = format!("{}:{}", time_range, project_filter.as_deref().unwrap_or("all"));
 
     if !force_refresh {
+        let fp = claude::current_credential_fingerprint();
         if let Ok(cache) = CACHE.lock() {
             if let Some(entry) = cache.token_ts.get(&key) {
-                if entry.is_valid(cache.ttl_seconds) {
+                if entry.is_valid(cache.ttl_seconds, fp) {
                     return Ok(entry.data.clone());
                 }
             }
@@ -1056,9 +1062,10 @@ pub async fn get_claude_v2_model_timeseries(
     force_refresh: bool,
 ) -> Result<Vec<ModelTimePoint>, String> {
     if !force_refresh {
+        let fp = claude::current_credential_fingerprint();
         if let Ok(cache) = CACHE.lock() {
             if let Some(entry) = cache.model_ts.get(&time_range) {
-                if entry.is_valid(cache.ttl_seconds) {
+                if entry.is_valid(cache.ttl_seconds, fp) {
                     return Ok(entry.data.clone());
                 }
             }
