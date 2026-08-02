@@ -11,10 +11,6 @@ pub struct GeneralSettings {
     pub launch_at_login: bool,
     pub username: String,
     #[serde(default)]
-    pub show_in_menu_bar: bool,
-    #[serde(default)]
-    pub keep_running_on_close: bool,
-    #[serde(default)]
     pub author_id: Option<String>,
 }
 
@@ -24,8 +20,6 @@ impl Default for GeneralSettings {
             theme: "dark".to_string(),
             launch_at_login: true,
             username: "user".to_string(),
-            show_in_menu_bar: true,
-            keep_running_on_close: true,
             author_id: None,
         }
     }
@@ -294,8 +288,6 @@ mod tests {
         let settings = AppSettings::default();
         assert_eq!(settings.general.theme, "dark");
         assert!(settings.general.launch_at_login);
-        assert!(settings.general.show_in_menu_bar);
-        assert!(settings.general.keep_running_on_close);
         assert_eq!(settings.deploy.default_strategy, "merge");
         assert!(settings.deploy.create_backups);
     }

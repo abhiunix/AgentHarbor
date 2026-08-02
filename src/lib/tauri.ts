@@ -207,8 +207,6 @@ export interface GeneralSettings {
   theme: string;
   launch_at_login: boolean;
   username: string;
-  show_in_menu_bar: boolean;
-  keep_running_on_close: boolean;
 }
 
 export interface RegistrySettings {
@@ -543,9 +541,6 @@ export async function validateImportData(jsonString: string): Promise<ExportData
   return invoke<ExportData>("validate_import_data", { jsonString });
 }
 
-export async function updateTrayVisibility(show: boolean): Promise<void> {
-  return invoke<void>("update_tray_visibility", { show });
-}
 
 export interface DriftFile {
   path: string;

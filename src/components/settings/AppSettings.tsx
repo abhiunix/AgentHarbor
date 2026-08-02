@@ -9,7 +9,6 @@ import {
   updateAnalyticsSettings,
   syncRegistryNow,
   getSyncStatus,
-  updateTrayVisibility,
   startRegistryPolling,
   stopRegistryPolling,
   type AppSettings as AppSettingsType,
@@ -391,27 +390,6 @@ export function AppSettings() {
           <Toggle
             checked={settings.general.launch_at_login}
             onChange={(checked) => handleGeneralChange({ launch_at_login: checked })}
-          />
-        </SettingRow>
-        <SettingRow
-          label="Show in Menu Bar"
-          description="Display AgentHarbor icon in the system tray"
-        >
-          <Toggle
-            checked={settings.general.show_in_menu_bar}
-            onChange={async (checked) => {
-              await handleGeneralChange({ show_in_menu_bar: checked });
-              await updateTrayVisibility(checked);
-            }}
-          />
-        </SettingRow>
-        <SettingRow
-          label="Keep Running on Close"
-          description="Hide window instead of quitting when closing (requires system tray)"
-        >
-          <Toggle
-            checked={settings.general.keep_running_on_close}
-            onChange={(checked) => handleGeneralChange({ keep_running_on_close: checked })}
           />
         </SettingRow>
       </SectionCard>

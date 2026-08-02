@@ -170,12 +170,6 @@ fn greet(name: &str) -> String {
 }
 
 
-#[tauri::command]
-fn update_tray_visibility(app: tauri::AppHandle, show: bool) -> Result<(), String> {
-    tray::setup_tray(&app, show).map_err(|e| e.to_string())
-}
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// `tauri dev` runs the bare binary outside an .app bundle, so macOS falls back
 /// to the generic exec icon in the Dock. Set it from the bundled PNG at runtime.
 /// Release builds read the icon from the bundle and must not carry this.
@@ -194,6 +188,7 @@ fn set_dev_dock_icon() {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -207,21 +202,17 @@ pub fn run() {
             #[cfg(all(debug_assertions, target_os = "macos"))]
             set_dev_dock_icon();
 
-            let settings = get_settings();
-            if settings.general.show_in_menu_bar {
-                let _ = tray::setup_tray(app.handle(), true);
-            }
+            // The tray is always present; the main window detaches from it on close.
+            let _ = tray::setup_tray(app.handle(), true);
             
             let handle = app.handle().clone();
             let main_window = app.get_webview_window("main");
             if let Some(window) = main_window {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        // Probe the real tray state rather than settings.show_in_menu_bar:
-                        // setup_tray latches on TRAY_CREATED and never tears the tray down,
-                        // so the setting can be false while the tray is still alive.
-                        let tray_alive = handle.tray_by_id("main-tray").is_some();
-                        if tray_alive || get_settings().general.keep_running_on_close {
+                        // Probe the real tray state: if tray setup ever failed there is
+                        // nothing left to reopen from, so let the close become a quit.
+                        if handle.tray_by_id("main-tray").is_some() {
                             api.prevent_close();
                             if let Some(w) = handle.get_webview_window("main") {
                                 let _ = w.hide();
@@ -297,7 +288,6 @@ pub fn run() {
             export_data,
             import_data,
             validate_import_data,
-            update_tray_visibility,
             detect_drift,
             accept_drift,
             restore_drift,
