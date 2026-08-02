@@ -956,6 +956,13 @@ export function TrayProviderCard({
                 {provider.plan}
               </span>
             )}
+            {provider.provider_id === "claude-code" &&
+              ((provider.extra?.active_agent_count as number) ?? 0) > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap bg-emerald-500/20 text-emerald-400">
+                  {provider.extra.active_agent_count as number} active agent
+                  {(provider.extra.active_agent_count as number) !== 1 ? "s" : ""}
+                </span>
+              )}
           </div>
           {provider.email && (
             <div className="text-[10px] text-[#9394a1] truncate">
