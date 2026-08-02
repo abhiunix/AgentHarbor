@@ -44,13 +44,11 @@ After every deploy AgentHarbor writes (or updates) a `<!-- AgentHarbor: Deployed
 
 ## Presets
 
-Presets live in `~/Library/Application Support/com.agentharbor.app/presets.json` and ship with two bundled examples (**Full-Stack Web**, **Data Science**).
+Presets live in `~/Library/Application Support/com.agentharbor.app/presets.json`.
 
 - **Save as preset** — from the multi-select bar in Library or from any capability detail.
 - **Edit preset** — `+ Add Capabilities` and `✕ Remove` inline.
 - **Deploy preset** — fires the deploy wizard with the preset's capabilities pre-selected.
-
-Bundled presets are read-only; deleting them is disabled.
 
 ## Backups & undo
 

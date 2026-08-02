@@ -16,39 +16,6 @@ fn get_presets_file_path() -> PathBuf {
     crate::utils::paths::app_data_dir().join("presets.json")
 }
 
-fn get_bundled_presets() -> Vec<Preset> {
-    vec![
-        Preset {
-            id: "bundled/full-stack-web".to_string(),
-            name: "Full-Stack Web".to_string(),
-            description: "Complete setup for full-stack web development with React, TypeScript, and Git workflows.".to_string(),
-            capability_ids: vec![
-                "community/github-mcp".to_string(),
-                "community/filesystem-mcp".to_string(),
-                "community/ts-strict-style".to_string(),
-                "community/react-best-practices".to_string(),
-                "community/react-component-gen".to_string(),
-                "community/pre-commit-lint".to_string(),
-            ],
-            tags: vec!["web".to_string(), "react".to_string(), "typescript".to_string()],
-            is_bundled: true,
-        },
-        Preset {
-            id: "bundled/data-science".to_string(),
-            name: "Data Science".to_string(),
-            description: "Tools for data science workflows with database access and Python best practices.".to_string(),
-            capability_ids: vec![
-                "community/postgres-mcp".to_string(),
-                "community/filesystem-mcp".to_string(),
-                "community/python-pep8".to_string(),
-                "community/api-scaffold".to_string(),
-            ],
-            tags: vec!["data".to_string(), "python".to_string(), "database".to_string()],
-            is_bundled: true,
-        },
-    ]
-}
-
 fn load_user_presets() -> Vec<Preset> {
     let path = get_presets_file_path();
     if !path.exists() {
@@ -84,9 +51,7 @@ fn save_user_presets(presets: &[Preset]) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_presets() -> Vec<Preset> {
-    let mut presets = get_bundled_presets();
-    presets.extend(load_user_presets());
-    presets
+    load_user_presets()
 }
 
 #[tauri::command]
@@ -175,29 +140,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bundled_presets() {
-        let presets = get_bundled_presets();
-        assert_eq!(presets.len(), 2);
-        assert!(presets.iter().all(|p| p.is_bundled));
-    }
-
-    #[test]
-    fn test_full_stack_web_preset() {
-        let presets = get_bundled_presets();
-        let fsweb = presets.iter().find(|p| p.id == "bundled/full-stack-web");
-        assert!(fsweb.is_some());
-        let preset = fsweb.unwrap();
-        assert_eq!(preset.name, "Full-Stack Web");
-        assert!(preset.capability_ids.contains(&"community/github-mcp".to_string()));
-    }
-
-    #[test]
-    fn test_data_science_preset() {
-        let presets = get_bundled_presets();
-        let ds = presets.iter().find(|p| p.id == "bundled/data-science");
-        assert!(ds.is_some());
-        let preset = ds.unwrap();
-        assert_eq!(preset.name, "Data Science");
-        assert!(preset.capability_ids.contains(&"community/postgres-mcp".to_string()));
+    fn no_presets_without_user_file() {
+        // Bundled sample presets were removed: their hardcoded slug IDs
+        // (community/github-mcp, ...) predate the registry's uuid/hash ID
+        // scheme and resolved to nothing.
+        assert!(get_presets().is_empty() || get_presets().iter().all(|p| !p.is_bundled));
     }
 }
