@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppLayout } from "./components/layout/AppLayout";
 import { TestBridge } from "./components/common/TestBridge";
@@ -185,11 +186,11 @@ function NavigateListener() {
     let cancelled = false;
     let unlistenFn: (() => void) | null = null;
 
-    const unlistenPromise = listen<string>("navigate-to", (event) => {
+    const unlistenPromise = listen<string>("navigate-to", async (event) => {
       if (!cancelled && event.payload) {
         navigate(event.payload);
-        // Also show/focus the main window
-        getCurrentWindow().show().catch(() => {});
+        // Restores the macOS activation policy too, which a plain show() can't do
+        await invoke("show_main_window").catch(() => {});
         getCurrentWindow().setFocus().catch(() => {});
       }
     });

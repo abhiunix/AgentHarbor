@@ -18,24 +18,10 @@ fn toggle_tray_popover(app: &AppHandle<Wry>, tray: &TrayIcon<Wry>) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            // Remember whether the main window was visible before we activate the app
-            let main_was_visible = app
-                .get_webview_window("main")
-                .and_then(|w| w.is_visible().ok())
-                .unwrap_or(false);
-
             position_popover_near_tray(&window, tray);
             let _ = window.show();
             let _ = window.set_focus();
             let _ = window.emit("tray-popover-opened", ());
-
-            // Showing/focusing the popover activates the macOS app, which can
-            // bring the main window forward. If it wasn't visible before, hide it.
-            if !main_was_visible {
-                if let Some(main) = app.get_webview_window("main") {
-                    let _ = main.hide();
-                }
-            }
         }
     }
 }
@@ -104,14 +90,24 @@ fn position_popover_near_tray(window: &tauri::WebviewWindow<Wry>, tray: &TrayIco
     let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
 }
 
-/// Tauri command: show and focus the main application window.
-/// Called from the tray popover's "Show AgentHarbor" button.
-#[tauri::command]
-pub fn show_main_window(app: AppHandle) {
+/// Restore the main window: back into the Dock/Cmd-Tab on macOS, then show + focus.
+/// Every reopen path (tray menu, popover, frontend navigate-to) must go through
+/// here so a window detached by ✕ comes back fully.
+pub fn restore_main_window(app: &AppHandle<Wry>) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+/// Tauri command: show and focus the main application window.
+/// Called from the tray popover's "Show AgentHarbor" button.
+#[tauri::command]
+pub fn show_main_window(app: AppHandle) {
+    restore_main_window(&app);
 }
 
 /// Tauri command: quit the app from tray popover actions.
@@ -179,15 +175,11 @@ pub fn setup_tray(app: &AppHandle<Wry>, show: bool) -> tauri::Result<()> {
                     app.exit(0);
                 }
                 "open" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    restore_main_window(app);
                 }
                 "deploy" => {
+                    restore_main_window(app);
                     if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
                         let _ = window.emit("open-deploy-wizard", ());
                     }
                 }
@@ -197,9 +189,8 @@ pub fn setup_tray(app: &AppHandle<Wry>, show: bool) -> tauri::Result<()> {
                     }
                 }
                 "recommendations" => {
+                    restore_main_window(app);
                     if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
                         let _ = window.emit("navigate-to", "/recommendations");
                     }
                 }
