@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,6 +204,107 @@ pub fn decode_claude_project_path(dir_name: &str) -> String {
     format!("/{}", s.replace('-', "/"))
 }
 
+lazy_static::lazy_static! {
+    /// Encoded project dir -> real cwd. A dir's cwd never changes, so a permanent
+    /// per-process memo is safe and keeps the JSONL probe off the hot path.
+    static ref PROJECT_PATH_CACHE: Mutex<HashMap<PathBuf, Option<String>>> =
+        Mutex::new(HashMap::new());
+}
+
+/// How many leading lines of a transcript to scan before giving up on it: the first
+/// lines ("mode", "file-history-snapshot", …) carry no `cwd`.
+const CWD_SCAN_MAX_LINES: usize = 50;
+/// How many transcripts (newest first) to probe per project dir.
+const CWD_SCAN_MAX_FILES: usize = 2;
+
+/// Resolve a Claude Code project dir to the absolute cwd it was recorded for.
+///
+/// Claude encodes the cwd by replacing every `/` with `-`, which is lossy for folder
+/// names that contain dashes. The transcripts inside the dir carry the original `cwd`,
+/// so prefer that; fall back to a filesystem-validated decode, then the lossy decode.
+pub fn resolve_project_dir_path(encoded_dir: &Path) -> Option<String> {
+    if let Ok(cache) = PROJECT_PATH_CACHE.lock() {
+        if let Some(hit) = cache.get(encoded_dir) {
+            return hit.clone();
+        }
+    }
+    let resolved = compute_project_dir_path(encoded_dir);
+    if let Ok(mut cache) = PROJECT_PATH_CACHE.lock() {
+        cache.insert(encoded_dir.to_path_buf(), resolved.clone());
+    }
+    resolved
+}
+
+/// Record a cwd observed while streaming a transcript, upgrading a dir that the
+/// bounded probe could not resolve. Never overwrites an already-resolved entry.
+fn seed_project_dir_path(encoded_dir: &Path, cwd: &str) {
+    if cwd.is_empty() {
+        return;
+    }
+    if let Ok(mut cache) = PROJECT_PATH_CACHE.lock() {
+        match cache.get(encoded_dir) {
+            Some(Some(_)) => {}
+            _ => {
+                cache.insert(encoded_dir.to_path_buf(), Some(cwd.to_string()));
+            }
+        }
+    }
+}
+
+fn compute_project_dir_path(encoded_dir: &Path) -> Option<String> {
+    if let Some(cwd) = probe_cwd_from_transcripts(encoded_dir) {
+        return Some(cwd);
+    }
+    let dir_name = encoded_dir.file_name().and_then(|n| n.to_str())?;
+    if dir_name.is_empty() {
+        return None;
+    }
+    let fs_decoded = super::transcripts::decode_project_path(dir_name);
+    if Path::new(&fs_decoded).is_dir() {
+        return Some(fs_decoded);
+    }
+    let lossy = decode_claude_project_path(dir_name);
+    if lossy.is_empty() {
+        None
+    } else {
+        Some(lossy)
+    }
+}
+
+fn probe_cwd_from_transcripts(dir: &Path) -> Option<String> {
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            Some((modified, e.path()))
+        })
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files
+        .into_iter()
+        .take(CWD_SCAN_MAX_FILES)
+        .find_map(|(_, path)| scan_file_for_cwd(&path))
+}
+
+fn scan_file_for_cwd(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    for line in reader.lines().take(CWD_SCAN_MAX_LINES).map_while(Result::ok) {
+        let json: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(cwd) = json.get("cwd").and_then(|v| v.as_str()) {
+            if !cwd.is_empty() {
+                return Some(cwd.to_string());
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProjectWithMcp {
     pub path: String,
@@ -231,10 +334,10 @@ pub fn list_projects_with_mcp() -> Result<Vec<ProjectWithMcp>, String> {
         if dir_name.is_empty() || dir_name.starts_with('.') {
             continue;
         }
-        let decoded = decode_claude_project_path(&dir_name);
-        if decoded.len() < 2 {
-            continue;
-        }
+        let decoded = match resolve_project_dir_path(&path) {
+            Some(d) if d.len() >= 2 => d,
+            _ => continue,
+        };
         let name = std::path::Path::new(&decoded)
             .file_name()
             .and_then(|n| n.to_str())
@@ -287,9 +390,7 @@ pub fn read_project_usage_files_with_mtime_floor(
                     }
                     let project_path = path
                         .parent()
-                        .and_then(|p| p.file_name())
-                        .and_then(|n| n.to_str())
-                        .map(|dir_name| decode_claude_project_path(dir_name))
+                        .and_then(resolve_project_dir_path)
                         .filter(|s| !s.is_empty());
                     if let Err(e) = read_jsonl_file(path, project_path, &mut records) {
                         eprintln!("Warning: failed to read {}: {}", path.display(), e);
@@ -313,6 +414,7 @@ fn read_jsonl_file(
     // We keep only the first occurrence per (message.id, requestId) pair.
     // Matches CodexBar's deduplication logic.
     let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seeded = project_path.is_some();
     for line in reader.lines() {
         let line = line.map_err(|e| e.to_string())?;
         let line = line.trim();
@@ -321,6 +423,16 @@ fn read_jsonl_file(
         }
         // Check for dedup key before full extraction
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+            // Every line is parsed anyway — seed the path memo at no extra parse cost
+            // for dirs whose bounded probe came up empty.
+            if !seeded {
+                if let (Some(dir), Some(cwd)) =
+                    (path.parent(), json.get("cwd").and_then(|v| v.as_str()))
+                {
+                    seed_project_dir_path(dir, cwd);
+                    seeded = true;
+                }
+            }
             let message_id = json
                 .get("message")
                 .and_then(|m| m.get("id"))
@@ -340,4 +452,93 @@ fn read_jsonl_file(
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Mirror Claude's encoding: every "/" of the cwd becomes "-".
+    fn encode(real: &Path) -> String {
+        real.to_string_lossy().replace('/', "-")
+    }
+
+    fn make_project_dir(root: &Path, real: &Path, lines: &str) -> PathBuf {
+        let dir = root.join("projects").join(encode(real));
+        fs::create_dir_all(&dir).unwrap();
+        if !lines.is_empty() {
+            fs::write(dir.join("session.jsonl"), lines).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn resolves_dashed_folder_name_from_cwd() {
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("incometax-24-25");
+        fs::create_dir_all(&real).unwrap();
+        let lines = format!(
+            "{{\"type\":\"user\",\"cwd\":\"{}\",\"uuid\":\"u1\"}}\n",
+            real.display()
+        );
+        let dir = make_project_dir(tmp.path(), &real, &lines);
+
+        assert_eq!(
+            resolve_project_dir_path(&dir).as_deref(),
+            Some(real.to_string_lossy().as_ref())
+        );
+        // Lossy decode is what this fixes: it would drop the dashed segments.
+        assert_ne!(
+            decode_claude_project_path(dir.file_name().unwrap().to_str().unwrap()),
+            real.to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn finds_cwd_after_leading_lines_without_it() {
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("agentharbor-app");
+        fs::create_dir_all(&real).unwrap();
+        let lines = format!(
+            "{{\"type\":\"mode\"}}\n{{\"type\":\"file-history-snapshot\",\"messageId\":\"m1\"}}\nnot json\n{{\"type\":\"user\",\"cwd\":\"{}\"}}\n",
+            real.display()
+        );
+        let dir = make_project_dir(tmp.path(), &real, &lines);
+
+        assert_eq!(
+            resolve_project_dir_path(&dir).as_deref(),
+            Some(real.to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn falls_back_to_fs_validated_decode_without_cwd() {
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("work").join("my-app-name");
+        fs::create_dir_all(&real).unwrap();
+        let dir = make_project_dir(tmp.path(), &real, "{\"type\":\"mode\"}\n");
+
+        assert_eq!(
+            resolve_project_dir_path(&dir).as_deref(),
+            Some(real.to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn memoizes_resolution_per_dir() {
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("cached-project-name");
+        fs::create_dir_all(&real).unwrap();
+        let lines = format!("{{\"cwd\":\"{}\"}}\n", real.display());
+        let dir = make_project_dir(tmp.path(), &real, &lines);
+
+        let first = resolve_project_dir_path(&dir);
+        assert_eq!(first.as_deref(), Some(real.to_string_lossy().as_ref()));
+
+        // Remove every source of truth: only the memo can still answer.
+        fs::remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&real).unwrap();
+        assert_eq!(resolve_project_dir_path(&dir), first);
+    }
 }

@@ -22,7 +22,9 @@ pub struct TranscriptMessage {
     pub line_index: usize,
 }
 
-fn decode_project_path(encoded_dir_name: &str) -> String {
+/// Decode a Claude/Cursor project dir name by brute-forcing how the dash-joined
+/// segments recombine, validating each candidate against the filesystem.
+pub(crate) fn decode_project_path(encoded_dir_name: &str) -> String {
     let clean = encoded_dir_name.trim_start_matches('-');
     if clean.is_empty() {
         return "/".to_string();
