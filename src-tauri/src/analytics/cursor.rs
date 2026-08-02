@@ -21,7 +21,7 @@ lazy_static::lazy_static! {
     static ref CURSOR_CACHE: Mutex<Option<CursorCacheEntry>> = Mutex::new(None);
 }
 
-const CURSOR_CACHE_TTL_SECS: u64 = 300;
+const CURSOR_CACHE_TTL_SECS: u64 = 60;
 
 // ── API response types ──────────────────────────────────────────────────────
 

@@ -55,7 +55,7 @@ Tools like [ccusage](https://github.com/ryoppippi/ccusage) and [Claude Code Usag
 
 ## Features
 
-- **Live tray analytics** — menu-bar metric updates every ~120 s: session percentage, monthly spend, quota bars — whichever is most relevant for each provider.
+- **Live tray analytics** — menu-bar metric updates every ~60 s: session percentage, monthly spend, quota bars — whichever is most relevant for each provider.
 - **Limit-state ladder** — tracks `Unauthenticated → ApiDisabled → BillablePaused → SubscriptionIssue → RateLimited → Reached → Approaching → Healthy` and surfaces native macOS notifications on transitions.
 - **Deploy wizard** — syntax-highlighted split/unified diffs, per-file `Replace / Merge / Append` strategy, automatic backups before every write.
 - **Undo Deploy** — one click restores the pre-deploy snapshot from the backup store.

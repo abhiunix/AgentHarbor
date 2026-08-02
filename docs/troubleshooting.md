@@ -24,7 +24,7 @@ Fix:
 claude login            # writes a fresh ~/.claude/.credentials.json
 ```
 
-Then click **Refresh** in the AgentHarbor tray, or wait ~120 s. AgentHarbor reads that file first, ahead of its own vault, so it always matches what `claude` itself uses.
+Then click **Refresh** in the AgentHarbor tray, or wait ~60 s. AgentHarbor reads that file first, ahead of its own vault, so it always matches what `claude` itself uses.
 
 ## Tray shows "rate limited" but the CLI says "out of credits"
 

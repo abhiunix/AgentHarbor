@@ -36,7 +36,7 @@ lazy_static::lazy_static! {
     static ref LAST_ACCOUNT_CACHE: Mutex<Option<AccountSnapshot>> = Mutex::new(None);
 }
 
-const CLAUDE_CACHE_TTL_SECS: u64 = 300; // 5 minutes
+const CLAUDE_CACHE_TTL_SECS: u64 = 60;
 const CLAUDE_CACHE_TTL_SHORT_SECS: u64 = 60; // when approaching / reached limits
 /// Never serve Claude API-backed analytics older than this — limits how long
 /// we show a "healthy" snapshot after OAuth tokens are rotated or expired.
