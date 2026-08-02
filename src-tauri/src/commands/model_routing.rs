@@ -5,7 +5,7 @@
 //! with the immediately-preceding user prompt text (used as the row preview in the UI).
 
 use crate::analytics::cost_engine::{estimate_cost, TokensForCost};
-use crate::commands::usage::decode_claude_project_path;
+use crate::commands::usage::resolve_project_dir_path;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -273,9 +273,7 @@ pub async fn analyze_model_routing(days: Option<u32>) -> Result<ModelRoutingAnal
                 }
                 let project = path
                     .parent()
-                    .and_then(|p| p.file_name())
-                    .and_then(|n| n.to_str())
-                    .map(decode_claude_project_path)
+                    .and_then(resolve_project_dir_path)
                     .filter(|s| !s.is_empty());
 
                 let mut ctx = FileWalkCtx { cutoff, project, out: &mut messages };

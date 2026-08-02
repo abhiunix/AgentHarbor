@@ -625,53 +625,17 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
         g
     };
 
-    // Build project breakdown
-    // Project paths are decoded from Claude's encoding where ALL dashes become slashes.
-    // So "agentdock-project" becomes "agentdock/project" and file_name() = "project" (wrong).
-    // Fix: scan ~/.claude/projects/ dirs, match by decoded path, use raw dir name for display.
-    let home_dir = dirs::home_dir().unwrap_or_default();
-    let projects_dir = home_dir.join(".claude").join("projects");
-    let raw_dir_map: HashMap<String, String> = if let Ok(entries) = std::fs::read_dir(&projects_dir) {
-        entries.flatten().filter_map(|e| {
-            let raw = e.file_name().to_string_lossy().to_string();
-            let decoded = usage::decode_claude_project_path(&raw);
-            if decoded.len() > 1 { Some((decoded, raw)) } else { None }
-        }).collect()
-    } else { HashMap::new() };
-
+    // Build project breakdown — records carry the real cwd, so the display name is
+    // just its last component.
     let project_breakdown: Vec<ProjectStat> = if strip_breakdowns {
         vec![]
     } else {
         let mut p: Vec<ProjectStat> = project_map.into_iter()
             .map(|(path, (count, tokens, cost))| {
-                // Get display name from raw dir name (preserves original dashes)
-                let name = if let Some(raw) = raw_dir_map.get(&path) {
-                    // Raw: "-Users-abhijeetsingh-Downloads-projects-agentdock-project"
-                    // We want the last meaningful folder name from the raw encoded path.
-                    // The raw name has the real path with / replaced by -.
-                    // Split at known prefixes to get the project-specific part.
-                    let trimmed = raw.trim_start_matches('-');
-                    // Find the deepest known parent dir pattern
-                    let candidates = ["-Downloads-projects-", "-Downloads-", "-projects-", "-Desktop-", "-Documents-"];
-                    let mut project_part = trimmed;
-                    for prefix in candidates {
-                        if let Some(pos) = trimmed.find(prefix) {
-                            project_part = &trimmed[pos + prefix.len()..];
-                            break;
-                        }
-                    }
-                    if project_part.is_empty() {
-                        // Fallback: take everything after the username
-                        let parts: Vec<&str> = trimmed.splitn(4, '-').collect();
-                        if parts.len() >= 4 { parts[3..].join("-") } else { trimmed.to_string() }
-                    } else {
-                        project_part.to_string()
-                    }
-                } else {
-                    // No raw dir found — use last path component
-                    std::path::Path::new(&path).file_name()
-                        .and_then(|n| n.to_str()).unwrap_or("unknown").to_string()
-                };
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone());
                 ProjectStat { project_path: path, project_name: name, message_count: count, total_tokens: tokens, estimated_cost_usd: cost }
             })
             .collect();
