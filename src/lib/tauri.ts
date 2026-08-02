@@ -1682,43 +1682,6 @@ export async function deleteDebate(id: string): Promise<void> {
   return invoke<void>("delete_debate", { id });
 }
 
-// --- AI Recommendations ---
-
-export interface Recommendation {
-  id: string;
-  action: string;
-  capability_id: string | null;
-  capability_name: string | null;
-  capability_type: string | null;
-  target_adapter_id: string | null;
-  target_adapter_name: string | null;
-  reason: string;
-  priority: string;
-}
-
-export interface RecommendationsPayload {
-  recommendations: Recommendation[];
-  generated_at: string;
-  from_cache: boolean;
-  summary: string;
-}
-
-export async function getRecommendations(forceRefresh: boolean): Promise<RecommendationsPayload> {
-  return invoke<RecommendationsPayload>("get_recommendations", { forceRefresh });
-}
-
-export async function getCachedRecommendationsCount(): Promise<number> {
-  return invoke<number>("get_cached_recommendations_count");
-}
-
-export async function hasAnthropicApiKey(): Promise<boolean> {
-  return invoke<boolean>("has_anthropic_api_key");
-}
-
-export async function clearRecommendationsCache(): Promise<void> {
-  return invoke<void>("clear_recommendations_cache");
-}
-
 // --- Token Optimizer: Model Routing ---
 
 export interface ModelRoutingMessage {
