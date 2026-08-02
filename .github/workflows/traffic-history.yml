@@ -1,0 +1,28 @@
+name: Collect traffic history
+
+on:
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect and render
+        env:
+          TRAFFIC_PAT: ${{ secrets.TRAFFIC_PAT }}
+        run: node scripts/traffic-history.mjs
+      - name: Commit if changed
+        run: |
+          if ! git diff --quiet traffic/ || [ -n "$(git status --porcelain traffic/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add traffic/
+            git commit -m "chore: collect traffic snapshot [skip ci]"
+            git push
+          fi
