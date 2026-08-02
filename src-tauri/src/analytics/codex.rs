@@ -498,7 +498,25 @@ pub fn fetch_codex_analytics() -> ProviderAnalytics {
         }
     }
 
-    let result = fetch_codex_analytics_uncached();
+    let mut result = fetch_codex_analytics_uncached();
+
+    // A transient WHAM failure still reports connected (local data exists) but
+    // with empty rate_limits. Caching that blanks the popover bars for a full
+    // TTL while the menu-bar title may show the previous cycle's percentage.
+    // Instead, graft the last good windows into the result and keep the old
+    // cache entry so the next cycle retries.
+    let wham_failed = result.status.error.is_some() && result.rate_limits.is_empty();
+    if wham_failed {
+        if let Ok(guard) = CACHE.lock() {
+            if let Some(ref prev) = *guard {
+                if !prev.data.rate_limits.is_empty() {
+                    result.rate_limits = prev.data.rate_limits.clone();
+                    result.limit_state = prev.data.limit_state.clone();
+                }
+            }
+        }
+        return result;
+    }
 
     // Cache successful results (connected = true)
     if result.status.connected {
