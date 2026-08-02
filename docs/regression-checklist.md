@@ -167,6 +167,9 @@ This runs `npm run build` (B2) then `cargo test` in `src-tauri` (B1). Both must 
 | T3   | Tray – Sync       |           |          |        |
 | T4   | Close behavior    |           |          |        |
 | T5   | Quit              |           |          |        |
+| T6   | ✕ detaches window |           |          | ✕ hides the window and drops the Dock icon (macOS); tray menu → Open restores window + Dock icon with route/state preserved |
+| T7   | ✕ then tray Quit  |           |          | After ✕, tray right-click → Quit AgentHarbor exits the process (no orphan in Activity Monitor) |
+| T8   | Popover no raise  |           |          | With the main window hidden, clicking the tray icon opens the popover without flashing or raising the main window |
 
 ---
 

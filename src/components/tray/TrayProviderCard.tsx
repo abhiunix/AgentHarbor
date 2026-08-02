@@ -1,5 +1,6 @@
 import { getAdapterIconImg } from "../../lib/adapterPlugins";
 import { emitTo } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { LimitStateBanner, type LimitState } from "../analytics/LimitStateBanner";
@@ -264,6 +265,9 @@ function DisconnectedCard({
     }
     const route = PROVIDER_ROUTES[provider.provider_id];
     if (route) {
+      try {
+        await invoke("show_main_window");
+      } catch { /* ignore */ }
       await emitTo("main", "navigate-to", route);
     }
     try {
