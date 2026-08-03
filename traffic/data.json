@@ -137,10 +137,84 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-08-03": [
+      {
+        "referrer": "t.co",
+        "count": 26,
+        "uniques": 5
+      },
+      {
+        "referrer": "github.com",
+        "count": 12,
+        "uniques": 5
+      },
+      {
+        "referrer": "reddit.com",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "referrer": "Google",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "paths": {
     "2026-08-02": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 50,
+        "uniques": 19
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulls",
+        "count": 4,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.0.132",
+        "count": 4,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulse",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/27",
+        "count": 3,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/tree/349ee947e8a8b585a3bf70d1f49b0193bd8be3c9/_downloads/070179efc13bd796c5dd4af7bf52d5b9",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/tree/main/docs/assets",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/actions/runs/30618984703",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/actions/workflows/ci.yml",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/349ee947e8a8b585a3bf70d1f49b0193bd8be3c9/_downloads/070179efc13bd796c5dd4af7bf52d5b9/intro.ipynb",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-08-03": [
       {
         "path": "/abhiunix/AgentHarbor",
         "count": 50,
@@ -198,10 +272,15 @@
       "stars": 9,
       "forks": 1,
       "issues": 8
+    },
+    "2026-08-03": {
+      "stars": 9,
+      "forks": 1,
+      "issues": 8
     }
   },
   "window": {
-    "asOf": "2026-08-02",
+    "asOf": "2026-08-03",
     "views": {
       "count": 103,
       "uniques": 19
