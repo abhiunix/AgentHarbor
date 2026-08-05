@@ -1,18 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" width="720" height="320" role="img" aria-label="Cumulative GitHub stars for abhiunix/AgentHarbor: 9 as of Aug 4">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" width="720" height="320" role="img" aria-label="Cumulative GitHub stars for abhiunix/AgentHarbor: 10 as of Aug 5">
   <rect width="720" height="320" fill="#1a1a19" rx="6"/>
   <g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
   <line x1="40" y1="284.0" x2="672" y2="284.0" stroke="#2c2c2a" stroke-width="1"/>
   <text x="32" y="287.5" text-anchor="end" fill="#898781" font-size="11">0</text>
-  <line x1="40" y1="144.4" x2="672" y2="144.4" stroke="#2c2c2a" stroke-width="1"/>
-  <text x="32" y="147.9" text-anchor="end" fill="#898781" font-size="11">6</text>
+  <line x1="40" y1="156.0" x2="672" y2="156.0" stroke="#2c2c2a" stroke-width="1"/>
+  <text x="32" y="159.5" text-anchor="end" fill="#898781" font-size="11">6</text>
   <line x1="40" y1="28.0" x2="672" y2="28.0" stroke="#2c2c2a" stroke-width="1"/>
-  <text x="32" y="31.5" text-anchor="end" fill="#898781" font-size="11">11</text>
+  <text x="32" y="31.5" text-anchor="end" fill="#898781" font-size="11">12</text>
   <line x1="40" y1="284" x2="672" y2="284" stroke="#383835" stroke-width="1"/>
   <text x="40.0" y="308" text-anchor="start" fill="#898781" font-size="11">May 21</text>
-  <text x="356.0" y="308" text-anchor="middle" fill="#898781" font-size="11">Jun 27</text>
-  <text x="672.0" y="308" text-anchor="end" fill="#898781" font-size="11">Aug 4</text>
-  <path d="M 40.0 284.0 L 40.0 284.0 L 40.0 260.7 L 68.4 260.7 L 68.4 237.5 L 88.8 237.5 L 88.8 214.2 L 89.6 214.2 L 89.6 190.9 L 90.8 190.9 L 90.8 167.6 L 402.3 167.6 L 402.3 144.4 L 429.5 144.4 L 429.5 121.1 L 504.5 121.1 L 504.5 97.8 L 545.4 97.8 L 545.4 74.5 L 672.0 74.5" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"/>
-  <circle cx="672.0" cy="74.5" r="4" fill="#3987e5"/>
-  <text x="680.0" y="78.5" fill="#c3c2b7" font-size="12" font-weight="600">9</text>
+  <text x="356.0" y="308" text-anchor="middle" fill="#898781" font-size="11">Jun 28</text>
+  <text x="672.0" y="308" text-anchor="end" fill="#898781" font-size="11">Aug 5</text>
+  <path d="M 40.0 284.0 L 40.0 284.0 L 40.0 262.7 L 68.0 262.7 L 68.0 241.3 L 88.2 241.3 L 88.2 220.0 L 89.0 220.0 L 89.0 198.7 L 90.2 198.7 L 90.2 177.3 L 397.6 177.3 L 397.6 156.0 L 424.4 156.0 L 424.4 134.7 L 498.4 134.7 L 498.4 113.3 L 538.7 113.3 L 538.7 92.0 L 671.0 92.0 L 671.0 70.7 L 672.0 70.7" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="672.0" cy="70.7" r="4" fill="#3987e5"/>
+  <text x="680.0" y="74.7" fill="#c3c2b7" font-size="12" font-weight="600">10</text>
   </g>
 </svg>
