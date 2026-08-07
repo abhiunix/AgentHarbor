@@ -29,6 +29,10 @@ struct AccountSnapshot {
 
 lazy_static::lazy_static! {
     static ref CLAUDE_CACHE: Mutex<Option<ClaudeCacheEntry>> = Mutex::new(None);
+    /// Single-flight guard: without it, the tray cycle, analytics page, and
+    /// popover can all miss the cache in the same instant and fire concurrent
+    /// /usage calls — tripping Anthropic's burst limiter on our own traffic.
+    static ref CLAUDE_FETCH_FLIGHT: Mutex<()> = Mutex::new(());
     /// Last successful `/api/oauth/account` payload — reused as a fallback
     /// when the endpoint starts 429-ing (Anthropic does this aggressively
     /// once a token is `out_of_credits`). Without it we'd lose the friendlier
@@ -1047,6 +1051,30 @@ pub fn fetch_claude_analytics() -> ProviderAnalytics {
     if switched_account {
         if let Ok(mut guard) = LAST_ACCOUNT_CACHE.lock() {
             *guard = None;
+        }
+    }
+
+    // Single-flight: concurrent callers wait here, then re-check the cache —
+    // whoever fetched first has usually just filled it.
+    let _flight = CLAUDE_FETCH_FLIGHT.lock();
+    if let Ok(guard) = CLAUDE_CACHE.lock() {
+        if let Some(ref entry) = *guard {
+            if entry.cred_fp == cred_fp {
+                let ttl_secs = if entry
+                    .data
+                    .limit_state
+                    .as_ref()
+                    .map(|s| s.prefers_fast_refresh())
+                    .unwrap_or(false)
+                {
+                    CLAUDE_CACHE_TTL_SHORT_SECS
+                } else {
+                    CLAUDE_CACHE_TTL_SECS
+                };
+                if entry.fetched_at.elapsed().as_secs() < ttl_secs.min(CLAUDE_CACHE_MAX_STALE_SECS) {
+                    return entry.data.clone();
+                }
+            }
         }
     }
 
