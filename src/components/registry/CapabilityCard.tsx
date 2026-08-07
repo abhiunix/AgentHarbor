@@ -185,6 +185,14 @@ export function CapabilityCard({
               {capability.source}
             </span>
           )}
+          {capability.type === "skill" && capability.managed && (
+            <span
+              className="text-[9px] px-1.5 py-0.5 rounded bg-accent-purple/15 text-accent-purple"
+              title="Deployed by AgentHarbor"
+            >
+              managed
+            </span>
+          )}
           {isNew && (
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-accent-green/20 text-accent-green animate-pulse">
               NEW

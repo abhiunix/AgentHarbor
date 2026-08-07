@@ -6,8 +6,26 @@ import type {
   AdapterType,
   RegistryFilters,
 } from "../lib/types";
-import { getAllCapabilities, discoverCapabilities } from "../lib/tauri";
-import type { McpServer } from "../lib/types";
+import { getAllCapabilities, discoverCapabilities, discoverSkills, discoverPlugins } from "../lib/tauri";
+import type { McpServer, Skill, Plugin } from "../lib/types";
+
+function slugify(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/** Stable short hash so same-named skills in different directories keep distinct ids. */
+function sourceHash(source: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < source.length; i++) {
+    h ^= source.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+function discoveredId(name: string, source: string): string {
+  return `discovered/${slugify(name)}-${sourceHash(source)}`;
+}
 
 const NEW_ITEM_DAYS = 7;
 const SEEN_ITEMS_KEY = "agentharbor_seen_capabilities";
@@ -97,9 +115,11 @@ export const useRegistryStore = create<RegistryState & RegistryActions>(
     loadCapabilities: async () => {
       set({ loading: true, error: null });
       try {
-        const [capabilities, discovered] = await Promise.all([
+        const [capabilities, discovered, discoveredSkills, discoveredPlugins] = await Promise.all([
           getAllCapabilities(),
           discoverCapabilities().catch(() => []),
+          discoverSkills().catch(() => []),
+          discoverPlugins().catch(() => []),
         ]);
         const discoveredAsCapabilities: McpServer[] = discovered.map((d) => {
           const slug = d.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") +
@@ -133,7 +153,49 @@ export const useRegistryStore = create<RegistryState & RegistryActions>(
             source: d.source,
           };
         });
-        const merged = [...capabilities, ...discoveredAsCapabilities];
+        const discoveredSkillCapabilities: Skill[] = discoveredSkills.map((s) => ({
+          type: "skill",
+          id: discoveredId(s.name, s.source),
+          name: s.name,
+          description: s.description,
+          version: "1.0.0",
+          author: "discovered",
+          visibility: "discovered" as const,
+          tags: s.tags,
+          compatible_agents: s.adapter_ids,
+          managed: s.managed,
+          files: [{ path: `${s.source}/SKILL.md`, content: "" }],
+          source: s.source,
+        }));
+
+        const discoveredPluginCapabilities: Plugin[] = discoveredPlugins.map((p) => ({
+          type: "plugin",
+          id: discoveredId(`${p.name}-${p.marketplace}`, p.source),
+          name: p.name,
+          description: p.description,
+          version: p.version || "1.0.0",
+          author: p.author || "discovered",
+          visibility: "discovered" as const,
+          tags: [],
+          compatible_agents: ["claude-code"],
+          install_command: `/plugin install ${p.name}@${p.marketplace}`,
+          config: {
+            marketplace: p.marketplace,
+            enabled: p.enabled,
+            scope: p.scope,
+            skill_count: p.skill_count,
+            install_path: p.source,
+          },
+          source: p.source,
+          source_info: p.homepage ? { url: p.homepage } : undefined,
+        }));
+
+        const merged = [
+          ...capabilities,
+          ...discoveredAsCapabilities,
+          ...discoveredSkillCapabilities,
+          ...discoveredPluginCapabilities,
+        ];
         const idMap = new Map<string, typeof merged[number]>();
         for (const cap of merged) {
           const existing = idMap.get(cap.id);

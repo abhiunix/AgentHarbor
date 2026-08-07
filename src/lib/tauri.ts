@@ -754,6 +754,36 @@ export async function discoverCapabilities(): Promise<DiscoveredCapability[]> {
   return invoke<DiscoveredCapability[]>("discover_capabilities");
 }
 
+export interface DiscoveredSkill {
+  name: string;
+  description: string;
+  source: string;
+  adapter_ids: string[];
+  managed: boolean;
+  tags: string[];
+}
+
+export async function discoverSkills(): Promise<DiscoveredSkill[]> {
+  return invoke<DiscoveredSkill[]>("discover_skills");
+}
+
+export interface DiscoveredPlugin {
+  name: string;
+  marketplace: string;
+  description: string;
+  version: string;
+  enabled: boolean;
+  scope: string;
+  author: string;
+  homepage: string;
+  skill_count: number;
+  source: string;
+}
+
+export async function discoverPlugins(): Promise<DiscoveredPlugin[]> {
+  return invoke<DiscoveredPlugin[]>("discover_plugins");
+}
+
 export interface UsageData {
   input_tokens?: number;
   cache_read_input_tokens?: number;

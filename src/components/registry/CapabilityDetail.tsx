@@ -122,11 +122,13 @@ export function CapabilityDetail({
       case "skill":
         return (
           <div className="space-y-4">
-            <DetailSection title="Scope">
-              <code className="block p-3 bg-app-bg rounded-md font-mono text-sm text-text-primary">
-                {capability.scope}
-              </code>
-            </DetailSection>
+            {capability.scope && (
+              <DetailSection title="Scope">
+                <code className="block p-3 bg-app-bg rounded-md font-mono text-sm text-text-primary">
+                  {capability.scope}
+                </code>
+              </DetailSection>
+            )}
 
             {capability.files && capability.files.length > 0 && (
               <DetailSection title="Files">

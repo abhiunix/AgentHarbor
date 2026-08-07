@@ -68,6 +68,7 @@ use commands::global_config::{
     read_global_config_raw, write_global_config_raw, add_global_mcp_server, remove_global_mcp_server,
     discover_capabilities, test_ollama_connection, launch_claude_via_ollama,
 };
+use commands::discovery::{discover_plugins, discover_skills};
 use commands::usage::{read_project_usage_files, list_projects_with_mcp};
 use commands::session_stats::get_claude_session_stats;
 use commands::prompt_history::{get_prompt_history, search_prompt_history, get_prompt_stats, build_resume_command, start_claude_session};
@@ -320,6 +321,8 @@ pub fn run() {
             add_global_mcp_server,
             remove_global_mcp_server,
             discover_capabilities,
+            discover_skills,
+            discover_plugins,
             read_project_usage_files,
             list_projects_with_mcp,
             list_notes_entries,
