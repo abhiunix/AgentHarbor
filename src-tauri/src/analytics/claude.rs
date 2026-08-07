@@ -1477,7 +1477,7 @@ impl WindowStats {
     }
 
     /// Add token usage with model-aware cost calculation
-    fn add_usage(&mut self, model: Option<&str>, inp: i64, outp: i64, cr: i64, cw: i64) {
+    fn add_usage(&mut self, model: Option<&str>, inp: i64, outp: i64, cr: i64, cw: i64, cw_1h: i64) {
         self.input_tokens += inp;
         self.output_tokens += outp;
         self.cache_read += cr;
@@ -1492,11 +1492,15 @@ impl WindowStats {
                 cache_write: cw.max(0) as u64,
             },
         );
+        let premium = crate::analytics::cost_engine::cache_write_1h_premium(
+            model,
+            cw_1h.clamp(0, cw.max(0)) as u64,
+        );
         self.input_cost += c.input;
         self.output_cost += c.output;
         self.cache_read_cost += c.cache_read;
-        self.cache_write_cost += c.cache_write;
-        self.total_cost += c.total();
+        self.cache_write_cost += c.cache_write + premium;
+        self.total_cost += c.total() + premium;
     }
 
     fn insert_to_extra(&self, prefix: &str, extra: &mut HashMap<String, serde_json::Value>) {
@@ -1671,10 +1675,16 @@ fn enrich_with_today_stats(extra: &mut HashMap<String, serde_json::Value>) {
                         let outp = usage.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
                         let cr = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
                         let cw = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let cw_1h = usage
+                            .get("cache_creation")
+                            .and_then(|c| c.get("ephemeral_1h_input_tokens"))
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0)
+                            .min(cw);
 
-                        stats_all.add_usage(model_str, inp, outp, cr, cw);
-                        if in_week { stats_week.add_usage(model_str, inp, outp, cr, cw); }
-                        if in_today { stats_today.add_usage(model_str, inp, outp, cr, cw); }
+                        stats_all.add_usage(model_str, inp, outp, cr, cw, cw_1h);
+                        if in_week { stats_week.add_usage(model_str, inp, outp, cr, cw, cw_1h); }
+                        if in_today { stats_today.add_usage(model_str, inp, outp, cr, cw, cw_1h); }
                     }
                 }
             }

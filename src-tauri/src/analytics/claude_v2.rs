@@ -542,10 +542,14 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
             entry.4 += cw;
 
             // Cost — component-based so the breakdown tiles sum to the headline
-            let comps = cost_engine::estimate_cost_components(
+            let mut comps = cost_engine::estimate_cost_components(
                 Some(model),
                 &cost_engine::TokensForCost { input: inp, output: out, cache_read: cr, cache_write: cw },
             );
+            // 1-hour-TTL cache writes bill at 2x base input (table rate is the
+            // 5-minute 1.25x); add the premium to component and total alike.
+            let eph_1h = u.cache_ephemeral_1h_tokens.unwrap_or(0).min(cw);
+            comps.cache_write += cost_engine::cache_write_1h_premium(Some(model), eph_1h);
             let msg_cost = comps.total();
             cost_parts.input += comps.input;
             cost_parts.output += comps.output;

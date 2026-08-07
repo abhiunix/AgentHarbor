@@ -64,23 +64,26 @@ fn get_raw_pricing(model: &str) -> RawPricing {
             threshold: None, above_input: None, above_output: None,
             above_cache_create: None, above_cache_read: None,
         },
-        // Sonnet 4 / 4.5 (tiered: above 200K tokens rates double)
-        "claude-sonnet-4" | "claude-sonnet-4-5" => RawPricing {
+        // Sonnet 4 / 4.5 / 4.6 ($3/$15 flat per the current published table)
+        "claude-sonnet-4" | "claude-sonnet-4-5" | "claude-sonnet-4-6" => RawPricing {
             input: 3e-6, output: 1.5e-5, cache_create: 3.75e-6, cache_read: 3e-7,
-            threshold: Some(200_000),
-            above_input: Some(6e-6),
-            above_output: Some(2.25e-5),
-            above_cache_create: Some(7.5e-6),
-            above_cache_read: Some(6e-7),
+            threshold: None, above_input: None, above_output: None,
+            above_cache_create: None, above_cache_read: None,
         },
-        // Default: Sonnet pricing (most common in Claude Code)
+        // Haiku 3.5 (retired; still appears in old transcripts)
+        "claude-3-5-haiku" | "claude-haiku-3-5" => RawPricing {
+            input: 8e-7, output: 4e-6, cache_create: 1e-6, cache_read: 8e-8,
+            threshold: None, above_input: None, above_output: None,
+            above_cache_create: None, above_cache_read: None,
+        },
+        // Default: Sonnet sticker pricing (most common in Claude Code).
+        // Known deviation: Sonnet 5 bills at introductory $2/$10 through
+        // 2026-08-31; we use the $3/$15 sticker uniformly since the engine
+        // is date-unaware and the window is brief.
         _ => RawPricing {
             input: 3e-6, output: 1.5e-5, cache_create: 3.75e-6, cache_read: 3e-7,
-            threshold: Some(200_000),
-            above_input: Some(6e-6),
-            above_output: Some(2.25e-5),
-            above_cache_create: Some(7.5e-6),
-            above_cache_read: Some(6e-7),
+            threshold: None, above_input: None, above_output: None,
+            above_cache_create: None, above_cache_read: None,
         },
     }
 }
@@ -207,6 +210,15 @@ pub fn estimate_cost(model: Option<&str>, tokens: &TokensForCost) -> f64 {
     estimate_cost_components(model, tokens).total()
 }
 
+/// Extra cost for 1-hour-TTL cache writes: billed at 2x base input, while the
+/// table's cache_create is the 5-minute 1.25x rate — premium is 0.75x input.
+/// Callers add this to BOTH the cache_write component and the total so the
+/// components-sum-to-total invariant holds.
+pub fn cache_write_1h_premium(model: Option<&str>, tokens_1h: u64) -> f64 {
+    let raw = get_raw_pricing(model.unwrap_or("sonnet"));
+    (tokens_1h as f64) * raw.input * 0.75
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +261,23 @@ mod tests {
     }
 
     #[test]
+    fn sonnet_4x_is_flat_and_haiku_35_priced() {
+        let big = TokensForCost { input: 500_000, output: 0, cache_read: 0, cache_write: 0 };
+        // 500K input at flat $3/M = $1.50 (no 200K doubling)
+        for m in ["claude-sonnet-4-5", "claude-sonnet-4-6"] {
+            assert!((estimate_cost(Some(m), &big) - 1.50).abs() < 1e-6, "{m}");
+        }
+        let mtok = TokensForCost { input: 1_000_000, output: 1_000_000, cache_read: 0, cache_write: 0 };
+        assert!((estimate_cost(Some("claude-3-5-haiku-20241022"), &mtok) - 4.80).abs() < 1e-6);
+    }
+
+    #[test]
+    fn one_hour_cache_write_premium() {
+        // Opus 5: 1M 1h-write tokens = $10/M total; table charges $6.25 → premium $3.75
+        assert!((cache_write_1h_premium(Some("claude-opus-5"), 1_000_000) - 3.75).abs() < 1e-6);
+    }
+
+    #[test]
     fn test_tiered_cost_no_threshold() {
         // Opus: no tiering
         assert!((tiered_cost(1_000_000, 5e-6, None, None) - 5.0).abs() < 0.001);
@@ -288,8 +317,8 @@ mod tests {
     }
 
     #[test]
-    fn test_estimate_cost_with_tiering() {
-        // Sonnet with tokens above 200K threshold
+    fn test_estimate_cost_flat_rates() {
+        // Sonnet 4.5 is flat per the current published table (no 200K tiering)
         let tokens = TokensForCost {
             input: 300_000,
             output: 100_000,
@@ -297,11 +326,8 @@ mod tests {
             cache_write: 500_000,
         };
         let cost = estimate_cost(Some("claude-sonnet-4-5"), &tokens);
-        // input: 200K*3e-6 + 100K*6e-6 = 0.60 + 0.60 = 1.20
-        // output: 100K*1.5e-5 = 1.50 (all below threshold)
-        // cache_read: 200K*3e-7 + 9.8M*6e-7 = 0.06 + 5.88 = 5.94
-        // cache_write: 200K*3.75e-6 + 300K*7.5e-6 = 0.75 + 2.25 = 3.00
-        let expected = 1.20 + 1.50 + 5.94 + 3.00;
+        // 0.90 input + 1.50 output + 3.00 cache_read + 1.875 cache_write
+        let expected = 0.90 + 1.50 + 3.00 + 1.875;
         assert!((cost - expected).abs() < 0.01);
     }
 
