@@ -89,6 +89,10 @@ interface Overview {
   thinking_message_count: number;
   total_message_count: number;
   estimated_total_cost: number;
+  input_cost: number;
+  output_cost: number;
+  cache_read_cost: number;
+  cache_write_cost: number;
   model_breakdown: ModelStat[];
   tool_usage: ToolStat[];
   cache_stats: CacheStats;
@@ -1496,17 +1500,12 @@ function ClaudeAnalyticsV2Inner() {
               cacheReadCost = trayFromExtra.cacheReadCost;
               cacheWriteCost = trayFromExtra.cacheWriteCost;
             } else {
-              overview.model_breakdown.forEach(m => {
-                const ml = m.model.toLowerCase();
-                const pi = ml.includes("opus") ? 15 : ml.includes("haiku") ? 0.8 : 3;
-                const po = ml.includes("opus") ? 75 : ml.includes("haiku") ? 4 : 15;
-                const pr = ml.includes("opus") ? 1.5 : ml.includes("haiku") ? 0.08 : 0.3;
-                const pw = ml.includes("opus") ? 18.75 : ml.includes("haiku") ? 1 : 3.75;
-                inputCost += (m.input_tokens / 1_000_000) * pi;
-                outputCost += (m.output_tokens / 1_000_000) * po;
-                cacheReadCost += (m.cache_read_tokens / 1_000_000) * pr;
-                cacheWriteCost += (m.cache_write_tokens / 1_000_000) * pw;
-              });
+              // Backend-computed with the same engine as the headline, so the
+              // four tiles always sum to the API-Equivalent Value.
+              inputCost = overview.input_cost ?? 0;
+              outputCost = overview.output_cost ?? 0;
+              cacheReadCost = overview.cache_read_cost ?? 0;
+              cacheWriteCost = overview.cache_write_cost ?? 0;
             }
 
             return (

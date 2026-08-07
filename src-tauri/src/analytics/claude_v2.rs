@@ -137,6 +137,14 @@ pub struct ClaudeV2Overview {
     pub thinking_message_count: u64,
     pub total_message_count: u64,
     pub estimated_total_cost: f64,
+    #[serde(default)]
+    pub input_cost: f64,
+    #[serde(default)]
+    pub output_cost: f64,
+    #[serde(default)]
+    pub cache_read_cost: f64,
+    #[serde(default)]
+    pub cache_write_cost: f64,
 
     // Breakdowns
     pub model_breakdown: Vec<ModelStat>,
@@ -506,6 +514,7 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
     let mut geo_map: HashMap<String, u64> = HashMap::new();
     let mut project_map: HashMap<String, (u64, u64, f64)> = HashMap::new(); // count, tokens, cost
     let mut total_cost = 0.0f64;
+    let mut cost_parts = cost_engine::CostComponents::default();
 
     for r in &records {
         if let Some(ref u) = r.usage {
@@ -532,11 +541,16 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
             entry.3 += cr;
             entry.4 += cw;
 
-            // Cost
-            let msg_cost = cost_engine::estimate_cost(
+            // Cost — component-based so the breakdown tiles sum to the headline
+            let comps = cost_engine::estimate_cost_components(
                 Some(model),
                 &cost_engine::TokensForCost { input: inp, output: out, cache_read: cr, cache_write: cw },
             );
+            let msg_cost = comps.total();
+            cost_parts.input += comps.input;
+            cost_parts.output += comps.output;
+            cost_parts.cache_read += comps.cache_read;
+            cost_parts.cache_write += comps.cache_write;
             total_cost += msg_cost;
 
             // Geo — skip empty and "not_available" values
@@ -803,6 +817,10 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
         thinking_message_count: thinking_count,
         total_message_count: tray_overlay_msgs.unwrap_or(records.len() as u64),
         estimated_total_cost: total_cost,
+        input_cost: cost_parts.input,
+        output_cost: cost_parts.output,
+        cache_read_cost: cost_parts.cache_read,
+        cache_write_cost: cost_parts.cache_write,
 
         model_breakdown,
         tool_usage,

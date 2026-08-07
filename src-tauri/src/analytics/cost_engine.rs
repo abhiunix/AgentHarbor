@@ -19,15 +19,6 @@ struct RawPricing {
     above_cache_read: Option<f64>,
 }
 
-/// Public pricing in USD per 1M tokens (for display purposes).
-#[derive(Debug, Clone)]
-pub struct ModelPricing {
-    pub input_per_mtok: f64,
-    pub output_per_mtok: f64,
-    pub cache_write_per_mtok: f64,
-    pub cache_read_per_mtok: f64,
-}
-
 /// Token counts for cost estimation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TokensForCost {
@@ -48,9 +39,22 @@ fn get_raw_pricing(model: &str) -> RawPricing {
             threshold: None, above_input: None, above_output: None,
             above_cache_create: None, above_cache_read: None,
         },
-        // Opus 4.5 / 4.6
-        "claude-opus-4-5" | "claude-opus-4-6" => RawPricing {
+        // Opus 4.5 through Opus 5 ($5/$25 per Mtok; no long-context premium)
+        "claude-opus-4-5" | "claude-opus-4-6" | "claude-opus-4-7" | "claude-opus-4-8"
+        | "claude-opus-5" => RawPricing {
             input: 5e-6, output: 2.5e-5, cache_create: 6.25e-6, cache_read: 5e-7,
+            threshold: None, above_input: None, above_output: None,
+            above_cache_create: None, above_cache_read: None,
+        },
+        // Fable 5 / Mythos 5 ($10/$50 per Mtok)
+        "claude-fable-5" | "claude-mythos-5" => RawPricing {
+            input: 1e-5, output: 5e-5, cache_create: 1.25e-5, cache_read: 1e-6,
+            threshold: None, above_input: None, above_output: None,
+            above_cache_create: None, above_cache_read: None,
+        },
+        // Sonnet 5 ($3/$15 sticker; no documented long-context premium)
+        "claude-sonnet-5" => RawPricing {
+            input: 3e-6, output: 1.5e-5, cache_create: 3.75e-6, cache_read: 3e-7,
             threshold: None, above_input: None, above_output: None,
             above_cache_create: None, above_cache_read: None,
         },
@@ -98,6 +102,14 @@ fn normalize_model(raw: &str) -> String {
             if tail.starts_with("claude-") {
                 s = tail.to_string();
             }
+        }
+    }
+
+    // Strip Claude Code thinking-variant suffixes so the base model matches
+    for suffix in ["-max-thinking-fast", "-max-thinking", "-high-thinking"] {
+        if let Some(rest) = s.strip_suffix(suffix) {
+            s = rest.to_string();
+            break;
         }
     }
 
@@ -163,25 +175,36 @@ fn tiered_cost(tokens: u64, base_rate: f64, above_rate: Option<f64>, threshold: 
     }
 }
 
-/// Get pricing for display purposes (USD per 1M tokens, base rates).
-pub fn get_pricing(model: &str) -> ModelPricing {
-    let raw = get_raw_pricing(model);
-    ModelPricing {
-        input_per_mtok: raw.input * 1_000_000.0,
-        output_per_mtok: raw.output * 1_000_000.0,
-        cache_write_per_mtok: raw.cache_create * 1_000_000.0,
-        cache_read_per_mtok: raw.cache_read * 1_000_000.0,
+/// Estimate cost in USD from token counts and model name.
+/// Uses tiered pricing matching CodexBar's logic.
+/// Per-component cost split. `estimate_cost` is the sum of these, so any
+/// UI that shows components alongside a total stays internally consistent.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CostComponents {
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+    pub cache_write: f64,
+}
+
+impl CostComponents {
+    pub fn total(&self) -> f64 {
+        self.input + self.output + self.cache_read + self.cache_write
     }
 }
 
-/// Estimate cost in USD from token counts and model name.
-/// Uses tiered pricing matching CodexBar's logic.
-pub fn estimate_cost(model: Option<&str>, tokens: &TokensForCost) -> f64 {
+pub fn estimate_cost_components(model: Option<&str>, tokens: &TokensForCost) -> CostComponents {
     let raw = get_raw_pricing(model.unwrap_or("sonnet"));
-    tiered_cost(tokens.input, raw.input, raw.above_input, raw.threshold)
-        + tiered_cost(tokens.output, raw.output, raw.above_output, raw.threshold)
-        + tiered_cost(tokens.cache_read, raw.cache_read, raw.above_cache_read, raw.threshold)
-        + tiered_cost(tokens.cache_write, raw.cache_create, raw.above_cache_create, raw.threshold)
+    CostComponents {
+        input: tiered_cost(tokens.input, raw.input, raw.above_input, raw.threshold),
+        output: tiered_cost(tokens.output, raw.output, raw.above_output, raw.threshold),
+        cache_read: tiered_cost(tokens.cache_read, raw.cache_read, raw.above_cache_read, raw.threshold),
+        cache_write: tiered_cost(tokens.cache_write, raw.cache_create, raw.above_cache_create, raw.threshold),
+    }
+}
+
+pub fn estimate_cost(model: Option<&str>, tokens: &TokensForCost) -> f64 {
+    estimate_cost_components(model, tokens).total()
 }
 
 #[cfg(test)]
@@ -195,6 +218,34 @@ mod tests {
         assert_eq!(normalize_model("claude-haiku-4-5-20251001"), "claude-haiku-4-5");
         assert_eq!(normalize_model("anthropic.claude-sonnet-4-5"), "claude-sonnet-4-5");
         assert_eq!(normalize_model("claude-sonnet-4-5"), "claude-sonnet-4-5");
+    }
+
+    #[test]
+    fn current_generation_models_are_priced() {
+        // Regression: these fell through to the Sonnet default, making every
+        // cost surface wrong in a different way.
+        let tokens = TokensForCost { input: 1_000_000, output: 1_000_000, cache_read: 0, cache_write: 0 };
+        assert!((estimate_cost(Some("claude-opus-4-8"), &tokens) - 30.0).abs() < 1e-6);
+        assert!((estimate_cost(Some("claude-opus-5"), &tokens) - 30.0).abs() < 1e-6);
+        assert!((estimate_cost(Some("claude-fable-5"), &tokens) - 60.0).abs() < 1e-6);
+        assert!((estimate_cost(Some("claude-sonnet-5"), &tokens) - 18.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn thinking_variant_suffixes_normalize() {
+        assert_eq!(normalize_model("claude-opus-4-8-high-thinking"), "claude-opus-4-8");
+        assert_eq!(normalize_model("claude-fable-5-max-thinking-fast"), "claude-fable-5");
+        assert_eq!(normalize_model("claude-opus-5-max-thinking"), "claude-opus-5");
+    }
+
+    #[test]
+    fn components_sum_to_total() {
+        // Tiled breakdowns must equal the headline by construction.
+        let tokens = TokensForCost { input: 350_000, output: 12_000, cache_read: 900_000, cache_write: 40_000 };
+        for model in ["claude-sonnet-4-5", "claude-opus-5", "claude-fable-5", "unknown-model"] {
+            let c = estimate_cost_components(Some(model), &tokens);
+            assert!((c.total() - estimate_cost(Some(model), &tokens)).abs() < 1e-9);
+        }
     }
 
     #[test]
@@ -220,21 +271,20 @@ mod tests {
 
     #[test]
     fn test_opus_pricing() {
-        let p = get_pricing("claude-opus-4-6");
-        assert!((p.input_per_mtok - 5.0).abs() < 0.001);
-        assert!((p.output_per_mtok - 25.0).abs() < 0.001);
+        let mtok = TokensForCost { input: 1_000_000, output: 1_000_000, cache_read: 0, cache_write: 0 };
+        assert!((estimate_cost(Some("claude-opus-4-6"), &mtok) - 30.0).abs() < 0.001);
     }
 
     #[test]
     fn test_sonnet_pricing() {
-        let p = get_pricing("claude-sonnet-4-5");
-        assert!((p.input_per_mtok - 3.0).abs() < 0.001);
+        let inp = TokensForCost { input: 100_000, output: 0, cache_read: 0, cache_write: 0 };
+        assert!((estimate_cost(Some("claude-sonnet-4-5"), &inp) - 0.30).abs() < 0.001);
     }
 
     #[test]
     fn test_haiku_pricing() {
-        let p = get_pricing("claude-haiku-4-5");
-        assert!((p.input_per_mtok - 1.0).abs() < 0.001);
+        let inp = TokensForCost { input: 1_000_000, output: 0, cache_read: 0, cache_write: 0 };
+        assert!((estimate_cost(Some("claude-haiku-4-5"), &inp) - 1.0).abs() < 0.001);
     }
 
     #[test]
