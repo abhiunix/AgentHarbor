@@ -103,14 +103,6 @@ fn read_cursor_local_token() -> Result<(String, String, Option<String>), String>
     )
     .map_err(|e| format!("Cannot open Cursor DB: {}", e))?;
 
-    let token: String = conn
-        .query_row(
-            "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| "No Cursor auth token found in state.vscdb".to_string())?;
-
     // Also try to read the user email for building the cookie
     let email: Option<String> = conn
         .query_row(
@@ -119,6 +111,22 @@ fn read_cursor_local_token() -> Result<(String, String, Option<String>), String>
             |row| row.get(0),
         )
         .ok();
+
+    // Recent Cursor versions moved the token into safeStorage-encrypted storage,
+    // so this row no longer exists even when the user is logged in.
+    let token: String = conn
+        .query_row(
+            "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| {
+            if email.is_some() {
+                "Your Cursor version encrypts its session token, so auto-detect no longer works. Sign in at cursor.com and paste your WorkosCursorSessionToken cookie to connect.".to_string()
+            } else {
+                "No Cursor auth token found in state.vscdb".to_string()
+            }
+        })?;
 
     if token.is_empty() {
         return Err("Cursor auth token is empty".into());
@@ -236,6 +244,12 @@ fn extract_user_id_from_jwt(jwt: &str) -> Option<String> {
 /// Build the cookie header for Cursor API calls.
 /// The cookie format must be: WorkosCursorSessionToken=userId%3A%3AJWT
 pub fn cookie_header(token: &str) -> String {
+    // Tolerate a paste of the whole cookie pair, not just the value
+    let token = token
+        .trim()
+        .trim_start_matches("WorkosCursorSessionToken=")
+        .trim_end_matches(';');
+
     // If token already contains :: or %3A%3A, it's the full cookie value
     if token.contains("::") || token.contains("%3A%3A") {
         return format!("WorkosCursorSessionToken={}", token);

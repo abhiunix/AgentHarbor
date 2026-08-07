@@ -532,8 +532,24 @@ function ConversationsTab({ conversations }: { conversations: { conversation_id:
 
 // ── Not Connected State ─────────────────────────────────────────────────────
 
-function NotConnected({ status, onSignIn }: { status: ConnectionStatus; onSignIn: () => void }) {
+function NotConnected({ status, onSignIn, onConnected }: { status: ConnectionStatus; onSignIn: () => void; onConnected: () => void }) {
   const isCursorInstalled = !status.error?.includes("not installed");
+  const [token, setToken] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleSaveToken = async () => {
+    if (!token.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await invoke("save_provider_token", { providerId: "cursor", keyType: "session-token", value: token.trim() });
+      onConnected();
+    } catch (e) {
+      setSaveError(String(e));
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="flex items-center justify-center py-20">
@@ -561,23 +577,40 @@ function NotConnected({ status, onSignIn }: { status: ConnectionStatus; onSignIn
         ) : (
           <>
             <p className="text-xs text-text-muted mb-4">
-              {status.error || "We auto-detect your session from Cursor's local data. If auto-detect failed, you can sign in manually."}
+              {status.error || "We auto-detect your session from Cursor's local data. If auto-detect failed, connect with your session cookie below."}
             </p>
 
             <div className="flex flex-col items-center gap-3">
-              <button
-                onClick={onSignIn}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent-blue text-white rounded-lg text-sm font-medium hover:bg-accent-blue/90 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
-                </svg>
-                Sign in to get insights
-              </button>
+              <ol className="text-[11px] text-text-secondary text-left list-decimal list-inside space-y-1 bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-3 w-full">
+                <li>
+                  <button onClick={onSignIn} className="text-accent-blue hover:underline">Sign in at cursor.com</button>
+                </li>
+                <li>Open DevTools (⌥⌘I) → Application → Cookies → cursor.com</li>
+                <li>Copy the <code className="font-mono text-accent-green">WorkosCursorSessionToken</code> value and paste it here</li>
+              </ol>
+
+              <div className="flex w-full gap-2">
+                <input
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSaveToken()}
+                  placeholder="WorkosCursorSessionToken=..."
+                  className="flex-1 px-3 py-2 bg-[#0e0f13] border border-[#2a2b36] rounded-lg text-xs text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-accent-blue"
+                />
+                <button
+                  onClick={handleSaveToken}
+                  disabled={!token.trim() || saving}
+                  className="px-4 py-2 bg-accent-blue text-white rounded-lg text-xs font-medium hover:bg-accent-blue/90 disabled:opacity-50"
+                >
+                  {saving ? "Connecting..." : "Connect"}
+                </button>
+              </div>
+
+              {saveError && <p className="text-[11px] text-red-400">{saveError}</p>}
 
               <p className="text-[10px] text-text-muted max-w-xs">
-                This will open Cursor's login page. After signing in, come back and click Refresh.
-                Your session token is stored securely in your OS keychain.
+                The token is stored securely in your OS keychain and only sent to cursor.com.
               </p>
             </div>
           </>
@@ -870,7 +903,7 @@ function CursorAnalyticsV2Inner() {
   }
 
   if (!status?.connected) {
-    return <NotConnected status={status!} onSignIn={handleSignIn} />;
+    return <NotConnected status={status!} onSignIn={handleSignIn} onConnected={() => loadData(timeRange, true)} />;
   }
 
   // ── Derived data ──────────────────────────────────────────────────────

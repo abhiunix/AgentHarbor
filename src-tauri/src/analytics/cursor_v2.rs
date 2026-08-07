@@ -432,7 +432,7 @@ fn _connection_status() -> CursorV2ConnectionStatus {
         plan: stripe.as_ref().and_then(|s| s.membership_type.clone()),
         team_name: None,
         team_id: stripe.as_ref().and_then(|s| s.team_id),
-        error: if auth.is_none() { Some("Token may be expired — try signing in again".into()) } else { None },
+        error: if auth.is_none() { Some("Cursor session token is invalid or expired — paste a fresh WorkosCursorSessionToken cookie from cursor.com".into()) } else { None },
     }
 }
 
