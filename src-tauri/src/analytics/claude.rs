@@ -1050,7 +1050,22 @@ pub fn fetch_claude_analytics() -> ProviderAnalytics {
         }
     }
 
-    let result = fetch_claude_analytics_uncached();
+    let mut result = fetch_claude_analytics_uncached();
+
+    // A rate-limited cycle produces empty windows; caching it would blank the
+    // popover bars for a full TTL. Graft the last good windows and keep the
+    // previous cache entry so the next cycle retries (same pattern as Codex).
+    let rate_limited = matches!(result.limit_state, Some(LimitState::RateLimited { .. }));
+    if rate_limited && result.rate_limits.is_empty() {
+        if let Ok(guard) = CLAUDE_CACHE.lock() {
+            if let Some(ref prev) = *guard {
+                if prev.cred_fp == cred_fp && !prev.data.rate_limits.is_empty() {
+                    result.rate_limits = prev.data.rate_limits.clone();
+                }
+            }
+        }
+        return result;
+    }
 
     // Cache successful results
     if result.status.connected {
@@ -1121,6 +1136,34 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         }
         Err(_) => None,
     };
+
+    // A burst 429 with a tiny Retry-After is transient (several local agents
+    // share these endpoints) — honor it once instead of surfacing a sticky
+    // RateLimited state for a whole refresh cycle.
+    if usage.is_none() {
+        if let Some((Some(retry), _)) = oauth429 {
+            if retry <= 5 {
+                std::thread::sleep(std::time::Duration::from_secs(retry.clamp(1, 5)));
+                match http::authed_get(
+                    "https://api.anthropic.com/api/oauth/usage",
+                    &active_token,
+                    Some(extra_headers.clone()),
+                ) {
+                    Ok(u) => {
+                        usage = Some(u);
+                        oauth429 = None;
+                    }
+                    Err(HttpCallError::RateLimited { retry_after_secs, body, .. }) => {
+                        oauth429 = Some((retry_after_secs, body));
+                    }
+                    Err(HttpCallError::Unsuccessful { status: 401, body, .. }) => {
+                        oauth401 = Some(body);
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    }
 
     let mut profile: Option<ClaudeProfileResponse> = match http::authed_get::<ClaudeProfileResponse>(
         "https://api.anthropic.com/api/oauth/profile",
