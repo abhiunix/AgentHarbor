@@ -29,6 +29,7 @@ pub mod windsurf_rules;
 pub mod gemini;
 pub mod test_bridge;
 pub mod github_fetch;
+pub mod discovery;
 pub mod mcp_discovery;
 pub mod mcp_registry;
 pub mod claude_history;

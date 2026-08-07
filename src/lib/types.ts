@@ -107,6 +107,8 @@ export interface Skill extends CapabilityMetadata {
   argument_hint?: string;
   /** License name (e.g. "MIT", "Apache-2.0") */
   license?: string;
+  /** Discovered skills only: deployed by AgentHarbor (hash-suffixed dir + our frontmatter). */
+  managed?: boolean;
 }
 
 export interface Hook extends CapabilityMetadata {
