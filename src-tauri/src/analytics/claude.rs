@@ -1412,17 +1412,20 @@ impl WindowStats {
         self.cache_read += cr;
         self.cache_write += cw;
 
-        let pricing = crate::analytics::cost_engine::get_pricing(model.unwrap_or("sonnet"));
-        let mtok = 1_000_000.0_f64;
-        let ic = (inp as f64 / mtok) * pricing.input_per_mtok;
-        let oc = (outp as f64 / mtok) * pricing.output_per_mtok;
-        let crc = (cr as f64 / mtok) * pricing.cache_read_per_mtok;
-        let cwc = (cw as f64 / mtok) * pricing.cache_write_per_mtok;
-        self.input_cost += ic;
-        self.output_cost += oc;
-        self.cache_read_cost += crc;
-        self.cache_write_cost += cwc;
-        self.total_cost += ic + oc + crc + cwc;
+        let c = crate::analytics::cost_engine::estimate_cost_components(
+            model,
+            &crate::analytics::cost_engine::TokensForCost {
+                input: inp.max(0) as u64,
+                output: outp.max(0) as u64,
+                cache_read: cr.max(0) as u64,
+                cache_write: cw.max(0) as u64,
+            },
+        );
+        self.input_cost += c.input;
+        self.output_cost += c.output;
+        self.cache_read_cost += c.cache_read;
+        self.cache_write_cost += c.cache_write;
+        self.total_cost += c.total();
     }
 
     fn insert_to_extra(&self, prefix: &str, extra: &mut HashMap<String, serde_json::Value>) {
