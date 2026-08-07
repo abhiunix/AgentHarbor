@@ -220,6 +220,24 @@ export function CapabilityList({
   } = useRegistryStore();
 
   const filteredCapabilities = useFilteredCapabilities();
+  // One dropdown open at a time; any outside click closes it.
+  const [openDropdown, setOpenDropdown] = useState<"adapter" | "category" | "sort" | null>(null);
+  const filterRowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!openDropdown) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (!filterRowRef.current?.contains(e.target as Node)) setOpenDropdown(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenDropdown(null);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openDropdown]);
   const { capabilities } = useRegistryStore();
 
   const selectedArray = Array.from(selectedIds);
@@ -403,7 +421,7 @@ export function CapabilityList({
   return (
     <div className="flex flex-col h-full">
       <div className="px-6 py-4 border-b border-border flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <div ref={filterRowRef} className="flex items-center gap-3">
           <div className="flex rounded-md overflow-hidden border border-border">
             {visibilityOptions.map((opt) => (
               <button
@@ -422,10 +440,7 @@ export function CapabilityList({
 
           <div className="relative">
             <button
-              onClick={() => {
-                const el = document.getElementById("adapter-filter-dropdown");
-                if (el) el.classList.toggle("hidden");
-              }}
+              onClick={() => setOpenDropdown(openDropdown === "adapter" ? null : "adapter")}
               className="h-9 px-3 rounded-md bg-app-card border border-border text-sm text-text-primary flex items-center gap-2"
             >
               {filters.adapter !== "all" && getAdapterIconImg(filters.adapter) && (
@@ -435,15 +450,14 @@ export function CapabilityList({
               <svg className="w-3 h-3 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
             </button>
             <div
-              id="adapter-filter-dropdown"
-              className="hidden absolute top-full left-0 mt-1 bg-app-card border border-border rounded-lg shadow-xl z-50 min-w-[160px] py-1"
+              className={`${openDropdown === "adapter" ? "" : "hidden"} absolute top-full left-0 mt-1 bg-app-card border border-border rounded-lg shadow-xl z-50 min-w-[160px] py-1`}
             >
               {adapterOptions.map((opt) => (
                 <button
                   key={opt.value}
                   onClick={() => {
                     setAdapterFilter(opt.value);
-                    document.getElementById("adapter-filter-dropdown")?.classList.add("hidden");
+                    setOpenDropdown(null);
                   }}
                   className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-white/5 ${
                     filters.adapter === opt.value ? "text-accent-blue" : "text-text-primary"
@@ -470,23 +484,19 @@ export function CapabilityList({
             return categories.length > 0 ? (
               <div className="relative">
                 <button
-                  onClick={() => {
-                    const el = document.getElementById("category-filter-dropdown");
-                    if (el) el.classList.toggle("hidden");
-                  }}
+                  onClick={() => setOpenDropdown(openDropdown === "category" ? null : "category")}
                   className="h-9 px-3 rounded-md bg-app-card border border-border text-sm text-text-primary flex items-center gap-2"
                 >
                   <span>{filters.category === "all" ? "All Categories" : filters.category}</span>
                   <svg className="w-3 h-3 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                 </button>
                 <div
-                  id="category-filter-dropdown"
-                  className="hidden absolute top-full left-0 mt-1 bg-app-card border border-border rounded-lg shadow-xl z-50 min-w-[200px] py-1 max-h-64 overflow-y-auto"
+                  className={`${openDropdown === "category" ? "" : "hidden"} absolute top-full left-0 mt-1 bg-app-card border border-border rounded-lg shadow-xl z-50 min-w-[200px] py-1 max-h-64 overflow-y-auto`}
                 >
                   <button
                     onClick={() => {
                       setCategoryFilter("all");
-                      document.getElementById("category-filter-dropdown")?.classList.add("hidden");
+                      setOpenDropdown(null);
                     }}
                     className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between hover:bg-white/5 ${
                       filters.category === "all" ? "text-accent-blue" : "text-text-primary"
@@ -500,7 +510,7 @@ export function CapabilityList({
                       key={cat}
                       onClick={() => {
                         setCategoryFilter(cat);
-                        document.getElementById("category-filter-dropdown")?.classList.add("hidden");
+                        setOpenDropdown(null);
                       }}
                       className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between hover:bg-white/5 ${
                         filters.category === cat ? "text-accent-blue" : "text-text-primary"
@@ -518,18 +528,14 @@ export function CapabilityList({
           {/* Sort dropdown */}
           <div className="relative">
             <button
-              onClick={() => {
-                const el = document.getElementById("sort-filter-dropdown");
-                if (el) el.classList.toggle("hidden");
-              }}
+              onClick={() => setOpenDropdown(openDropdown === "sort" ? null : "sort")}
               className="h-9 px-3 rounded-md bg-app-card border border-border text-sm text-text-primary flex items-center gap-2"
             >
               <span>{filters.sort === "name" ? "Name" : filters.sort === "stars" ? "Most Stars" : "Recently Updated"}</span>
               <svg className="w-3 h-3 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
             </button>
             <div
-              id="sort-filter-dropdown"
-              className="hidden absolute top-full left-0 mt-1 bg-app-card border border-border rounded-lg shadow-xl z-50 min-w-[160px] py-1"
+              className={`${openDropdown === "sort" ? "" : "hidden"} absolute top-full left-0 mt-1 bg-app-card border border-border rounded-lg shadow-xl z-50 min-w-[160px] py-1`}
             >
               {([
                 { value: "name" as const, label: "Name" },
@@ -540,7 +546,7 @@ export function CapabilityList({
                   key={opt.value}
                   onClick={() => {
                     setSortFilter(opt.value);
-                    document.getElementById("sort-filter-dropdown")?.classList.add("hidden");
+                    setOpenDropdown(null);
                   }}
                   className={`w-full text-left px-3 py-1.5 text-sm hover:bg-white/5 ${
                     filters.sort === opt.value ? "text-accent-blue" : "text-text-primary"
