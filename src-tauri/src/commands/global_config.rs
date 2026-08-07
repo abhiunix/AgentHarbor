@@ -418,6 +418,7 @@ pub fn discover_capabilities() -> Result<Vec<DiscoveredCapability>, String> {
             "windsurf",
             home.join(".codeium").join("windsurf").join("mcp_config.json"),
         ),
+        ("gemini", home.join(".gemini").join("settings.json")),
     ] {
         if path.exists() {
             let source = source_str(&path);
