@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useUpdateStore } from "../../stores/updateStore";
 
 export function UpdateBanner() {
@@ -10,6 +11,11 @@ export function UpdateBanner() {
   const [error, setError] = useState<string | null>(null);
 
   if (!shouldShowBanner()) return null;
+
+  // Prefer the URL embedded in the release notes; fall back to building it from the version
+  const releaseUrl =
+    notes?.match(/https:\/\/\S+/)?.[0]?.replace(/[.,)]+$/, "") ??
+    `https://github.com/abhiunix/AgentHarbor/releases/tag/v${latestVersion}`;
 
   const handleInstall = async () => {
     setInstalling(true);
@@ -48,11 +54,14 @@ export function UpdateBanner() {
         <span className="text-text-primary font-medium">
           v{latestVersion} available
         </span>
-        {notes && (
-          <span className="text-text-muted truncate max-w-xs hidden sm:inline">
-            — {notes.split("\n")[0]}
-          </span>
-        )}
+        <span className="text-text-muted hidden sm:inline">—</span>
+        <button
+          onClick={() => openUrl(releaseUrl)}
+          title={notes?.split("\n")[0]}
+          className="text-accent-blue hover:underline hidden sm:inline text-left break-all"
+        >
+          {releaseUrl}
+        </button>
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {error && <span className="text-xs text-accent-red">{error}</span>}
