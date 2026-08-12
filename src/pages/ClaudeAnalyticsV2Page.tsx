@@ -1200,51 +1200,80 @@ function ClaudeAnalyticsV2Inner() {
               <div>
                 <span className="text-text-muted block mb-0.5">Extra Usage</span>
                 <div className="flex items-center gap-1.5">
-                  {overview.credit_usage ? (
-                    <Badge text="ENABLED" color="bg-emerald-500/20 text-emerald-400" />
-                  ) : (
-                    <span title={(() => {
-                      const reason = (overview.extra as any)?.extra_usage_disabled_reason;
-                      return reason ? `Disabled: ${String(reason).replace(/_/g, " ")}` : undefined;
-                    })()}>
-                      <Badge text="DISABLED" color="bg-[#2a2b36] text-text-muted" />
-                    </span>
-                  )}
+                  {(() => {
+                    const ex = overview.extra as any;
+                    // Credits are "configured" if there's a spend limit or credits
+                    // were ever enabled — even if momentarily out_of_credits.
+                    const configured = overview.credit_usage != null
+                      || ex?.spend_limit_usd != null
+                      || ex?.extra_usage_credits_ever_enabled === true;
+                    const reason = ex?.spend_disabled_reason ?? ex?.extra_usage_disabled_reason;
+                    if (configured) {
+                      return (
+                        <span title={reason ? `Currently: ${String(reason).replace(/_/g, " ")}` : undefined}>
+                          <Badge text="ENABLED" color="bg-emerald-500/20 text-emerald-400" />
+                        </span>
+                      );
+                    }
+                    return (
+                      <span title={reason ? `Disabled: ${String(reason).replace(/_/g, " ")}` : undefined}>
+                        <Badge text="DISABLED" color="bg-[#2a2b36] text-text-muted" />
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">Usage this cycle</span>
-                {overview.credit_usage ? (
-                  <div className="text-text-primary font-semibold">
-                    {formatUsd(overview.credit_usage.used)}
-                    {overview.credit_usage.limit != null ? (
-                      <>
-                        <span className="text-text-muted font-normal"> / {formatUsd(overview.credit_usage.limit)}</span>
+                {(() => {
+                  const ex = overview.extra as any;
+                  const spendUsed = ex?.spend_used_usd;
+                  const spendLimit = ex?.spend_limit_usd;
+                  const spendReason = ex?.spend_disabled_reason;
+                  // Prefer the `spend` ledger: it's the source for the official
+                  // "Usage credits" panel and stays valid even when momentarily
+                  // out_of_credits (limit + spent persist; only the balance is 0).
+                  if (spendUsed != null && spendLimit != null) {
+                    const pct = ex?.spend_percent ?? (spendLimit > 0 ? (spendUsed / spendLimit) * 100 : 0);
+                    return (
+                      <div className="text-text-primary font-semibold">
+                        {formatUsd(spendUsed)}
+                        <span className="text-text-muted font-normal"> / {formatUsd(spendLimit)}</span>
                         <div className="text-[10px] text-text-muted font-normal mt-0.5">
-                          {(() => {
-                            const pct = (overview.credit_usage.used / overview.credit_usage.limit) * 100;
-                            return pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`;
-                          })()}
+                          {pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`}
+                          {spendReason ? ` · ${String(spendReason).replace(/_/g, " ")}` : ""}
                         </div>
-                      </>
-                    ) : (
-                      <span className="text-text-muted font-normal text-[10px] block mt-0.5">No cap</span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-text-muted">
-                    Not enabled
-                    {(() => {
-                      const reason = (overview.extra as any)?.extra_usage_disabled_reason;
-                      if (!reason) return null;
-                      return (
-                        <div className="text-[10px] mt-0.5">
-                          {String(reason).replace(/_/g, " ")}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
+                      </div>
+                    );
+                  }
+                  if (overview.credit_usage) {
+                    return (
+                      <div className="text-text-primary font-semibold">
+                        {formatUsd(overview.credit_usage.used)}
+                        {overview.credit_usage.limit != null ? (
+                          <>
+                            <span className="text-text-muted font-normal"> / {formatUsd(overview.credit_usage.limit)}</span>
+                            <div className="text-[10px] text-text-muted font-normal mt-0.5">
+                              {(() => {
+                                const pct = (overview.credit_usage.used / overview.credit_usage.limit) * 100;
+                                return pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`;
+                              })()}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-text-muted font-normal text-[10px] block mt-0.5">No cap</span>
+                        )}
+                      </div>
+                    );
+                  }
+                  const reason = ex?.extra_usage_disabled_reason;
+                  return (
+                    <div className="text-text-muted">
+                      Not enabled
+                      {reason ? <div className="text-[10px] mt-0.5">{String(reason).replace(/_/g, " ")}</div> : null}
+                    </div>
+                  );
+                })()}
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">API-Equiv. Value</span>
