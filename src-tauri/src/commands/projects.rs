@@ -396,6 +396,13 @@ pub fn open_project_in_terminal(project_path: String) -> Result<(), String> {
     crate::utils::platform::open_in_terminal(&project_path)
 }
 
+/// Launch a fresh Claude Code session in the given project directory.
+#[tauri::command]
+pub fn start_claude_in_project(project_path: String) -> Result<(), String> {
+    let quoted = format!("'{}'", project_path.replace('\'', "'\\''"));
+    crate::utils::platform::launch_in_terminal(&format!("cd {} && claude", quoted))
+}
+
 
 #[tauri::command]
 pub fn get_project_installed_items(project_path: String) -> Result<Vec<InstalledItem>, String> {

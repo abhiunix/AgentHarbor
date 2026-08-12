@@ -131,6 +131,54 @@ function formatNum(n: number | null | undefined): string {
 
 function formatUsd(n: number): string { return `$${n.toFixed(2)}`; }
 
+function shellQuote(p: string): string { return `'${p.replace(/'/g, "'\\''")}'`; }
+
+function ProjectRow({ p }: { p: ProjectStat }) {
+  const [copied, setCopied] = useState<"resume" | "dir" | null>(null);
+  const copy = async (text: string, which: "resume" | "dir") => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied(null), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+  return (
+    <tr className="border-b border-[#1e1f2a] hover:bg-[#22232e] group">
+      <td className="px-3 py-2 text-text-primary max-w-[280px]" title={p.project_path}>
+        <div className="flex items-center gap-2">
+          <span className="truncate">{p.project_name}</span>
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+            <button
+              onClick={() => invoke("start_claude_in_project", { projectPath: p.project_path }).catch(() => {})}
+              title="Start a Claude session in this project directory"
+              className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 whitespace-nowrap"
+            >
+              Start session
+            </button>
+            <button
+              onClick={() => copy(`cd ${shellQuote(p.project_path)} && claude -c`, "resume")}
+              title="Copy: cd '<path>' && claude -c"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2b36] text-text-secondary hover:text-text-primary whitespace-nowrap"
+            >
+              {copied === "resume" ? "Copied" : "Copy resume"}
+            </button>
+            <button
+              onClick={() => copy(p.project_path, "dir")}
+              title="Copy the project directory path"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2b36] text-text-secondary hover:text-text-primary whitespace-nowrap"
+            >
+              {copied === "dir" ? "Copied" : "Copy dir"}
+            </button>
+          </div>
+        </div>
+      </td>
+      <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatNum(p.message_count)}</td>
+      <td className="px-3 py-2 text-right text-text-muted font-mono">{formatNum(p.total_tokens)}</td>
+      <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatUsd(p.estimated_cost_usd)}</td>
+    </tr>
+  );
+}
+
 /** Strong highlight for the rate-limit row that matches derived `limit_state`. */
 function rateLimitRowExhausted(overview: Overview, rl: RateLimitWindow): boolean {
   const ls = overview.limit_state;
@@ -1887,12 +1935,7 @@ function ClaudeAnalyticsV2Inner() {
                 </tr></thead>
                 <tbody>
                   {overview.project_breakdown.slice(0, 20).map((p, i) => (
-                    <tr key={i} className="border-b border-[#1e1f2a] hover:bg-[#22232e]">
-                      <td className="px-3 py-2 text-text-primary truncate max-w-[250px]" title={p.project_path}>{p.project_name}</td>
-                      <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatNum(p.message_count)}</td>
-                      <td className="px-3 py-2 text-right text-text-muted font-mono">{formatNum(p.total_tokens)}</td>
-                      <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatUsd(p.estimated_cost_usd)}</td>
-                    </tr>
+                    <ProjectRow key={i} p={p} />
                   ))}
                 </tbody>
               </table>
