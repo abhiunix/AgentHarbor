@@ -133,6 +133,14 @@ function formatUsd(n: number): string { return `$${n.toFixed(2)}`; }
 
 function shellQuote(p: string): string { return `'${p.replace(/'/g, "'\\''")}'`; }
 
+/** Detect a git worktree path (`.../<repo>/.claude/worktrees/<name>`) and its parent repo. */
+function worktreeInfo(path: string): { isWorktree: boolean; parent?: string } {
+  const m = path.match(/\/([^/]+)\/\.claude\/worktrees\//);
+  if (m) return { isWorktree: true, parent: m[1] };
+  if (path.includes("/worktrees/")) return { isWorktree: true };
+  return { isWorktree: false };
+}
+
 function ProjectRow({ p }: { p: ProjectStat }) {
   const [copied, setCopied] = useState<"resume" | "dir" | null>(null);
   const copy = async (text: string, which: "resume" | "dir") => {
@@ -143,33 +151,47 @@ function ProjectRow({ p }: { p: ProjectStat }) {
     } catch { /* clipboard unavailable */ }
   };
   return (
-    <tr className="border-b border-[#1e1f2a] hover:bg-[#22232e] group">
-      <td className="px-3 py-2 text-text-primary max-w-[280px]" title={p.project_path}>
-        <div className="flex items-center gap-2">
-          <span className="truncate">{p.project_name}</span>
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={() => invoke("start_claude_in_project", { projectPath: p.project_path }).catch(() => {})}
-              title="Start a Claude session in this project directory"
-              className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 whitespace-nowrap"
-            >
-              Start session
-            </button>
-            <button
-              onClick={() => copy(`cd ${shellQuote(p.project_path)} && claude -c`, "resume")}
-              title="Copy: cd '<path>' && claude -c"
-              className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2b36] text-text-secondary hover:text-text-primary whitespace-nowrap"
-            >
-              {copied === "resume" ? "Copied" : "Copy resume"}
-            </button>
-            <button
-              onClick={() => copy(p.project_path, "dir")}
-              title="Copy the project directory path"
-              className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2b36] text-text-secondary hover:text-text-primary whitespace-nowrap"
-            >
-              {copied === "dir" ? "Copied" : "Copy dir"}
-            </button>
-          </div>
+    <tr className="border-b border-[#1e1f2a] hover:bg-[#22232e]">
+      <td className="px-3 py-2 w-[220px] max-w-[220px]">
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="block truncate text-text-primary" title={p.project_path}>{p.project_name}</span>
+          {(() => {
+            const wt = worktreeInfo(p.project_path);
+            if (!wt.isWorktree) return null;
+            return (
+              <span
+                className="self-start text-[9px] px-1.5 py-0.5 rounded border border-purple-500/40 text-purple-300 bg-purple-500/10 whitespace-nowrap"
+                title={wt.parent ? `Git worktree of ${wt.parent}` : "Git worktree"}
+              >
+                {wt.parent ? `worktree · ${wt.parent}` : "worktree"}
+              </span>
+            );
+          })()}
+        </div>
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => invoke("start_claude_in_project", { projectPath: p.project_path }).catch(() => {})}
+            title="Start a Claude session in this project directory"
+            className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 whitespace-nowrap"
+          >
+            Start session
+          </button>
+          <button
+            onClick={() => copy(`cd ${shellQuote(p.project_path)} && claude -c`, "resume")}
+            title="Copy: cd '<path>' && claude -c"
+            className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2b36] text-text-secondary hover:text-text-primary whitespace-nowrap w-[86px]"
+          >
+            {copied === "resume" ? "Copied" : "Copy resume"}
+          </button>
+          <button
+            onClick={() => copy(p.project_path, "dir")}
+            title="Copy the project directory path"
+            className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2b36] text-text-secondary hover:text-text-primary whitespace-nowrap w-[92px]"
+          >
+            {copied === "dir" ? "Copied" : "Copy directory"}
+          </button>
         </div>
       </td>
       <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatNum(p.message_count)}</td>
@@ -454,7 +476,63 @@ function Badge({ text, color = "bg-accent-blue/20 text-accent-blue" }: { text: s
   return <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${color}`}>{text}</span>;
 }
 
-function Section({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+function CopyButton({ value, title = "Copy" }: { value: string; title?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch { /* clipboard unavailable */ }
+      }}
+      title={title}
+      className="shrink-0 text-text-muted hover:text-text-primary transition-colors"
+    >
+      {copied ? (
+        <svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+function InfoTip({ text }: { text: string }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (!show) return;
+    const close = () => setShow(false);
+    // Defer to the next tick so the click that opened it isn't the one that closes it.
+    const id = setTimeout(() => document.addEventListener("click", close), 0);
+    return () => { clearTimeout(id); document.removeEventListener("click", close); };
+  }, [show]);
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setShow((s) => !s); }}
+        title="What is this?"
+        className="w-4 h-4 inline-flex items-center justify-center rounded-full border border-[#3a3b46] italic font-serif text-[10px] leading-none text-text-muted hover:text-text-primary hover:border-text-secondary"
+      >
+        i
+      </button>
+      {show && (
+        <span className="absolute left-5 top-1/2 -translate-y-1/2 z-20 w-80 normal-case tracking-normal font-normal bg-[#1a1b23] border border-[#2a2b36] rounded-lg px-3 py-2 text-[11px] leading-relaxed text-text-secondary shadow-lg">
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function Section({ title, children, defaultOpen = true, info }: { title: string; children: React.ReactNode; defaultOpen?: boolean; info?: string }) {
   const storageKey = `claude-v2-${title}`;
   const [open, setOpen] = useState(() => {
     try { const s = localStorage.getItem(storageKey); return s !== "0"; } catch { return defaultOpen; }
@@ -462,12 +540,15 @@ function Section({ title, children, defaultOpen = true }: { title: string; child
   const toggle = () => { const next = !open; setOpen(next); try { localStorage.setItem(storageKey, next ? "1" : "0"); } catch {} };
   return (
     <div className="mb-6">
-      <button onClick={toggle} className="flex items-center gap-2 w-full text-left mb-3 group">
-        <svg className={`w-3 h-3 text-text-muted transition-transform ${open ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted group-hover:text-text-secondary">{title}</h3>
-      </button>
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={toggle} className="flex items-center gap-2 text-left group">
+          <svg className={`w-3 h-3 text-text-muted transition-transform ${open ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted group-hover:text-text-secondary">{title}</h3>
+        </button>
+        {info && <InfoTip text={info} />}
+      </div>
       {open && children}
     </div>
   );
@@ -1114,7 +1195,15 @@ function ClaudeAnalyticsV2Inner() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
               <div>
                 <span className="text-text-muted block mb-0.5">Email</span>
-                <div className="text-text-primary font-medium truncate">{ai?.email_address ?? overview.email ?? "-"}</div>
+                {(() => {
+                  const email = ai?.email_address ?? overview.email;
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-text-primary font-medium truncate">{email ?? "-"}</span>
+                      {email && <CopyButton value={email} title="Copy email" />}
+                    </div>
+                  );
+                })()}
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">Name</span>
@@ -1131,7 +1220,10 @@ function ClaudeAnalyticsV2Inner() {
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">Account ID</span>
-                <div className="text-text-primary font-mono text-[10px] truncate">{ai?.uuid ?? "-"}</div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-text-primary font-mono text-[10px] truncate">{ai?.uuid ?? "-"}</span>
+                  {ai?.uuid && <CopyButton value={ai.uuid} title="Copy account ID" />}
+                </div>
               </div>
             </div>
 
@@ -1299,18 +1391,18 @@ function ClaudeAnalyticsV2Inner() {
                 ))}
                 {ai?.is_verified && <Badge text="VERIFIED" color="bg-emerald-500/20 text-emerald-400" />}
                 {memberships && memberships.length > 1 && (
-                  <span
-                    className="text-text-muted text-[10px] cursor-help underline decoration-dotted decoration-[#3a3b46] underline-offset-2"
-                    title={memberships
-                      .map((m: any) => {
-                        const name = m?.organization?.name ?? "Unknown org";
-                        const role = m?.role ? ` (${m.role})` : "";
-                        return `${name}${role}`;
-                      })
-                      .join("\n")}
-                  >
-                    member of {memberships.length} organizations
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-text-muted text-xs">member of {memberships.length} organizations:</span>
+                    {memberships.map((m: any, i: number) => (
+                      <span
+                        key={i}
+                        title={m?.role ? `Role: ${m.role}` : undefined}
+                        className="text-xs text-text-secondary px-2 py-0.5 rounded-md border border-cyan-500/50 bg-cyan-500/5"
+                      >
+                        {m?.organization?.name ?? "Unknown org"}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
@@ -1516,7 +1608,7 @@ function ClaudeAnalyticsV2Inner() {
 
         {/* ── Section 2.5: Usage Stats ─────────────────────────────────── */}
         <Section title="Usage Stats">
-          <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             {/* Favorite Model */}
             <StatCard
               label="Favorite Model"
@@ -1927,7 +2019,7 @@ function ClaudeAnalyticsV2Inner() {
 
         {/* Section 9: Inference Geography */}
         {overview.geo_breakdown.length > 0 && (
-          <Section title="Inference Geography">
+          <Section title="Inference Geography" info="Each request records which Anthropic region served it (its inference_geo). 'global' means it was routed through the multi-region endpoint rather than pinned to a specific region, which is the default for Pro/Max accounts. You'll only see a split like 'us 60% / europe 40%' if your account or org pins inference to specific regions (some Enterprise/Zero-Data-Retention setups route to us-only or eu-only). A single 100% bar just means there's nothing to split.">
             <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
               <div className="space-y-2">
                 {overview.geo_breakdown.map((g, i) => {
@@ -1955,7 +2047,8 @@ function ClaudeAnalyticsV2Inner() {
             <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] overflow-hidden">
               <table className="w-full text-xs">
                 <thead><tr className="border-b border-[#2a2b36] text-text-muted">
-                  <th className="text-left px-3 py-2">Project</th>
+                  <th className="text-left px-3 py-2 w-[220px]">Project</th>
+                  <th className="text-left px-3 py-2">Actions</th>
                   <th className="text-right px-3 py-2">Messages</th>
                   <th className="text-right px-3 py-2">Tokens</th>
                   <th className="text-right px-3 py-2">Cost</th>
@@ -2032,27 +2125,6 @@ function ClaudeAnalyticsV2Inner() {
             </div>
           </Section>
         )}
-
-        {/* Section 13: Enterprise Placeholder */}
-        <Section title="Enterprise Analytics" defaultOpen={false}>
-          <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-6 text-center">
-            <div className="text-2xl mb-2">🔒</div>
-            <h3 className="text-sm font-semibold text-text-primary mb-1">Enterprise Features</h3>
-            <p className="text-xs text-text-muted mb-3 max-w-md mx-auto">
-              Connect an Admin API key to unlock real USD costs, team productivity metrics, DAU/WAU/MAU, skill usage, and more.
-            </p>
-            <div className="flex flex-wrap justify-center gap-2 mb-4">
-              <Badge text="Real Costs" color="bg-emerald-500/20 text-emerald-400" />
-              <Badge text="Team Productivity" color="bg-blue-500/20 text-blue-400" />
-              <Badge text="DAU/WAU/MAU" color="bg-purple-500/20 text-purple-400" />
-              <Badge text="Skill Usage" color="bg-amber-500/20 text-amber-400" />
-              <Badge text="Connector Usage" color="bg-cyan-500/20 text-cyan-400" />
-            </div>
-            <button disabled className="px-4 py-2 bg-[#2a2b36] text-text-muted rounded-lg text-xs cursor-not-allowed">
-              Coming Soon
-            </button>
-          </div>
-        </Section>
 
         </div>{/* end data sections opacity wrapper */}
       </div>
