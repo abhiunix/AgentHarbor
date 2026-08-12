@@ -227,8 +227,18 @@ export function setEnabledAdapterIds(ids: string[]): void {
   } catch { /* noop */ }
 }
 
+/** Move the Analytics feature to the front of an adapter's feature list. */
+function analyticsFirst(features: AdapterFeature[]): AdapterFeature[] {
+  const isAnalytics = (f: AdapterFeature) => f.id === "analytics" || f.id === "analytics-v2";
+  const analytics = features.filter(isAnalytics);
+  if (analytics.length === 0) return features;
+  return [...analytics, ...features.filter((f) => !isAnalytics(f))];
+}
+
 /** Get only the enabled adapter plugins. Coming-soon adapters are always included. */
 export function getEnabledAdapterPlugins(): AdapterPlugin[] {
   const enabled = new Set(getEnabledAdapterIds());
-  return adapterPlugins.filter((p) => p.comingSoon || enabled.has(p.id));
+  return adapterPlugins
+    .filter((p) => p.comingSoon || enabled.has(p.id))
+    .map((p) => ({ ...p, features: analyticsFirst(p.features) }));
 }
