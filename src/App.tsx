@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useAppZoom } from "./lib/useAppZoom";
 import { AppLayout } from "./components/layout/AppLayout";
 import { TestBridge } from "./components/common/TestBridge";
 import { TrayPopover } from "./components/tray/TrayPopover";
@@ -206,6 +207,11 @@ function NavigateListener() {
   return null;
 }
 
+function ZoomController() {
+  useAppZoom();
+  return null;
+}
+
 function App() {
   const [windowLabel, setWindowLabel] = useState<string | null>(null);
 
@@ -228,6 +234,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <ZoomController />
       <TestBridge />
       <NavigateListener />
       <AppInitializer>
