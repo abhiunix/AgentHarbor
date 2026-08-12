@@ -147,7 +147,7 @@ function ProjectRow({ p }: { p: ProjectStat }) {
       <td className="px-3 py-2 text-text-primary max-w-[280px]" title={p.project_path}>
         <div className="flex items-center gap-2">
           <span className="truncate">{p.project_name}</span>
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => invoke("start_claude_in_project", { projectPath: p.project_path }).catch(() => {})}
               title="Start a Claude session in this project directory"
@@ -1229,7 +1229,6 @@ function ClaudeAnalyticsV2Inner() {
                   const ex = overview.extra as any;
                   const spendUsed = ex?.spend_used_usd;
                   const spendLimit = ex?.spend_limit_usd;
-                  const spendReason = ex?.spend_disabled_reason;
                   // Prefer the `spend` ledger: it's the source for the official
                   // "Usage credits" panel and stays valid even when momentarily
                   // out_of_credits (limit + spent persist; only the balance is 0).
@@ -1241,7 +1240,6 @@ function ClaudeAnalyticsV2Inner() {
                         <span className="text-text-muted font-normal"> / {formatUsd(spendLimit)}</span>
                         <div className="text-[10px] text-text-muted font-normal mt-0.5">
                           {pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`}
-                          {spendReason ? ` · ${String(spendReason).replace(/_/g, " ")}` : ""}
                         </div>
                       </div>
                     );
