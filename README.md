@@ -38,6 +38,43 @@ AgentHarbor is an AI coding agent manager — a native tray app for macOS and Wi
 
 ---
 
+## Screenshots
+
+<div align="center">
+
+<img src="docs/assets/screenshot-tray.webp" alt="AgentHarbor tray popover with live limits and spend for Claude, Cursor, Codex and Gemini" width="300">
+
+<sub>Live limits, active agents, and Today / Week / All-time spend for every provider, right in your menu bar.</sub>
+
+<br><br>
+
+### Deep analytics behind every provider
+
+<img src="docs/assets/screenshot-usage-limits.webp" alt="Session and weekly usage limits with per-window severity coloring and reset countdowns" width="820">
+
+<sub>Session and weekly limits with severity coloring, an active-window marker, and reset countdowns.</sub>
+
+<br><br>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshot-cost-analysis.webp" alt="Cost analysis broken down by component and by model"><br><sub>Cost by component and by model, at API-equivalent rates</sub></td>
+    <td width="50%"><img src="docs/assets/screenshot-token-usage.webp" alt="Token usage over time, input, output and cache"><br><sub>Token usage over time: input, output, and cache</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshot-message-log.webp" alt="Per-message log with model, tokens, tier and cost"><br><sub>Per-message log: model, tokens, tier, and cost</sub></td>
+    <td width="50%"><img src="docs/assets/screenshot-cursor-analytics.webp" alt="Cursor analytics inside AgentHarbor"><br><sub>Not just Claude: Cursor, Codex, and Gemini too</sub></td>
+  </tr>
+</table>
+
+<br>
+
+<a href="https://openxsecurity.com/blog/agentharbor-vs-ccusage-vs-codexbar"><b>See how it compares to ccusage and CodexBar &rarr;</b></a>
+
+</div>
+
+---
+
 ## Why AgentHarbor?
 
 Tools like [ccusage](https://github.com/ryoppippi/ccusage) and [Claude Code Usage Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) do one job very well: if you want a terminal-based Claude Code usage monitor, use them. AgentHarbor is built for a different job — an always-on desktop app that watches **all** your providers and also manages the config files they read.
