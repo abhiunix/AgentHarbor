@@ -1122,7 +1122,7 @@ function ClaudeAnalyticsV2Inner() {
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">Role</span>
-                <div className="text-text-primary font-medium capitalize">{primaryOrg?.member_role ?? "User"}</div>
+                <div className="text-text-primary font-medium capitalize">{primaryOrg?.role ?? primaryOrg?.member_role ?? "User"}</div>
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">Subscription</span>
@@ -1155,7 +1155,12 @@ function ClaudeAnalyticsV2Inner() {
                   {overview.credit_usage ? (
                     <Badge text="ENABLED" color="bg-emerald-500/20 text-emerald-400" />
                   ) : (
-                    <Badge text="DISABLED" color="bg-[#2a2b36] text-text-muted" />
+                    <span title={(() => {
+                      const reason = (overview.extra as any)?.extra_usage_disabled_reason;
+                      return reason ? `Disabled: ${String(reason).replace(/_/g, " ")}` : undefined;
+                    })()}>
+                      <Badge text="DISABLED" color="bg-[#2a2b36] text-text-muted" />
+                    </span>
                   )}
                 </div>
               </div>
@@ -1179,7 +1184,18 @@ function ClaudeAnalyticsV2Inner() {
                     )}
                   </div>
                 ) : (
-                  <span className="text-text-muted">-</span>
+                  <div className="text-text-muted">
+                    Not enabled
+                    {(() => {
+                      const reason = (overview.extra as any)?.extra_usage_disabled_reason;
+                      if (!reason) return null;
+                      return (
+                        <div className="text-[10px] mt-0.5">
+                          {String(reason).replace(/_/g, " ")}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 )}
               </div>
               <div>
@@ -1208,7 +1224,18 @@ function ClaudeAnalyticsV2Inner() {
                 ))}
                 {ai?.is_verified && <Badge text="VERIFIED" color="bg-emerald-500/20 text-emerald-400" />}
                 {memberships && memberships.length > 1 && (
-                  <span className="text-text-muted text-[10px]">{memberships.length} organizations</span>
+                  <span
+                    className="text-text-muted text-[10px] cursor-help underline decoration-dotted decoration-[#3a3b46] underline-offset-2"
+                    title={memberships
+                      .map((m: any) => {
+                        const name = m?.organization?.name ?? "Unknown org";
+                        const role = m?.role ? ` (${m.role})` : "";
+                        return `${name}${role}`;
+                      })
+                      .join("\n")}
+                  >
+                    member of {memberships.length} organizations
+                  </span>
                 )}
               </div>
             )}

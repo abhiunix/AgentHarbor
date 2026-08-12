@@ -97,6 +97,10 @@ struct ExtraUsage {
     used_credits: Option<f64>,
     utilization: Option<f64>,
     currency: Option<String>,
+    #[serde(default)]
+    disabled_reason: Option<String>,
+    #[serde(default)]
+    credits_ever_enabled: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -1385,6 +1389,19 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         }
         if let Some(eu_enabled) = org.and_then(|o| o.has_extra_usage_enabled) {
             extra.insert("has_extra_usage_enabled".into(), serde_json::Value::Bool(eu_enabled));
+        }
+
+        // Why extra usage is off (e.g. "out_of_credits"), so the UI can explain
+        // the DISABLED badge instead of showing a bare dash.
+        if let Some(ref u) = usage {
+            if let Some(ref eu) = u.extra_usage {
+                if let Some(ref reason) = eu.disabled_reason {
+                    extra.insert("extra_usage_disabled_reason".into(), serde_json::json!(reason));
+                }
+                if let Some(ever) = eu.credits_ever_enabled {
+                    extra.insert("extra_usage_credits_ever_enabled".into(), serde_json::Value::Bool(ever));
+                }
+            }
         }
 
         // Enterprise-specific spend signals (used by tray / analytics page UI).
