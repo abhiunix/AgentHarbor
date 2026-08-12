@@ -248,80 +248,6 @@ export function Sidebar() {
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
-        {/* ── Library ─────────────────────────────────── */}
-        <div className="flex items-center justify-between px-3 pt-4 pb-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-            Library
-          </span>
-          {newItemsCount > 0 && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-accent-green/20 text-accent-green animate-pulse">
-              {newItemsCount} NEW
-            </span>
-          )}
-        </div>
-        <nav className="px-2 space-y-0.5">
-          {typeItems.map((item) => (
-            <NavItem
-              key={item.type}
-              icon={item.icon}
-              iconImg={item.iconImg}
-              label={item.label}
-              count={capabilityCounts[item.type]}
-              active={isRegistryView && filters.type === item.type}
-              onClick={() => handleTypeClick(item.type)}
-              testId={item.type === "all" ? "sidebar-all" : undefined}
-            />
-          ))}
-        </nav>
-
-        <div className="px-2 mt-1 space-y-0.5">
-          <NavItem
-            icon="⊛"
-            label="Agents"
-            count={agentCounts.total}
-            active={isAgentsView}
-            onClick={() => navigate("/agents")}
-          />
-          <NavItem
-            icon="⚙"
-            label="Presets"
-            count={presets.length}
-            active={location.pathname === "/presets" || location.pathname.startsWith("/presets/")}
-            onClick={() => navigate("/presets")}
-          />
-        </div>
-
-        {/* ── Utilities (Projects + Notes + Debate) ───── */}
-        <SectionHeader title="Utilities" />
-        <nav className="px-2 space-y-0.5">
-          <NavItem
-            icon="📁"
-            label="All Projects"
-            active={location.pathname === "/projects"}
-            onClick={() => navigate("/projects")}
-          />
-          <NavItem
-            icon="📝"
-            label="Private Notes"
-            active={location.pathname === "/notes"}
-            onClick={() => navigate("/notes")}
-          />
-          <div className="relative">
-            <NavItem
-              icon="⚖️"
-              label="AI Debate"
-              active={location.pathname === "/debate"}
-              onClick={() => navigate("/debate")}
-            />
-            {debateIsRunning && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-accent-blue/15 border border-accent-blue/40 text-accent-blue font-mono pointer-events-none">
-                <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse" />
-                {debateCurrentTurn > 0 ? `Turn ${debateCurrentTurn}` : "starting…"}
-              </span>
-            )}
-          </div>
-        </nav>
-
         {/* ── Adapters (collapsible per-adapter) ──────── */}
         <SectionHeader title="Adapters" />
         <div className="px-2 space-y-0.5">
@@ -365,6 +291,80 @@ export function Sidebar() {
               />
             )
           )}
+        </div>
+
+        {/* ── Utilities (Projects + Notes + Debate) ───── */}
+        <SectionHeader title="Utilities" />
+        <nav className="px-2 space-y-0.5">
+          <NavItem
+            icon="📁"
+            label="All Projects"
+            active={location.pathname === "/projects"}
+            onClick={() => navigate("/projects")}
+          />
+          <NavItem
+            icon="📝"
+            label="Private Notes"
+            active={location.pathname === "/notes"}
+            onClick={() => navigate("/notes")}
+          />
+          <div className="relative">
+            <NavItem
+              icon="⚖️"
+              label="AI Debate"
+              active={location.pathname === "/debate"}
+              onClick={() => navigate("/debate")}
+            />
+            {debateIsRunning && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-accent-blue/15 border border-accent-blue/40 text-accent-blue font-mono pointer-events-none">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse" />
+                {debateCurrentTurn > 0 ? `Turn ${debateCurrentTurn}` : "starting…"}
+              </span>
+            )}
+          </div>
+        </nav>
+
+        {/* ── Library ─────────────────────────────────── */}
+        <div className="flex items-center justify-between px-3 pt-4 pb-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+            Library
+          </span>
+          {newItemsCount > 0 && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-accent-green/20 text-accent-green animate-pulse">
+              {newItemsCount} NEW
+            </span>
+          )}
+        </div>
+        <nav className="px-2 space-y-0.5">
+          {typeItems.map((item) => (
+            <NavItem
+              key={item.type}
+              icon={item.icon}
+              iconImg={item.iconImg}
+              label={item.label}
+              count={capabilityCounts[item.type]}
+              active={isRegistryView && filters.type === item.type}
+              onClick={() => handleTypeClick(item.type)}
+              testId={item.type === "all" ? "sidebar-all" : undefined}
+            />
+          ))}
+        </nav>
+
+        <div className="px-2 mt-1 space-y-0.5">
+          <NavItem
+            icon="⊛"
+            label="Agents"
+            count={agentCounts.total}
+            active={isAgentsView}
+            onClick={() => navigate("/agents")}
+          />
+          <NavItem
+            icon="⚙"
+            label="Presets"
+            count={presets.length}
+            active={location.pathname === "/presets" || location.pathname.startsWith("/presets/")}
+            onClick={() => navigate("/presets")}
+          />
         </div>
       </div>
 
