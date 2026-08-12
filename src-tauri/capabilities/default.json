@@ -5,6 +5,7 @@
   "windows": ["main", "tray-popover"],
   "permissions": [
     "core:default",
+    "core:webview:allow-set-webview-zoom",
     "opener:default",
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",

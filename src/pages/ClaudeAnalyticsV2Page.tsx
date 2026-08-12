@@ -1348,7 +1348,6 @@ function ClaudeAnalyticsV2Inner() {
                 </div>
               </div>
               <div>
-                <span className="text-text-muted block mb-0.5">Usage this cycle</span>
                 {(() => {
                   const ex = overview.extra as any;
                   const spendUsed = ex?.spend_used_usd;
@@ -1356,49 +1355,50 @@ function ClaudeAnalyticsV2Inner() {
                   // Prefer the `spend` ledger: it's the source for the official
                   // "Usage credits" panel and stays valid even when momentarily
                   // out_of_credits (limit + spent persist; only the balance is 0).
+                  let used: number | undefined;
+                  let limit: number | null | undefined;
+                  let pct: number | undefined;
                   if (spendUsed != null && spendLimit != null) {
-                    const pct = ex?.spend_percent ?? (spendLimit > 0 ? (spendUsed / spendLimit) * 100 : 0);
+                    used = spendUsed; limit = spendLimit;
+                    pct = ex?.spend_percent ?? (spendLimit > 0 ? (spendUsed / spendLimit) * 100 : 0);
+                  } else if (overview.credit_usage) {
+                    used = overview.credit_usage.used;
+                    limit = overview.credit_usage.limit;
+                    if (limit != null) pct = limit > 0 ? (used / limit) * 100 : 0;
+                  }
+                  const pctLabel = pct != null ? ` (${pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)}% used)` : "";
+                  if (used == null) {
+                    const reason = ex?.extra_usage_disabled_reason;
                     return (
-                      <div className="text-text-primary font-semibold">
-                        {formatUsd(spendUsed)}
-                        <span className="text-text-muted font-normal"> / {formatUsd(spendLimit)}</span>
-                        <div className="text-[10px] text-text-muted font-normal mt-0.5">
-                          {pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`}
+                      <>
+                        <span className="text-text-muted block mb-0.5">Usage this cycle</span>
+                        <div className="text-text-muted">
+                          Not enabled
+                          {reason ? <div className="text-[10px] mt-0.5">{String(reason).replace(/_/g, " ")}</div> : null}
                         </div>
-                      </div>
+                      </>
                     );
                   }
-                  if (overview.credit_usage) {
-                    return (
+                  return (
+                    <>
+                      <span className="text-text-muted block mb-0.5">Usage this cycle{pctLabel}</span>
                       <div className="text-text-primary font-semibold">
-                        {formatUsd(overview.credit_usage.used)}
-                        {overview.credit_usage.limit != null ? (
-                          <>
-                            <span className="text-text-muted font-normal"> / {formatUsd(overview.credit_usage.limit)}</span>
-                            <div className="text-[10px] text-text-muted font-normal mt-0.5">
-                              {(() => {
-                                const pct = (overview.credit_usage.used / overview.credit_usage.limit) * 100;
-                                return pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`;
-                              })()}
-                            </div>
-                          </>
+                        {formatUsd(used)}
+                        {limit != null ? (
+                          <span className="text-text-muted font-normal"> / {formatUsd(limit)}</span>
                         ) : (
-                          <span className="text-text-muted font-normal text-[10px] block mt-0.5">No cap</span>
+                          <span className="text-text-muted font-normal text-[10px] ml-1">No cap</span>
                         )}
                       </div>
-                    );
-                  }
-                  const reason = ex?.extra_usage_disabled_reason;
-                  return (
-                    <div className="text-text-muted">
-                      Not enabled
-                      {reason ? <div className="text-[10px] mt-0.5">{String(reason).replace(/_/g, " ")}</div> : null}
-                    </div>
+                    </>
                   );
                 })()}
               </div>
               <div>
-                <span className="text-text-muted block mb-0.5">API-Equiv. Value</span>
+                <div className="flex items-center gap-1 mb-0.5">
+                  <span className="text-text-muted">API-Equiv. Value</span>
+                  <InfoTip text="What your token usage over this period would cost at standard pay-as-you-go API prices, if you were billed per token instead of through your subscription. It's an equivalent-value estimate for comparison, not an actual charge — your plan already covers this usage." />
+                </div>
                 <div className="text-emerald-400 font-semibold">
                   {formatUsd(displayEstimatedCost)}
                   <span className="text-[9px] text-text-muted font-normal ml-1">({timeRange})</span>
@@ -2119,7 +2119,8 @@ function ClaudeAnalyticsV2Inner() {
         )}
 
         {/* Section 11: Plugins & Productivity */}
-        <Section title="Plugins & Productivity" defaultOpen={false}>
+        <Section title="Plugins & Productivity" defaultOpen={false} info="Counts read from your local ~/.claude/ folder. Plugins: installed Claude Code plugins. Commands: your personal slash-commands in ~/.claude/commands (plugin-bundled ones aren't counted here). Plans: saved plan documents from plan mode. Todos: task-list items across sessions. Hooks: hook log entries (times hooks have fired, not how many you've configured). Checkpoints: file snapshots Claude Code takes before editing, so edits can be rewound — this grows fast.">
+
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
             <StatCard label="Plugins" value={`${overview.plugins_count}`} />
             <StatCard label="Commands" value={`${overview.custom_commands_count}`} />
