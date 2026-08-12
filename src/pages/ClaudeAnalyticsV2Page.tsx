@@ -131,6 +131,54 @@ function formatNum(n: number | null | undefined): string {
 
 function formatUsd(n: number): string { return `$${n.toFixed(2)}`; }
 
+function shellQuote(p: string): string { return `'${p.replace(/'/g, "'\\''")}'`; }
+
+function ProjectRow({ p }: { p: ProjectStat }) {
+  const [copied, setCopied] = useState<"resume" | "dir" | null>(null);
+  const copy = async (text: string, which: "resume" | "dir") => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied(null), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+  return (
+    <tr className="border-b border-[#1e1f2a] hover:bg-[#22232e] group">
+      <td className="px-3 py-2 text-text-primary max-w-[280px]" title={p.project_path}>
+        <div className="flex items-center gap-2">
+          <span className="truncate">{p.project_name}</span>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => invoke("start_claude_in_project", { projectPath: p.project_path }).catch(() => {})}
+              title="Start a Claude session in this project directory"
+              className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 whitespace-nowrap"
+            >
+              Start session
+            </button>
+            <button
+              onClick={() => copy(`cd ${shellQuote(p.project_path)} && claude -c`, "resume")}
+              title="Copy: cd '<path>' && claude -c"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2b36] text-text-secondary hover:text-text-primary whitespace-nowrap"
+            >
+              {copied === "resume" ? "Copied" : "Copy resume"}
+            </button>
+            <button
+              onClick={() => copy(p.project_path, "dir")}
+              title="Copy the project directory path"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2b36] text-text-secondary hover:text-text-primary whitespace-nowrap"
+            >
+              {copied === "dir" ? "Copied" : "Copy dir"}
+            </button>
+          </div>
+        </div>
+      </td>
+      <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatNum(p.message_count)}</td>
+      <td className="px-3 py-2 text-right text-text-muted font-mono">{formatNum(p.total_tokens)}</td>
+      <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatUsd(p.estimated_cost_usd)}</td>
+    </tr>
+  );
+}
+
 /** Strong highlight for the rate-limit row that matches derived `limit_state`. */
 function rateLimitRowExhausted(overview: Overview, rl: RateLimitWindow): boolean {
   const ls = overview.limit_state;
@@ -1152,51 +1200,78 @@ function ClaudeAnalyticsV2Inner() {
               <div>
                 <span className="text-text-muted block mb-0.5">Extra Usage</span>
                 <div className="flex items-center gap-1.5">
-                  {overview.credit_usage ? (
-                    <Badge text="ENABLED" color="bg-emerald-500/20 text-emerald-400" />
-                  ) : (
-                    <span title={(() => {
-                      const reason = (overview.extra as any)?.extra_usage_disabled_reason;
-                      return reason ? `Disabled: ${String(reason).replace(/_/g, " ")}` : undefined;
-                    })()}>
-                      <Badge text="DISABLED" color="bg-[#2a2b36] text-text-muted" />
-                    </span>
-                  )}
+                  {(() => {
+                    const ex = overview.extra as any;
+                    // Credits are "configured" if there's a spend limit or credits
+                    // were ever enabled — even if momentarily out_of_credits.
+                    const configured = overview.credit_usage != null
+                      || ex?.spend_limit_usd != null
+                      || ex?.extra_usage_credits_ever_enabled === true;
+                    const reason = ex?.spend_disabled_reason ?? ex?.extra_usage_disabled_reason;
+                    if (configured) {
+                      return (
+                        <span title={reason ? `Currently: ${String(reason).replace(/_/g, " ")}` : undefined}>
+                          <Badge text="ENABLED" color="bg-emerald-500/20 text-emerald-400" />
+                        </span>
+                      );
+                    }
+                    return (
+                      <span title={reason ? `Disabled: ${String(reason).replace(/_/g, " ")}` : undefined}>
+                        <Badge text="DISABLED" color="bg-[#2a2b36] text-text-muted" />
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">Usage this cycle</span>
-                {overview.credit_usage ? (
-                  <div className="text-text-primary font-semibold">
-                    {formatUsd(overview.credit_usage.used)}
-                    {overview.credit_usage.limit != null ? (
-                      <>
-                        <span className="text-text-muted font-normal"> / {formatUsd(overview.credit_usage.limit)}</span>
+                {(() => {
+                  const ex = overview.extra as any;
+                  const spendUsed = ex?.spend_used_usd;
+                  const spendLimit = ex?.spend_limit_usd;
+                  // Prefer the `spend` ledger: it's the source for the official
+                  // "Usage credits" panel and stays valid even when momentarily
+                  // out_of_credits (limit + spent persist; only the balance is 0).
+                  if (spendUsed != null && spendLimit != null) {
+                    const pct = ex?.spend_percent ?? (spendLimit > 0 ? (spendUsed / spendLimit) * 100 : 0);
+                    return (
+                      <div className="text-text-primary font-semibold">
+                        {formatUsd(spendUsed)}
+                        <span className="text-text-muted font-normal"> / {formatUsd(spendLimit)}</span>
                         <div className="text-[10px] text-text-muted font-normal mt-0.5">
-                          {(() => {
-                            const pct = (overview.credit_usage.used / overview.credit_usage.limit) * 100;
-                            return pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`;
-                          })()}
+                          {pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`}
                         </div>
-                      </>
-                    ) : (
-                      <span className="text-text-muted font-normal text-[10px] block mt-0.5">No cap</span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-text-muted">
-                    Not enabled
-                    {(() => {
-                      const reason = (overview.extra as any)?.extra_usage_disabled_reason;
-                      if (!reason) return null;
-                      return (
-                        <div className="text-[10px] mt-0.5">
-                          {String(reason).replace(/_/g, " ")}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
+                      </div>
+                    );
+                  }
+                  if (overview.credit_usage) {
+                    return (
+                      <div className="text-text-primary font-semibold">
+                        {formatUsd(overview.credit_usage.used)}
+                        {overview.credit_usage.limit != null ? (
+                          <>
+                            <span className="text-text-muted font-normal"> / {formatUsd(overview.credit_usage.limit)}</span>
+                            <div className="text-[10px] text-text-muted font-normal mt-0.5">
+                              {(() => {
+                                const pct = (overview.credit_usage.used / overview.credit_usage.limit) * 100;
+                                return pct >= 10 ? `${pct.toFixed(0)}% used` : `${pct.toFixed(1)}% used`;
+                              })()}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-text-muted font-normal text-[10px] block mt-0.5">No cap</span>
+                        )}
+                      </div>
+                    );
+                  }
+                  const reason = ex?.extra_usage_disabled_reason;
+                  return (
+                    <div className="text-text-muted">
+                      Not enabled
+                      {reason ? <div className="text-[10px] mt-0.5">{String(reason).replace(/_/g, " ")}</div> : null}
+                    </div>
+                  );
+                })()}
               </div>
               <div>
                 <span className="text-text-muted block mb-0.5">API-Equiv. Value</span>
@@ -1887,12 +1962,7 @@ function ClaudeAnalyticsV2Inner() {
                 </tr></thead>
                 <tbody>
                   {overview.project_breakdown.slice(0, 20).map((p, i) => (
-                    <tr key={i} className="border-b border-[#1e1f2a] hover:bg-[#22232e]">
-                      <td className="px-3 py-2 text-text-primary truncate max-w-[250px]" title={p.project_path}>{p.project_name}</td>
-                      <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatNum(p.message_count)}</td>
-                      <td className="px-3 py-2 text-right text-text-muted font-mono">{formatNum(p.total_tokens)}</td>
-                      <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatUsd(p.estimated_cost_usd)}</td>
-                    </tr>
+                    <ProjectRow key={i} p={p} />
                   ))}
                 </tbody>
               </table>

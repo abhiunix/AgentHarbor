@@ -124,6 +124,42 @@ struct ClaudeUsageResponse {
     #[serde(default)]
     limits: Option<Vec<ApiLimitEntry>>,
     extra_usage: Option<ExtraUsage>,
+    #[serde(default)]
+    spend: Option<Spend>,
+}
+
+/// Minor-unit money amount, e.g. `{ amount_minor: 500, exponent: 2 }` = $5.00.
+#[derive(Deserialize, Debug)]
+struct MinorMoney {
+    amount_minor: Option<f64>,
+    #[serde(default)]
+    exponent: Option<i32>,
+}
+
+impl MinorMoney {
+    fn to_major(&self) -> Option<f64> {
+        let amt = self.amount_minor?;
+        let exp = self.exponent.unwrap_or(2);
+        Some(amt / 10f64.powi(exp))
+    }
+}
+
+/// The `spend` block drives the official "Usage credits" panel: spent this
+/// cycle, the monthly spend limit, and remaining balance. `enabled` flips to
+/// false with `disabled_reason: "out_of_credits"` once the balance is depleted,
+/// but the limit and ledger stay valid — the panel is still shown.
+#[derive(Deserialize, Debug)]
+struct Spend {
+    used: Option<MinorMoney>,
+    limit: Option<MinorMoney>,
+    #[serde(default)]
+    percent: Option<f64>,
+    #[serde(default)]
+    balance: Option<MinorMoney>,
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    disabled_reason: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -1400,6 +1436,30 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
                 }
                 if let Some(ever) = eu.credits_ever_enabled {
                     extra.insert("extra_usage_credits_ever_enabled".into(), serde_json::Value::Bool(ever));
+                }
+            }
+
+            // The `spend` block powers the "Usage credits" panel. Surface it
+            // whenever a monthly limit exists, even if `enabled` is momentarily
+            // false because the balance is depleted (out_of_credits).
+            if let Some(ref sp) = u.spend {
+                if let Some(used) = sp.used.as_ref().and_then(|m| m.to_major()) {
+                    extra.insert("spend_used_usd".into(), serde_json::json!(used));
+                }
+                if let Some(limit) = sp.limit.as_ref().and_then(|m| m.to_major()) {
+                    extra.insert("spend_limit_usd".into(), serde_json::json!(limit));
+                }
+                if let Some(balance) = sp.balance.as_ref().and_then(|m| m.to_major()) {
+                    extra.insert("spend_balance_usd".into(), serde_json::json!(balance));
+                }
+                if let Some(pct) = sp.percent {
+                    extra.insert("spend_percent".into(), serde_json::json!(pct));
+                }
+                if let Some(enabled) = sp.enabled {
+                    extra.insert("spend_enabled".into(), serde_json::Value::Bool(enabled));
+                }
+                if let Some(ref reason) = sp.disabled_reason {
+                    extra.insert("spend_disabled_reason".into(), serde_json::json!(reason));
                 }
             }
         }

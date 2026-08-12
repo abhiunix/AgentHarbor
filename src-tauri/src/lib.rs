@@ -43,7 +43,7 @@ use commands::custom::{
 use commands::projects::{
     get_all_projects, get_project_detail, add_project, remove_project,
     record_deployment, open_project_in_finder, open_project_in_cursor,
-    open_project_in_vscode, open_project_in_terminal,
+    open_project_in_vscode, open_project_in_terminal, start_claude_in_project,
     get_project_installed_items, remove_project_item,
 };
 use commands::importexport::{
@@ -279,6 +279,7 @@ pub fn run() {
             open_project_in_cursor,
             open_project_in_vscode,
             open_project_in_terminal,
+            start_claude_in_project,
             get_project_installed_items,
             remove_project_item,
             export_data,

@@ -470,6 +470,10 @@ export async function openProjectInTerminal(projectPath: string): Promise<void> 
   return invoke<void>("open_project_in_terminal", { projectPath });
 }
 
+export async function startClaudeInProject(projectPath: string): Promise<void> {
+  return invoke<void>("start_claude_in_project", { projectPath });
+}
+
 export interface InstalledItem {
   name: string;
   item_type: string;
