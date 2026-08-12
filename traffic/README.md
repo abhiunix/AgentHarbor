@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-08-11.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-08-12.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 261 | 60 |
-| Clones | 402 | 226 |
+| Views | 295 | 75 |
+| Clones | 414 | 234 |
 
 Stars 10 | Forks 1 | Open issues 8
 
@@ -28,23 +28,22 @@ Stars 10 | Forks 1 | Open issues 8
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| github.com | 52 | 7 |
+| github.com | 56 | 7 |
 | t.co | 33 | 9 |
-| reddit.com | 6 | 6 |
-| com.reddit.frontpage | 3 | 2 |
-| Google | 1 | 1 |
+| reddit.com | 19 | 13 |
+| com.reddit.frontpage | 4 | 3 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 114 | 39 |
-| /graphs/traffic | 13 | 1 |
-| /pulse | 12 | 4 |
+| / | 134 | 51 |
+| /graphs/traffic | 16 | 1 |
+| /pulse | 13 | 4 |
 | /pulls | 8 | 2 |
 | /commits/main | 6 | 2 |
 | /pull/27 | 6 | 2 |
+| /releases/tag/v1.1.1 | 5 | 3 |
 | /releases/tag/v1.0.132 | 5 | 2 |
 | /network | 4 | 1 |
 | /tree/main/traffic | 4 | 1 |
-| /forks | 3 | 2 |
