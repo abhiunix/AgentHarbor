@@ -88,6 +88,10 @@ struct ApiLimitEntry {
     percent: Option<f64>,
     resets_at: Option<String>,
     scope: Option<ApiLimitScope>,
+    #[serde(default)]
+    severity: Option<String>,
+    #[serde(default)]
+    is_active: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -736,8 +740,22 @@ fn parse_window(
 /// Build rate-limit windows from a usage response. Prefers the modern
 /// `limits[]` array (which carries per-model `weekly_scoped` windows, e.g.
 /// "Fable (7d)"); falls back to the legacy named fields when absent.
+#[cfg(test)]
 fn build_rate_limits(u: &ClaudeUsageResponse, show_internal: bool) -> Vec<RateLimitWindow> {
+    build_rate_limits_with_meta(u, show_internal).0
+}
+
+/// Same as `build_rate_limits`, plus a per-label meta map `{ label: { severity,
+/// is_active } }` derived from the modern `limits[]` array. The map is keyed by
+/// the same label the window carries, so the frontend can look it up to color
+/// bars by severity and flag the currently-binding window. Empty for the legacy
+/// fallback windows, which don't carry severity.
+fn build_rate_limits_with_meta(
+    u: &ClaudeUsageResponse,
+    show_internal: bool,
+) -> (Vec<RateLimitWindow>, serde_json::Value) {
     let mut rate_limits = Vec::new();
+    let mut meta = serde_json::Map::new();
 
     if let Some(ref entries) = u.limits {
         for e in entries {
@@ -757,6 +775,13 @@ fn build_rate_limits(u: &ClaudeUsageResponse, show_internal: bool) -> Vec<RateLi
                 // Unreleased experiment kinds — ignore rather than chase.
                 _ => continue,
             };
+            meta.insert(
+                label.clone(),
+                serde_json::json!({
+                    "severity": e.severity.clone(),
+                    "is_active": e.is_active.unwrap_or(false),
+                }),
+            );
             rate_limits.push(RateLimitWindow {
                 provider_id: "claude-code".into(),
                 label,
@@ -804,7 +829,7 @@ fn build_rate_limits(u: &ClaudeUsageResponse, show_internal: bool) -> Vec<RateLi
         }
     }
 
-    rate_limits
+    (rate_limits, serde_json::Value::Object(meta))
 }
 
 // ── Limit state derivation ─────────────────────────────────────────────────
@@ -1339,10 +1364,10 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         .claude_experimental_features;
 
     // Build rate limits (modern limits[] first, legacy named fields fallback)
-    let rate_limits = usage
+    let (rate_limits, rate_limit_meta) = usage
         .as_ref()
-        .map(|u| build_rate_limits(u, show_internal))
-        .unwrap_or_default();
+        .map(|u| build_rate_limits_with_meta(u, show_internal))
+        .unwrap_or_else(|| (Vec::new(), serde_json::Value::Object(Default::default())));
 
     let had_oauth_401 = oauth401.is_some();
     // Classify plan before deriving limit state so we can suppress plan-irrelevant flags.
@@ -1496,6 +1521,11 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
         let plan = creds.as_ref().and_then(|c| c.subscription_type.clone());
         (None, plan, None)
     };
+
+    // Per-window severity + active flag, keyed by label (see build_rate_limits_with_meta).
+    if rate_limit_meta.as_object().map(|m| !m.is_empty()).unwrap_or(false) {
+        extra.insert("rate_limit_meta".into(), rate_limit_meta.clone());
+    }
 
     // Stash the raw `/api/oauth/account` payload so the analytics page and
     // debug surfaces can see what the API actually returned.

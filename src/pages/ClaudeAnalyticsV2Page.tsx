@@ -217,6 +217,38 @@ function rateLimitRowExhausted(overview: Overview, rl: RateLimitWindow): boolean
   return false;
 }
 
+/** Per-window { severity, is_active } from the API's limits[], keyed by label. */
+function rlMeta(overview: Overview, label: string): { severity?: string; is_active?: boolean } | undefined {
+  const m = (overview.extra as Record<string, unknown> | undefined)?.rate_limit_meta as
+    | Record<string, { severity?: string; is_active?: boolean }>
+    | undefined;
+  return m?.[label];
+}
+
+/** Resolve a severity level, falling back to percent thresholds when the API omits it. */
+function severityLevel(severity: string | undefined, pct: number): "critical" | "warning" | "normal" {
+  const s = (severity ?? "").toLowerCase();
+  if (s === "critical" || pct >= 90) return "critical";
+  if (s === "warning" || pct >= 75) return "warning";
+  return "normal";
+}
+
+function severityFillClass(severity: string | undefined, pct: number): string {
+  switch (severityLevel(severity, pct)) {
+    case "critical": return "bg-red-500";
+    case "warning": return "bg-amber-500";
+    default: return "bg-emerald-500";
+  }
+}
+
+function severityTextClass(severity: string | undefined, pct: number): string {
+  switch (severityLevel(severity, pct)) {
+    case "critical": return "text-red-400";
+    case "warning": return "text-amber-400";
+    default: return "text-emerald-400";
+  }
+}
+
 /** Numeric values from `overview.extra` (serde_json can deserialize as number). */
 function extraNum(v: unknown): number | undefined {
   if (v == null) return undefined;
@@ -1410,6 +1442,31 @@ function ClaudeAnalyticsV2Inner() {
         </Section>
         )}
 
+        {/* ── Section 1.5: Models & Limits ─────────────────────────────── */}
+        {(() => {
+          const models = (primaryOrg?.organization?.claude_ai_bootstrap_models_config ?? []) as Array<{
+            model?: string; name?: string; hard_limit?: number; inactive?: boolean; overflow?: boolean; notice_text?: string;
+          }>;
+          const active = models.filter((m) => !m.inactive && m.hard_limit);
+          if (active.length === 0) return null;
+          active.sort((a, b) => (b.hard_limit ?? 0) - (a.hard_limit ?? 0));
+          return (
+            <Section title="Models & Limits" defaultOpen={false} info="Models your plan can use, each with its token hard-limit — the maximum length (in tokens) a single conversation with that model can reach before you must start a new one. This is a context-window cap for your plan, not a cost or a share of your usage limits. 'overflow' models are fallbacks used when a primary model is unavailable.">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                {active.map((m, i) => (
+                  <div key={i} className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] px-3 py-2" title={`${(m.hard_limit ?? 0).toLocaleString()} tokens${m.notice_text ? ` · ${m.notice_text}` : ""}`}>
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-[11px] text-text-primary truncate">{m.name ?? m.model}</span>
+                      {m.overflow && <span className="text-[8px] uppercase tracking-wider text-text-muted shrink-0">overflow</span>}
+                    </div>
+                    <div className="text-sm font-mono text-text-secondary">{formatNum(m.hard_limit)}</div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          );
+        })()}
+
         {/* ── Section 2: Your Usage Limits (API required) ──────────────── */}
         {/* Enterprise has no 5h/7d windows: rate_limits is empty but credit_usage carries the spend ledger. */}
         {(() => {
@@ -1476,9 +1533,12 @@ function ClaudeAnalyticsV2Inner() {
                     .map((rl, i) => (
                       <div key={i} className="mb-3 last:mb-0">
                         <div className="flex justify-between text-xs mb-1">
-                          <div>
+                          <div className="flex items-center gap-2">
                             <span className="text-text-secondary">{rl.label}</span>
-                            <span className="text-text-muted text-[10px] ml-2">Resets in {resetCountdown(rl.resets_at, rl.window_seconds)}</span>
+                            {rlMeta(overview, rl.label)?.is_active && (
+                              <span className="text-[8px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400" title="This is the currently-binding limit">Active</span>
+                            )}
+                            <span className="text-text-muted text-[10px]">Resets in {resetCountdown(rl.resets_at, rl.window_seconds)}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1493,18 +1553,14 @@ function ClaudeAnalyticsV2Inner() {
                               </div>
                             </div>
                           ) : (
-                            <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden flex">
+                            <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden">
                               <div
-                                className="h-full rounded-l-full transition-all duration-700 bg-red-500"
+                                className={`h-full rounded-full transition-all duration-700 ${severityFillClass(rlMeta(overview, rl.label)?.severity, rl.used_percent)}`}
                                 style={{ width: `${Math.min(rl.used_percent, 100)}%` }}
-                              />
-                              <div
-                                className="h-full rounded-r-full transition-all duration-700 bg-emerald-500"
-                                style={{ width: `${Math.max(100 - rl.used_percent, 0)}%` }}
                               />
                             </div>
                           )}
-                          <span className="text-red-400 font-semibold text-xs whitespace-nowrap">
+                          <span className={`font-semibold text-xs whitespace-nowrap ${severityTextClass(rlMeta(overview, rl.label)?.severity, rl.used_percent)}`}>
                             {rl.used_percent.toFixed(0)}% Used
                           </span>
                         </div>
@@ -1523,9 +1579,12 @@ function ClaudeAnalyticsV2Inner() {
                       .map((rl, i) => (
                         <div key={i}>
                           <div className="flex justify-between text-xs mb-1">
-                            <div>
+                            <div className="flex items-center gap-2">
                               <span className="text-text-secondary">{rl.label}</span>
-                              <span className="text-text-muted text-[10px] ml-2">
+                              {rlMeta(overview, rl.label)?.is_active && (
+                                <span className="text-[8px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400" title="This is the currently-binding limit">Active</span>
+                              )}
+                              <span className="text-text-muted text-[10px]">
                                 Resets {formatResetDateLabel(rl)}
                               </span>
                             </div>
@@ -1542,18 +1601,14 @@ function ClaudeAnalyticsV2Inner() {
                                 </div>
                               </div>
                             ) : (
-                              <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden flex">
+                              <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden">
                                 <div
-                                  className="h-full rounded-l-full transition-all duration-700 bg-red-500"
+                                  className={`h-full rounded-full transition-all duration-700 ${severityFillClass(rlMeta(overview, rl.label)?.severity, rl.used_percent)}`}
                                   style={{ width: `${Math.min(rl.used_percent, 100)}%` }}
-                                />
-                                <div
-                                  className="h-full rounded-r-full transition-all duration-700 bg-emerald-500"
-                                  style={{ width: `${Math.max(100 - rl.used_percent, 0)}%` }}
                                 />
                               </div>
                             )}
-                            <span className="text-red-400 font-semibold text-xs whitespace-nowrap">
+                            <span className={`font-semibold text-xs whitespace-nowrap ${severityTextClass(rlMeta(overview, rl.label)?.severity, rl.used_percent)}`}>
                               {rl.used_percent.toFixed(0)}% Used
                             </span>
                           </div>
