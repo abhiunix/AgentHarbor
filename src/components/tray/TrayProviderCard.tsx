@@ -522,13 +522,13 @@ function CursorCard({ provider }: { provider: TrayProviderSummary }) {
                 )}
                 {bonusVal > 0 && (
                   <div
-                    className="h-full bg-emerald-500 transition-all duration-300"
+                    className="h-full bg-amber-500 transition-all duration-300"
                     style={{ width: `${(bonusVal / totalSpent) * 100}%` }}
                   />
                 )}
                 {onDemandVal > 0 && (
                   <div
-                    className="h-full bg-amber-500 transition-all duration-300"
+                    className="h-full bg-orange-500 transition-all duration-300"
                     style={{ width: `${(onDemandVal / totalSpent) * 100}%` }}
                   />
                 )}
@@ -544,13 +544,13 @@ function CursorCard({ provider }: { provider: TrayProviderSummary }) {
                 )}
                 {bonus != null && bonusVal > 0 && (
                   <span className="flex items-center gap-1">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
                     <span className="text-[#9394a1]">{formatCurrency(bonusVal, "USD")} bonus</span>
                   </span>
                 )}
                 {onDemandVal > 0 && (
                   <span className="flex items-center gap-1">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-500" />
                     <span className="text-[#9394a1]">{formatCurrency(onDemandVal, "USD")} on-demand</span>
                   </span>
                 )}
@@ -595,7 +595,7 @@ function CursorCard({ provider }: { provider: TrayProviderSummary }) {
             {bonus != null && (
               <div className="bg-[#0e0f13] rounded p-1.5">
                 <div className="text-[8px] text-[#9394a1] uppercase">Bonus</div>
-                <div className="text-[11px] text-emerald-400 font-mono">{formatCurrency(bonus, "USD")}</div>
+                <div className="text-[11px] text-amber-400 font-mono">{formatCurrency(bonus, "USD")}</div>
                 <div className="text-[8px] text-[#9394a1]">Extra credits</div>
               </div>
             )}

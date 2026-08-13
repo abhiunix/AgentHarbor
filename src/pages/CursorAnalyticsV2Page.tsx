@@ -1169,8 +1169,8 @@ function CursorAnalyticsV2Inner() {
               const onDemandVal = onDemand?.used ?? 0;
               const segments: UsageSegment[] = [];
               if (includedVal > 0) segments.push({ label: "included", value: includedVal, color: "bg-blue-500", textColor: "text-blue-400" });
-              if (bonusVal > 0) segments.push({ label: "bonus", value: bonusVal, color: "bg-emerald-500", textColor: "text-emerald-400" });
-              if (onDemandVal > 0) segments.push({ label: "on-demand", value: onDemandVal, color: "bg-amber-500", textColor: "text-amber-400" });
+              if (bonusVal > 0) segments.push({ label: "bonus", value: bonusVal, color: "bg-amber-500", textColor: "text-amber-400" });
+              if (onDemandVal > 0) segments.push({ label: "on-demand", value: onDemandVal, color: "bg-orange-500", textColor: "text-orange-400" });
               return (
                 <MultiSegmentUsageBar
                   segments={segments}
