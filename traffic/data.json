@@ -717,6 +717,33 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-08-20": [
+      {
+        "referrer": "reddit.com",
+        "count": 26,
+        "uniques": 14
+      },
+      {
+        "referrer": "github.com",
+        "count": 16,
+        "uniques": 5
+      },
+      {
+        "referrer": "t.co",
+        "count": 6,
+        "uniques": 4
+      },
+      {
+        "referrer": "com.reddit.frontpage",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "referrer": "stahuj.cz",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "paths": {
@@ -1655,6 +1682,58 @@
         "count": 2,
         "uniques": 1
       }
+    ],
+    "2026-08-20": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 101,
+        "uniques": 41
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/graphs/traffic",
+        "count": 13,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulse",
+        "count": 7,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.1.1",
+        "count": 5,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/tree/main/src",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.1.4",
+        "count": 3,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/stargazers",
+        "count": 3,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulls",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/.github/FUNDING.yml",
+        "count": 2,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -1747,10 +1826,15 @@
       "stars": 11,
       "forks": 1,
       "issues": 8
+    },
+    "2026-08-20": {
+      "stars": 11,
+      "forks": 1,
+      "issues": 8
     }
   },
   "window": {
-    "asOf": "2026-08-19",
+    "asOf": "2026-08-20",
     "views": {
       "count": 175,
       "uniques": 44
