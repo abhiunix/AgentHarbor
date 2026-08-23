@@ -135,6 +135,10 @@
     "2026-08-20": {
       "count": 0,
       "uniques": 0
+    },
+    "2026-08-21": {
+      "count": 1,
+      "uniques": 1
     }
   },
   "clones": {
@@ -273,6 +277,10 @@
     "2026-08-20": {
       "count": 11,
       "uniques": 6
+    },
+    "2026-08-21": {
+      "count": 12,
+      "uniques": 4
     }
   },
   "referrers": {
@@ -801,6 +809,28 @@
         "referrer": "github.com",
         "count": 22,
         "uniques": 6
+      },
+      {
+        "referrer": "com.reddit.frontpage",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "referrer": "stahuj.cz",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-08-23": [
+      {
+        "referrer": "reddit.com",
+        "count": 23,
+        "uniques": 11
+      },
+      {
+        "referrer": "github.com",
+        "count": 20,
+        "uniques": 5
       },
       {
         "referrer": "com.reddit.frontpage",
@@ -1906,6 +1936,58 @@
         "count": 2,
         "uniques": 2
       }
+    ],
+    "2026-08-23": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 98,
+        "uniques": 36
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/graphs/traffic",
+        "count": 12,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulse",
+        "count": 9,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.1.1",
+        "count": 5,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/stargazers",
+        "count": 5,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.1.4",
+        "count": 4,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulls",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/tree/main/src",
+        "count": 2,
+        "uniques": 2
+      }
     ]
   },
   "repo": {
@@ -2013,17 +2095,22 @@
       "stars": 11,
       "forks": 1,
       "issues": 8
+    },
+    "2026-08-23": {
+      "stars": 11,
+      "forks": 1,
+      "issues": 8
     }
   },
   "window": {
-    "asOf": "2026-08-22",
+    "asOf": "2026-08-23",
     "views": {
-      "count": 176,
-      "uniques": 40
+      "count": 174,
+      "uniques": 38
     },
     "clones": {
-      "count": 319,
-      "uniques": 91
+      "count": 290,
+      "uniques": 82
     }
   }
 }
