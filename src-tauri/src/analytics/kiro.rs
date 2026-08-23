@@ -153,10 +153,11 @@ pub fn fetch_kiro_analytics() -> ProviderAnalytics {
     };
 
     // Run kiro-cli with a 20 second timeout
-    let output = Command::new(&kiro_path)
-        .args(["chat", "--no-interactive", "/usage"])
-        .env("NO_COLOR", "1")
-        .output();
+    let mut cmd = Command::new(&kiro_path);
+    cmd.args(["chat", "--no-interactive", "/usage"])
+        .env("NO_COLOR", "1");
+    crate::utils::platform::hide_console_window(&mut cmd);
+    let output = cmd.output();
 
     let output = match output {
         Ok(o) => o,

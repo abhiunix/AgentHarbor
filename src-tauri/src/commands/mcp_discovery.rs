@@ -239,6 +239,7 @@ fn discover_tools_stdio(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    crate::utils::platform::hide_console_window(&mut cmd);
 
     if !enriched_path.is_empty() {
         cmd.env("PATH", &enriched_path);

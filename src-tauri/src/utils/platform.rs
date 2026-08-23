@@ -1,5 +1,21 @@
 use std::process::Command;
 
+/// On Windows the app has no console, so spawning a console process (cmd,
+/// .cmd shims, CLI tools) flashes a new console window. CREATE_NO_WINDOW
+/// suppresses it; windows launched via `start` are unaffected. No-op elsewhere.
+pub fn hide_console_window(cmd: &mut Command) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = cmd;
+    }
+}
+
 /// Open a path in the platform's file manager.
 pub fn open_in_file_manager(path: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -41,9 +57,10 @@ pub fn open_in_terminal(path: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd")
-            .args(["/c", "start", "cmd", "/K", &format!("cd /d \"{}\"", path)])
-            .spawn()
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/c", "start", "cmd", "/K", &format!("cd /d \"{}\"", path)]);
+        hide_console_window(&mut cmd);
+        cmd.spawn()
             .map_err(|e| format!("Failed to open Command Prompt: {}", e))?;
     }
 
@@ -110,11 +127,12 @@ pub fn open_in_ide(ide: &str, path: &str) -> Result<(), String> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let cmd = resolve_cli_command(ide);
-        Command::new(&cmd)
-            .arg(path)
-            .spawn()
-            .map_err(|e| format!("Failed to open {} ({}): {}", ide, cmd, e))?;
+        let cli = resolve_cli_command(ide);
+        let mut cmd = Command::new(&cli);
+        cmd.arg(path);
+        hide_console_window(&mut cmd);
+        cmd.spawn()
+            .map_err(|e| format!("Failed to open {} ({}): {}", ide, cli, e))?;
         Ok(())
     }
 }
@@ -196,9 +214,10 @@ pub fn launch_in_terminal(command: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd")
-            .args(["/c", "start", "cmd", "/K", command])
-            .spawn()
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/c", "start", "cmd", "/K", command]);
+        hide_console_window(&mut cmd);
+        cmd.spawn()
             .map_err(|e| format!("Failed to open Command Prompt: {}", e))?;
     }
 
