@@ -653,6 +653,12 @@ mod tests {
         fs::create_dir_all(&claude).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&real, claude.join("shared")).unwrap();
+        #[cfg(windows)]
+        if std::os::windows::fs::symlink_dir(&real, claude.join("shared")).is_err() {
+            // Creating symlinks on Windows needs Developer Mode or admin.
+            eprintln!("skipping: symlink creation not permitted on this host");
+            return;
+        }
 
         let mut collector = SkillCollector::new(vec![]);
         collector.scan_dir(&agents, &["cursor"]);
@@ -787,6 +793,11 @@ mod tests {
         fs::write(path, body).unwrap();
     }
 
+    /// Embed a path in a JSON string literal (Windows backslashes must be escaped).
+    fn json_path(p: &Path) -> String {
+        p.to_string_lossy().replace('\\', "\\\\")
+    }
+
     #[test]
     fn picks_newest_record_and_reads_plugin_manifest() {
         let dir = tempdir().unwrap();
@@ -808,8 +819,8 @@ mod tests {
                   {{"scope":"project","installPath":"{}","version":"1.0.0","lastUpdated":"2026-01-01T00:00:00.000Z"}},
                   {{"scope":"user","installPath":"{}","version":"2.0.0","lastUpdated":"2026-05-01T00:00:00.000Z"}}
                 ]}}}}"#,
-                old.to_string_lossy(),
-                new.to_string_lossy()
+                json_path(&old),
+                json_path(&new)
             ),
         );
 
@@ -841,7 +852,7 @@ mod tests {
             &plugins.join("installed_plugins.json"),
             &format!(
                 r#"{{"version":2,"plugins":{{"lsp@mkt":[{{"scope":"user","installPath":"{}","version":"1.0.0","lastUpdated":"2026-05-01T00:00:00.000Z"}}]}}}}"#,
-                install.to_string_lossy()
+                json_path(&install)
             ),
         );
 
@@ -866,7 +877,7 @@ mod tests {
             &plugins.join("installed_plugins.json"),
             &format!(
                 r#"{{"version":2,"plugins":{{"gone@mkt":[{{"scope":"user","installPath":"{}","version":"1.0.0","lastUpdated":"2026-05-01T00:00:00.000Z"}}]}}}}"#,
-                install.to_string_lossy()
+                json_path(&install)
             ),
         );
         let settings = dir.path().join("settings.json");

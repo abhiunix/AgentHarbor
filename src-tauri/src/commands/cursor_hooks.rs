@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn test_resolve_hooks_path_global() {
         let (path, is_global) = resolve_hooks_path(None).unwrap();
-        assert!(path.to_string_lossy().contains(".cursor/hooks.json"));
+        assert!(path.ends_with(PathBuf::from(".cursor").join("hooks.json")));
         assert!(is_global);
     }
 
