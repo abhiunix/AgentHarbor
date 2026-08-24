@@ -10,6 +10,7 @@ const PROVIDER_TOKEN_CONFIG: Record<string, { keyType: string; placeholder: stri
   "openrouter": { keyType: "api-key", placeholder: "sk-or-v1-...", label: "OpenRouter API Key" },
   "kimi": { keyType: "auth-token", placeholder: "JWT token from kimi-auth cookie", label: "Kimi Auth Token" },
   "kimi-k2": { keyType: "api-key", placeholder: "API key", label: "Kimi K2 API Key" },
+  "deepseek": { keyType: "api-key", placeholder: "sk-...", label: "DeepSeek API Key" },
   "zai": { keyType: "api-key", placeholder: "API key", label: "z.ai API Key" },
   "augment": { keyType: "session-token", placeholder: "Session token", label: "Augment Session Token" },
   "amp": { keyType: "session-cookie", placeholder: "session=...", label: "Amp Session Cookie" },

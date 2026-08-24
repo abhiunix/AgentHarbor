@@ -302,6 +302,14 @@ pub fn all_provider_info() -> Vec<ProviderInfo> {
             has_api: true,
         },
         ProviderInfo {
+            id: "deepseek".into(),
+            name: "DeepSeek".into(),
+            auth_type: "api-key".into(),
+            description: "Account balance (granted + topped-up), multi-currency".into(),
+            has_local_data: false,
+            has_api: true,
+        },
+        ProviderInfo {
             id: "kimi-k2".into(),
             name: "Kimi K2".into(),
             auth_type: "api-key".into(),
