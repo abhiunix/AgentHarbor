@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   AgentDefinition,
   AgentModel,
@@ -70,7 +70,11 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
 
   const displayId = agent?.id ?? "Assigned on create";
 
-  const validate = (): boolean => {
+  const nameRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  const validate = (): Record<string, string> => {
     const newErrors: Record<string, string> = {};
 
     if (!name.trim()) {
@@ -84,13 +88,26 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
     }
 
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    return newErrors;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validate()) return;
+    const newErrors = validate();
+    if (Object.keys(newErrors).length > 0) {
+      // Bring the first missing field into view — required fields (notably the
+      // system prompt) sit below the fold, so a silent return looks like a dead
+      // button. Focus scrolls the field into the scrollable form container.
+      const firstRef = newErrors.name
+        ? nameRef
+        : newErrors.description
+          ? descriptionRef
+          : promptRef;
+      firstRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      firstRef.current?.focus({ preventScroll: true });
+      return;
+    }
 
     let id: string;
     if (agent?.id) {
@@ -161,6 +178,7 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
               Agent Name <span className="text-accent-red">*</span>
             </label>
             <input
+              ref={nameRef}
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -180,6 +198,7 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
               Description <span className="text-accent-red">*</span>
             </label>
             <textarea
+              ref={descriptionRef}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Use this agent when..."
@@ -315,6 +334,7 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
               System Prompt <span className="text-accent-red">*</span>
             </label>
             <textarea
+              ref={promptRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="You are a specialized agent that..."
@@ -340,6 +360,12 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
               </code>
             </p>
           </div>
+
+          {Object.keys(errors).length > 0 && (
+            <p className="text-xs text-accent-red text-right">
+              Please complete: {Object.values(errors).join(", ")}
+            </p>
+          )}
 
           <div className="flex items-center justify-between">
             <div>
