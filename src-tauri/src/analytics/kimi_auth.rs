@@ -133,7 +133,10 @@ fn refresh_once(host: &str, refresh_token: &str) -> RefreshOutcome {
     }
     let code = status.as_u16();
     let body = resp.text().unwrap_or_default();
-    if code == 401 || code == 403 {
+    // A revoked/expired refresh token comes back as 400 `invalid_grant`; 401/403
+    // are outright rejections. None of these are worth retrying — the user must
+    // re-run `kimi login`. Only 5xx / network errors are transient.
+    if code == 400 || code == 401 || code == 403 {
         RefreshOutcome::Rejected(body)
     } else {
         RefreshOutcome::Transient(format!("refresh HTTP {code}: {body}"))
