@@ -12,7 +12,7 @@ use commands::registry::{
     get_all_agents, get_all_capabilities, get_capabilities_by_type, search_agents,
     search_capabilities,
 };
-use commands::agents::{save_agent, delete_agent};
+use commands::agents::{save_agent, delete_agent, preview_import_agents, import_agents_from_dir};
 use commands::project::{
     select_project_folder, detect_adapters, get_recent_projects, add_recent_project,
     remove_recent_project, get_global_config, open_in_app,
@@ -231,6 +231,8 @@ pub fn run() {
             search_agents,
             save_agent,
             delete_agent,
+            preview_import_agents,
+            import_agents_from_dir,
             select_project_folder,
             detect_adapters,
             get_recent_projects,

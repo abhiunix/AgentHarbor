@@ -167,6 +167,23 @@ export interface Preset {
   is_bundled: boolean;
 }
 
+export type ImportStatus = "new" | "duplicate-id" | "content-match";
+
+export interface ImportableAgent {
+  agent: AgentDefinition;
+  source_tool: string;
+  source_path: string;
+  status: ImportStatus;
+  model_defaulted: boolean;
+}
+
+export interface AgentImportResult {
+  imported: number;
+  skipped: number;
+  conflicts: string[];
+  agents: AgentDefinition[];
+}
+
 export type AdapterType = "claude-code" | "cursor" | "windsurf";
 
 export interface Project {
