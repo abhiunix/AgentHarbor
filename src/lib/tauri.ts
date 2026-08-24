@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { UniversalCapability, AgentDefinition, Preset } from "./types";
+import type {
+  UniversalCapability,
+  AgentDefinition,
+  Preset,
+  ImportableAgent,
+  AgentImportResult,
+} from "./types";
 
 export async function getAllCapabilities(): Promise<UniversalCapability[]> {
   return invoke<UniversalCapability[]>("get_all_capabilities");
@@ -33,6 +39,27 @@ export async function saveAgent(agent: AgentDefinition): Promise<AgentDefinition
 
 export async function deleteAgent(id: string): Promise<void> {
   return invoke<void>("delete_agent", { id });
+}
+
+export async function previewImportAgents(
+  path: string,
+  includeCodex = false
+): Promise<ImportableAgent[]> {
+  return invoke<ImportableAgent[]>("preview_import_agents", { path, includeCodex });
+}
+
+export async function importAgentsFromDir(
+  path: string,
+  selectedPaths: string[],
+  includeCodex = false,
+  renameOnConflict = false
+): Promise<AgentImportResult> {
+  return invoke<AgentImportResult>("import_agents_from_dir", {
+    path,
+    selectedPaths,
+    includeCodex,
+    renameOnConflict,
+  });
 }
 
 export async function getPresets(): Promise<Preset[]> {

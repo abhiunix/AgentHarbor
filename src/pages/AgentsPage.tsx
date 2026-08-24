@@ -1,12 +1,18 @@
 import { useCallback, useState } from "react";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentList } from "../components/agents/AgentList";
 import { AgentDetail } from "../components/agents/AgentDetail";
 import { AgentEditor } from "../components/agents/AgentEditor";
+import { ImportAgentsModal } from "../components/agents/ImportAgentsModal";
 import { AgentDeployWizard } from "../components/deploy/AgentDeployWizard";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
-import { saveAgent as saveAgentApi, deleteAgent as deleteAgentApi } from "../lib/tauri";
-import type { AgentDefinition } from "../lib/types";
+import {
+  saveAgent as saveAgentApi,
+  deleteAgent as deleteAgentApi,
+  previewImportAgents,
+} from "../lib/tauri";
+import type { AgentDefinition, ImportableAgent } from "../lib/types";
 
 export function AgentsPage() {
   const {
@@ -21,6 +27,30 @@ export function AgentsPage() {
 
   const [deployAgent, setDeployAgent] = useState<AgentDefinition | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [importState, setImportState] = useState<{
+    path: string;
+    candidates: ImportableAgent[];
+  } | null>(null);
+  const [importScanning, setImportScanning] = useState(false);
+
+  const handleImportClick = useCallback(async () => {
+    const selected = await openFileDialog({ directory: true, multiple: false });
+    if (!selected || typeof selected !== "string") return;
+    setImportScanning(true);
+    try {
+      const candidates = await previewImportAgents(selected);
+      setImportState({ path: selected, candidates });
+    } catch (error) {
+      console.error("Failed to scan folder for agents:", error);
+    } finally {
+      setImportScanning(false);
+    }
+  }, []);
+
+  const handleImported = useCallback(async () => {
+    setImportState(null);
+    await loadAgents();
+  }, [loadAgents]);
 
   const handleOpenDetail = useCallback(
     (agent: AgentDefinition) => {
@@ -98,7 +128,18 @@ export function AgentsPage() {
         onDeploy={handleDeploy}
         onEdit={handleEdit}
         onDelete={handleDeleteClick}
+        onImport={handleImportClick}
+        importing={importScanning}
       />
+
+      {importState && (
+        <ImportAgentsModal
+          path={importState.path}
+          candidates={importState.candidates}
+          onClose={() => setImportState(null)}
+          onImported={handleImported}
+        />
+      )}
 
       {detailAgent && (
         <>

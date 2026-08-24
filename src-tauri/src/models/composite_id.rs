@@ -109,7 +109,7 @@ impl CompositeId {
     }
 }
 
-fn to_kebab_slug(s: &str) -> String {
+pub fn to_kebab_slug(s: &str) -> String {
     let s = s
         .to_lowercase()
         .chars()

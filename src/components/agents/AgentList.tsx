@@ -15,6 +15,8 @@ interface AgentListProps {
   onDeploy: (agent: AgentDefinition) => void;
   onEdit?: (agent: AgentDefinition) => void;
   onDelete?: (id: string, name?: string) => void;
+  onImport?: () => void;
+  importing?: boolean;
 }
 
 export function AgentList({
@@ -22,6 +24,8 @@ export function AgentList({
   onDeploy,
   onEdit,
   onDelete,
+  onImport,
+  importing,
 }: AgentListProps) {
   const { loading, error, agents, filters, setVisibilityFilter } = useAgentStore();
   const filteredAgents = useFilteredAgents();
@@ -86,9 +90,23 @@ export function AgentList({
               </button>
             ))}
           </div>
-          <p className="text-sm text-text-muted">
-            Showing {filteredAgents.length} of {agents.length} agents
-          </p>
+          <div className="flex items-center gap-3">
+            {onImport && (
+              <button
+                type="button"
+                onClick={onImport}
+                disabled={importing}
+                data-testid="agents-import"
+                className="h-9 px-3 flex items-center gap-1.5 rounded-md bg-app-card border border-border text-sm text-text-primary hover:bg-app-card-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>↧</span>
+                <span>{importing ? "Scanning…" : "Import agents"}</span>
+              </button>
+            )}
+            <p className="text-sm text-text-muted">
+              Showing {filteredAgents.length} of {agents.length} agents
+            </p>
+          </div>
         </div>
       </div>
 

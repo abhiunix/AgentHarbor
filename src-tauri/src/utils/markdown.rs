@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use crate::models::composite_id::to_kebab_slug;
 use crate::models::{
-    AgentColor, AgentDefinition, AgentModel, MemoryScope, ToolAccess, Visibility,
+    AgentColor, AgentDefinition, AgentModel, CompositeId, MemoryScope, ToolAccess, Visibility,
 };
 
 #[derive(Debug)]
@@ -148,6 +149,202 @@ pub fn parse_agent_md(content: &str) -> Result<AgentDefinition, MarkdownError> {
         tools: vec![ToolAccess::All],
         required_capabilities: vec![],
         prompt: body.to_string(),
+        examples: vec![],
+    })
+}
+
+/// Lenient frontmatter for importing foreign agent files. Every field is optional and
+/// unknown keys (Claude's disallowedTools/permissionMode/skills, Cursor's readonly/
+/// is_background, Gemini's kind/tools/mcpServers/temperature, etc.) are silently dropped.
+#[derive(Deserialize, Debug, Default)]
+struct LenientFrontmatter {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    color: Option<String>,
+    #[serde(default)]
+    memory: Option<String>,
+}
+
+/// Split a `---\n<frontmatter>\n---\n<body>` document. Returns None when there is no
+/// closing frontmatter delimiter.
+fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
+    let content = content.trim_start();
+    if !content.starts_with("---") {
+        return None;
+    }
+    let rest = &content[3..];
+    let end_marker = rest.find("\n---")?;
+    let frontmatter_str = &rest[..end_marker];
+    let body_start = end_marker + 4;
+    let body = if body_start < rest.len() {
+        rest[body_start..].trim()
+    } else {
+        ""
+    };
+    Some((frontmatter_str, body))
+}
+
+/// Map an arbitrary model string to the three-value enum. Anything that isn't an exact
+/// haiku/sonnet/opus match (full model ids, inherit, fable, absent) defaults to sonnet
+/// and reports `defaulted = true`.
+fn map_import_model(raw: Option<&str>) -> (AgentModel, bool) {
+    match raw.map(|s| s.trim().to_lowercase()).as_deref() {
+        Some("haiku") => (AgentModel::Haiku, false),
+        Some("sonnet") => (AgentModel::Sonnet, false),
+        Some("opus") => (AgentModel::Opus, false),
+        _ => (AgentModel::Sonnet, true),
+    }
+}
+
+fn map_import_color(raw: Option<&str>) -> AgentColor {
+    match raw.map(|s| s.trim().to_lowercase()).as_deref() {
+        Some("red") => AgentColor::Red,
+        Some("green") => AgentColor::Green,
+        Some("yellow") => AgentColor::Yellow,
+        Some("purple") => AgentColor::Purple,
+        Some("orange") => AgentColor::Orange,
+        Some("pink") => AgentColor::Pink,
+        Some("cyan") => AgentColor::Cyan,
+        _ => AgentColor::Blue,
+    }
+}
+
+fn map_import_memory(raw: Option<&str>) -> MemoryScope {
+    match raw.map(|s| s.trim().to_lowercase()).as_deref() {
+        Some("local") => MemoryScope::Project,
+        _ => MemoryScope::None,
+    }
+}
+
+fn import_id(display_name: &str, fallback_name: &str) -> CompositeId {
+    let mut slug = to_kebab_slug(display_name);
+    if slug.is_empty() {
+        slug = to_kebab_slug(fallback_name);
+    }
+    if slug.is_empty() {
+        slug = "imported-agent".to_string();
+    }
+    CompositeId::new("imported", &slug)
+        .unwrap_or_else(|_| CompositeId::new("imported", "imported-agent").unwrap())
+}
+
+/// Parse a tool-native agent markdown file (Claude/Cursor/Gemini shape: YAML frontmatter +
+/// markdown body) leniently into the universal AgentDefinition. Author is set to "imported".
+/// When the frontmatter omits `name` the id/name fall back to "imported-agent"; the caller
+/// is expected to override with a better fallback (e.g. the file stem).
+pub fn parse_agent_md_lenient(content: &str, _source_tool: &str) -> AgentDefinition {
+    let (frontmatter_str, body) = split_frontmatter(content).unwrap_or(("", content.trim()));
+
+    let fm: LenientFrontmatter = if frontmatter_str.trim().is_empty() {
+        LenientFrontmatter::default()
+    } else {
+        serde_yaml::from_str(frontmatter_str).unwrap_or_default()
+    };
+
+    let display_name = fm
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("imported-agent")
+        .to_string();
+
+    let (model, _) = map_import_model(fm.model.as_deref());
+    let description = fm
+        .description
+        .map(|d| d.trim().trim_matches('"').to_string())
+        .unwrap_or_default();
+
+    AgentDefinition {
+        id: import_id(&display_name, "imported-agent"),
+        name: display_name,
+        description,
+        version: "1.0.0".to_string(),
+        author: "imported".to_string(),
+        visibility: Visibility::Private,
+        tags: vec![],
+        model,
+        color: map_import_color(fm.color.as_deref()),
+        memory: map_import_memory(fm.memory.as_deref()),
+        tools: vec![ToolAccess::All],
+        required_capabilities: vec![],
+        prompt: body.to_string(),
+        examples: vec![],
+    }
+}
+
+/// True when the file's frontmatter model wasn't an exact haiku/sonnet/opus match (or was
+/// absent) and [`parse_agent_md_lenient`] therefore defaulted it to sonnet.
+pub fn import_model_was_defaulted(content: &str) -> bool {
+    let (frontmatter_str, _) = split_frontmatter(content).unwrap_or(("", ""));
+    let fm: LenientFrontmatter = serde_yaml::from_str(frontmatter_str).unwrap_or_default();
+    map_import_model(fm.model.as_deref()).1
+}
+
+/// Extract an agent from a prose `AGENTS.md` (Codex) that has no frontmatter: the first
+/// heading becomes the name, the first paragraph the description, and the whole document
+/// the prompt (model always defaults to sonnet). Returns None for empty files and
+/// AgentHarbor manifest-stub files (which only contain the deployed-capabilities marker).
+pub fn extract_prose_agent(content: &str, fallback_name: &str) -> Option<AgentDefinition> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Skip manifest stubs: files whose only real content is the AgentHarbor marker/comments.
+    let meaningful: String = trimmed
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("<!--") && !t.contains("AgentHarbor:")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if meaningful.trim().is_empty() {
+        return None;
+    }
+
+    let name = trimmed
+        .lines()
+        .find(|l| l.trim_start().starts_with('#'))
+        .map(|l| l.trim_start().trim_start_matches('#').trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| fallback_name.to_string());
+
+    let mut description = String::new();
+    for para in trimmed.split("\n\n") {
+        let joined = para
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string();
+        if !joined.is_empty() {
+            description = joined;
+            break;
+        }
+    }
+
+    Some(AgentDefinition {
+        id: import_id(&name, fallback_name),
+        name,
+        description,
+        version: "1.0.0".to_string(),
+        author: "imported".to_string(),
+        visibility: Visibility::Private,
+        tags: vec![],
+        model: AgentModel::Sonnet,
+        color: AgentColor::Blue,
+        memory: MemoryScope::None,
+        tools: vec![ToolAccess::All],
+        required_capabilities: vec![],
+        prompt: trimmed.to_string(),
         examples: vec![],
     })
 }
@@ -473,6 +670,129 @@ Prompt"#;
         assert!(!mdc.contains("color:"));
         assert!(!mdc.contains("memory:"));
         assert!(!mdc.contains("name:"));
+    }
+
+    #[test]
+    fn test_lenient_claude_full_frontmatter() {
+        let md = r#"---
+name: code-reviewer
+description: "Reviews code for quality"
+model: opus
+color: purple
+memory: local
+tools: ["Read", "Grep"]
+disallowedTools: ["Bash"]
+permissionMode: ask
+---
+
+You are a meticulous code reviewer."#;
+
+        let agent = parse_agent_md_lenient(md, "claude-code");
+        assert_eq!(agent.id.author, "imported");
+        assert_eq!(agent.id.name, "code-reviewer");
+        assert_eq!(agent.description, "Reviews code for quality");
+        assert_eq!(agent.model, AgentModel::Opus);
+        assert_eq!(agent.color, AgentColor::Purple);
+        assert_eq!(agent.memory, MemoryScope::Project);
+        assert_eq!(agent.prompt, "You are a meticulous code reviewer.");
+        assert!(!import_model_was_defaulted(md));
+    }
+
+    #[test]
+    fn test_lenient_cursor_agent() {
+        let md = r#"---
+name: Background Refactorer
+description: "Refactors in the background"
+model: sonnet
+readonly: false
+is_background: true
+---
+
+Refactor safely."#;
+
+        let agent = parse_agent_md_lenient(md, "cursor");
+        assert_eq!(agent.name, "Background Refactorer");
+        assert_eq!(agent.id.name, "background-refactorer");
+        assert_eq!(agent.model, AgentModel::Sonnet);
+        assert_eq!(agent.prompt, "Refactor safely.");
+        assert!(!import_model_was_defaulted(md));
+    }
+
+    #[test]
+    fn test_lenient_cursor_agent_no_model_defaults() {
+        let md = r#"---
+name: no-model-agent
+description: "Has no model field"
+readonly: true
+---
+
+Do the thing."#;
+
+        let agent = parse_agent_md_lenient(md, "cursor");
+        assert_eq!(agent.model, AgentModel::Sonnet);
+        assert!(import_model_was_defaulted(md));
+    }
+
+    #[test]
+    fn test_lenient_gemini_full_model_id_defaults() {
+        let md = r#"---
+name: planner
+description: "Plans work"
+kind: local
+model: gemini-2.5-pro
+temperature: 0.4
+mcpServers: []
+---
+
+You plan carefully."#;
+
+        let agent = parse_agent_md_lenient(md, "gemini");
+        assert_eq!(agent.id.name, "planner");
+        assert_eq!(agent.model, AgentModel::Sonnet);
+        assert!(import_model_was_defaulted(md));
+        assert_eq!(agent.prompt, "You plan carefully.");
+    }
+
+    #[test]
+    fn test_extract_prose_codex_agents_md() {
+        let md = r#"# Repo Assistant
+
+Helps contributors navigate this repository and follow conventions.
+
+## Guidelines
+- Be concise."#;
+
+        let agent = extract_prose_agent(md, "agents").expect("should parse");
+        assert_eq!(agent.name, "Repo Assistant");
+        assert_eq!(agent.id.name, "repo-assistant");
+        assert_eq!(
+            agent.description,
+            "Helps contributors navigate this repository and follow conventions."
+        );
+        assert!(agent.prompt.contains("## Guidelines"));
+        assert_eq!(agent.model, AgentModel::Sonnet);
+    }
+
+    #[test]
+    fn test_extract_prose_skips_empty_and_manifest_stub() {
+        assert!(extract_prose_agent("   \n  ", "agents").is_none());
+        let stub = "<!-- AgentHarbor: Deployed Capabilities -->\n<!-- managed block -->";
+        assert!(extract_prose_agent(stub, "agents").is_none());
+    }
+
+    #[test]
+    fn test_lenient_fallback_name_when_missing() {
+        let md = r#"---
+description: "No name here"
+model: haiku
+---
+
+Body."#;
+        let agent = parse_agent_md_lenient(md, "claude-code");
+        // No name in frontmatter -> the parser uses the "imported-agent" sentinel that the
+        // command layer replaces with the file stem.
+        assert_eq!(agent.id.name, "imported-agent");
+        assert_eq!(agent.model, AgentModel::Haiku);
     }
 
     #[test]
