@@ -17,6 +17,7 @@ pub mod copilot;
 pub mod openrouter;
 pub mod kimi;
 pub mod deepseek;
+pub mod moonshot;
 pub mod zai;
 pub mod augment;
 pub mod amp;
