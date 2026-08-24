@@ -44,7 +44,7 @@ use commands::projects::{
     get_all_projects, get_project_detail, add_project, remove_project,
     record_deployment, open_project_in_finder, open_project_in_cursor,
     open_project_in_vscode, open_project_in_terminal, start_claude_in_project,
-    get_project_installed_items, remove_project_item,
+    start_kimi_in_project, get_project_installed_items, remove_project_item,
 };
 use commands::importexport::{
     export_data, import_data, validate_import_data,
@@ -152,6 +152,9 @@ use analytics::claude::{
 use analytics::claude_v2::{
     get_claude_v2_overview, get_claude_v2_token_timeseries, get_claude_v2_model_timeseries,
     get_claude_v2_message_log, get_claude_v2_prompt_history, export_claude_v2_csv,
+};
+use analytics::kimi_v2::{
+    get_kimi_v2_overview, get_kimi_v2_prompt_history, get_kimi_v2_connection_status,
 };
 use analytics::cursor_v2::{
     get_cursor_v2_connection_status, get_cursor_v2_overview, get_cursor_v2_usage_events,
@@ -282,6 +285,7 @@ pub fn run() {
             open_project_in_vscode,
             open_project_in_terminal,
             start_claude_in_project,
+            start_kimi_in_project,
             get_project_installed_items,
             remove_project_item,
             export_data,
@@ -474,6 +478,10 @@ pub fn run() {
             get_claude_v2_message_log,
             get_claude_v2_prompt_history,
             export_claude_v2_csv,
+            // Kimi Code Analytics V2 (local)
+            get_kimi_v2_overview,
+            get_kimi_v2_prompt_history,
+            get_kimi_v2_connection_status,
             get_claude_history,
             get_claude_active_sessions,
             get_claude_app_info,

@@ -403,6 +403,13 @@ pub fn start_claude_in_project(project_path: String) -> Result<(), String> {
     crate::utils::platform::launch_in_terminal(&format!("cd {} && claude", quoted))
 }
 
+/// Launch a fresh Kimi Code session in the given project directory.
+#[tauri::command]
+pub fn start_kimi_in_project(project_path: String) -> Result<(), String> {
+    let quoted = format!("'{}'", project_path.replace('\'', "'\\''"));
+    crate::utils::platform::launch_in_terminal(&format!("cd {} && kimi", quoted))
+}
+
 
 #[tauri::command]
 pub fn get_project_installed_items(project_path: String) -> Result<Vec<InstalledItem>, String> {
