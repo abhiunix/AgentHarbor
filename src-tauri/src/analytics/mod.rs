@@ -16,6 +16,7 @@ pub mod cursor_v2;
 pub mod copilot;
 pub mod openrouter;
 pub mod kimi;
+pub mod kimi_v2;
 pub mod deepseek;
 pub mod moonshot;
 pub mod zai;

@@ -52,6 +52,9 @@ const CursorAnalyticsV2Page = lazy(() =>
 const ClaudeAnalyticsV2Page = lazy(() =>
   import("./ClaudeAnalyticsV2Page").then((m) => ({ default: m.ClaudeAnalyticsV2Page }))
 );
+const KimiAnalyticsV2Page = lazy(() =>
+  import("./KimiAnalyticsV2Page").then((m) => ({ default: m.KimiAnalyticsV2Page }))
+);
 
 // Windsurf-specific
 const WindsurfRulesPage = lazy(() =>
@@ -152,6 +155,9 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
   },
   moonshot: {
     analytics: ProviderBalancePage as LazyPage,
+  },
+  kimi: {
+    "analytics-v2": KimiAnalyticsV2Page as LazyPage,
   },
 };
 

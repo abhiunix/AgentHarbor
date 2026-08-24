@@ -501,6 +501,93 @@ export async function startClaudeInProject(projectPath: string): Promise<void> {
   return invoke<void>("start_claude_in_project", { projectPath });
 }
 
+export async function startKimiInProject(projectPath: string): Promise<void> {
+  return invoke<void>("start_kimi_in_project", { projectPath });
+}
+
+// ── Kimi Code Analytics V2 (local) ──────────────────────────────────────────
+
+export interface KimiModelInfo {
+  id: string;
+  provider: string | null;
+  model: string | null;
+  max_context_size: number | null;
+  capabilities: string[];
+}
+
+export interface KimiProjectStat {
+  project_path: string;
+  project_name: string;
+  sessions: number;
+  messages: number;
+  context_tokens_peak: number;
+  last_activity: string | null;
+  last_session_id: string | null;
+}
+
+export interface KimiPromptEntry {
+  content: string;
+  project_path: string;
+  project_name: string;
+}
+
+export interface KimiPromptHistoryPage {
+  entries: KimiPromptEntry[];
+  total_count: number;
+  page: number;
+  page_size: number;
+}
+
+export interface KimiDailyActivity {
+  date: string;
+  message_count: number;
+  session_count: number;
+  tool_call_count: number;
+}
+
+export interface KimiV2Overview {
+  connected: boolean;
+  connection_method: string;
+  default_model: string | null;
+  total_sessions: number;
+  total_messages: number;
+  user_messages: number;
+  assistant_messages: number;
+  total_turns: number;
+  context_tokens_peak: number;
+  active_now: number;
+  hour_counts: number[];
+  daily_activity: KimiDailyActivity[];
+  first_session_date: string | null;
+  active_days: number;
+  total_days: number;
+  longest_streak: number;
+  current_streak: number;
+  most_active_weekday: string | null;
+  peak_hour: number | null;
+  projects: KimiProjectStat[];
+  models: KimiModelInfo[];
+}
+
+export async function getKimiV2Overview(
+  timeRange: string,
+  forceRefresh: boolean
+): Promise<KimiV2Overview> {
+  return invoke<KimiV2Overview>("get_kimi_v2_overview", { timeRange, forceRefresh });
+}
+
+export async function getKimiV2PromptHistory(
+  query: string | null,
+  page: number,
+  pageSize: number
+): Promise<KimiPromptHistoryPage> {
+  return invoke<KimiPromptHistoryPage>("get_kimi_v2_prompt_history", { query, page, pageSize });
+}
+
+export async function getKimiV2ConnectionStatus(): Promise<boolean> {
+  return invoke<boolean>("get_kimi_v2_connection_status");
+}
+
 export interface InstalledItem {
   name: string;
   item_type: string;
