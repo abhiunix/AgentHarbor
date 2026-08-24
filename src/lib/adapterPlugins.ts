@@ -166,6 +166,26 @@ export const adapterPlugins: AdapterPlugin[] = [
       { id: "analytics", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/codex/analytics" },
     ],
   },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    icon: "\uD83D\uDC0B",
+    color: "#4d6bfe",
+    defaultExpanded: false,
+    features: [
+      { id: "analytics", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/deepseek/analytics" },
+    ],
+  },
+  {
+    id: "moonshot",
+    name: "Moonshot",
+    icon: "\uD83C\uDF11",
+    color: "#7c4dff",
+    defaultExpanded: false,
+    features: [
+      { id: "analytics", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/moonshot/analytics" },
+    ],
+  },
   // ── Coming soon ──
   {
     id: "kiro",
@@ -208,13 +228,27 @@ function getDefaultEnabledAdapterIds(): string[] {
   return adapterPlugins.filter((p) => p.enabledByDefault !== false).map((p) => p.id);
 }
 
+// Adapters added after the enabled-list feature shipped. A user's stored list
+// predates them, so a one-time migration adds each default-on newcomer once
+// (without touching adapters the user explicitly disabled).
+const NEW_DEFAULT_ADAPTERS_MIGRATION_KEY = "agentharbor-adapters-migrated";
+const NEW_DEFAULT_ADAPTERS = ["deepseek", "moonshot"];
+
 /** Get the set of enabled adapter IDs from localStorage. Falls back to plugin defaults. */
 export function getEnabledAdapterIds(): string[] {
   try {
     const stored = localStorage.getItem(ENABLED_ADAPTERS_KEY);
     if (stored) {
       const parsed = JSON.parse(stored) as string[];
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        const done = localStorage.getItem(NEW_DEFAULT_ADAPTERS_MIGRATION_KEY);
+        if (done === "1") return parsed;
+        const toAdd = NEW_DEFAULT_ADAPTERS.filter((id) => !parsed.includes(id));
+        const merged = toAdd.length ? [...parsed, ...toAdd] : parsed;
+        if (toAdd.length) localStorage.setItem(ENABLED_ADAPTERS_KEY, JSON.stringify(merged));
+        localStorage.setItem(NEW_DEFAULT_ADAPTERS_MIGRATION_KEY, "1");
+        return merged;
+      }
     }
   } catch { /* noop */ }
   return getDefaultEnabledAdapterIds();
