@@ -77,6 +77,9 @@ const GeminiAgentsPage = lazy(() =>
 const GeminiExtensionsPage = lazy(() =>
   import("./GeminiExtensionsPage").then((m) => ({ default: m.GeminiExtensionsPage }))
 );
+const ProviderBalancePage = lazy(() =>
+  import("./ProviderBalancePage").then((m) => ({ default: m.ProviderBalancePage }))
+);
 const GeminiAnalyticsPage = lazy(() =>
   import("./GeminiAnalyticsPage").then((m) => ({ default: m.GeminiAnalyticsPage }))
 );
@@ -143,6 +146,12 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
     "global-config": CodexGlobalConfigPage as LazyPage,
     skills: CodexSkillsPage as LazyPage,
     analytics: CodexAnalyticsPage as LazyPage,
+  },
+  deepseek: {
+    analytics: ProviderBalancePage as LazyPage,
+  },
+  moonshot: {
+    analytics: ProviderBalancePage as LazyPage,
   },
 };
 

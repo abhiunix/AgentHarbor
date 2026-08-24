@@ -297,12 +297,6 @@ export function Sidebar() {
         <SectionHeader title="Utilities" />
         <nav className="px-2 space-y-0.5">
           <NavItem
-            icon="📊"
-            label="All Providers"
-            active={location.pathname === "/providers"}
-            onClick={() => navigate("/providers")}
-          />
-          <NavItem
             icon="📁"
             label="All Projects"
             active={location.pathname === "/projects"}
