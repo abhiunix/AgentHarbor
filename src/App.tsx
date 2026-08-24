@@ -15,6 +15,7 @@ import { PresetPage } from "./pages/PresetPage";
 import { NotesPage } from "./pages/NotesPage";
 import { DebatePage } from "./pages/DebatePage";
 import { OptimizePage } from "./pages/OptimizePage";
+import { UnifiedAnalyticsPage } from "./pages/UnifiedAnalyticsPage";
 import { AdapterFeaturePage } from "./pages/AdapterFeaturePage";
 import { useRegistryStore } from "./stores/registryStore";
 import { useAgentStore } from "./stores/agentStore";
@@ -245,6 +246,7 @@ function App() {
             <Route path="agents" element={<AgentsPage />} />
             <Route path="presets/*" element={<PresetPage />} />
             <Route path="projects" element={<ProjectsPage />} />
+            <Route path="providers" element={<UnifiedAnalyticsPage />} />
             <Route path="optimize" element={<OptimizePage />} />
             <Route path="notes" element={<NotesPage />} />
             <Route path="debate" element={<DebatePage />} />
