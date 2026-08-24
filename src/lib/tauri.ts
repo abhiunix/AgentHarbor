@@ -545,6 +545,24 @@ export interface KimiDailyActivity {
   tool_call_count: number;
 }
 
+export interface KimiRateLimitWindow {
+  provider_id: string;
+  label: string;
+  used_percent: number;
+  remaining_percent: number;
+  resets_at: string | null;
+  resets_in_seconds: number | null;
+  window_seconds: number | null;
+}
+
+export type KimiLimitState =
+  | { kind: "healthy" }
+  | { kind: "approaching"; worst_pct: number; label: string; resets_at: string | null }
+  | { kind: "reached"; used_pct: number; cap: number | null; resets_at: string | null }
+  | { kind: "rate_limited"; retry_after_secs: number | null; message: string }
+  | { kind: "unauthenticated"; message: string }
+  | { kind: string };
+
 export interface KimiV2Overview {
   connected: boolean;
   connection_method: string;
@@ -567,6 +585,10 @@ export interface KimiV2Overview {
   peak_hour: number | null;
   projects: KimiProjectStat[];
   models: KimiModelInfo[];
+  usage_connected: boolean;
+  usage_connection_method: string;
+  rate_limits: KimiRateLimitWindow[];
+  limit_state: KimiLimitState | null;
 }
 
 export async function getKimiV2Overview(

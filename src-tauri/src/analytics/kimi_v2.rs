@@ -5,6 +5,7 @@
 //!   kimi.json (work_dirs → md5→path map)  ·  config.toml (model catalog)
 //! Modeled on `claude_v2.rs`.
 
+use crate::analytics::types::{LimitScope, LimitState, RateLimitWindow};
 use crate::commands::session_stats::DailyActivity;
 use chrono::{Datelike, Local, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
@@ -79,6 +80,23 @@ pub struct KimiV2Overview {
     // Breakdowns
     pub projects: Vec<KimiProjectStat>,
     pub models: Vec<KimiModelInfo>,
+
+    // ── Subscription usage limits (Phase 2, OAuth) ──
+    // `connected`/`connection_method` above stay bound to LOCAL data so the
+    // Phase 1 sections keep working when the token is absent. OAuth availability
+    // is reported separately here.
+    /// Whether the Kimi OAuth token was resolved (usage limits are live).
+    #[serde(default)]
+    pub usage_connected: bool,
+    /// "oauth-refreshed" | "oauth-cached" | "none".
+    #[serde(default)]
+    pub usage_connection_method: String,
+    /// Session/weekly rate-limit windows from `/coding/v1/usages`.
+    #[serde(default)]
+    pub rate_limits: Vec<RateLimitWindow>,
+    /// Derived health of the usage limits (Healthy/Approaching/Reached/…).
+    #[serde(default)]
+    pub limit_state: Option<LimitState>,
 }
 
 // ── Cache ───────────────────────────────────────────────────────────────────
@@ -605,7 +623,282 @@ fn build_overview(time_range: &str) -> KimiV2Overview {
         peak_hour,
         projects,
         models,
+        usage_connected: false,
+        usage_connection_method: "none".into(),
+        rate_limits: Vec::new(),
+        limit_state: None,
     }
+}
+
+// ── Subscription usage limits (GET /coding/v1/usages) ────────────────────────
+// Kept off the local-file cache so a token/API error never blanks local
+// analytics.
+
+fn usages_base_url() -> String {
+    std::env::var("KIMI_CODE_BASE_URL").unwrap_or_else(|_| "https://api.kimi.com".to_string())
+}
+
+/// Lenient number parse — the API returns quota values as either numbers or
+/// strings ("2048" or 2048).
+fn lenient_f64(v: Option<&serde_json::Value>) -> Option<f64> {
+    match v {
+        Some(serde_json::Value::Number(n)) => n.as_f64(),
+        Some(serde_json::Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// Seconds per `timeUnit` token (e.g. TIME_UNIT_MINUTE → 60).
+fn unit_seconds(time_unit: &str) -> Option<i64> {
+    let u = time_unit.to_uppercase();
+    if u.contains("SECOND") {
+        Some(1)
+    } else if u.contains("MINUTE") {
+        Some(60)
+    } else if u.contains("HOUR") {
+        Some(3600)
+    } else if u.contains("DAY") {
+        Some(86400)
+    } else if u.contains("WEEK") {
+        Some(604800)
+    } else {
+        None
+    }
+}
+
+/// Short unit suffix for labels (MINUTE → "min", HOUR → "h", DAY → "d").
+fn unit_short(time_unit: &str) -> String {
+    let u = time_unit.to_uppercase();
+    if u.contains("SECOND") {
+        "s".into()
+    } else if u.contains("MINUTE") {
+        "min".into()
+    } else if u.contains("HOUR") {
+        "h".into()
+    } else if u.contains("DAY") {
+        "d".into()
+    } else if u.contains("WEEK") {
+        "w".into()
+    } else {
+        time_unit.to_string()
+    }
+}
+
+/// Label for a `limits[]` window: a 5h (300-minute) window is the "Session"
+/// window; anything else is "<n><unit>" (e.g. "7d", "1h").
+fn window_label(window_seconds: Option<i64>, duration: f64, time_unit: &str) -> String {
+    if window_seconds == Some(18000) {
+        return "Session (5h)".to_string();
+    }
+    format!("{}{}", duration as i64, unit_short(time_unit))
+}
+
+/// Build one `RateLimitWindow` from a `detail` object + optional label/window.
+fn window_from_detail(
+    detail: &serde_json::Value,
+    label: String,
+    window_seconds: Option<i64>,
+) -> Option<RateLimitWindow> {
+    let limit = lenient_f64(detail.get("limit"))?;
+    if limit <= 0.0 {
+        return None;
+    }
+    let used = lenient_f64(detail.get("used")).unwrap_or(0.0);
+    let used_percent = (used / limit * 100.0).clamp(0.0, 100.0);
+    let resets_at = detail
+        .get("resetTime")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Some(RateLimitWindow {
+        provider_id: "kimi".into(),
+        label,
+        used_percent,
+        remaining_percent: (100.0 - used_percent).max(0.0),
+        resets_at,
+        resets_in_seconds: None,
+        window_seconds,
+    })
+}
+
+/// Map a parsed `/coding/v1/usages` JSON body to rate-limit windows.
+/// Top-level `usage` → "Weekly"; each `limits[]` entry → a window labeled from
+/// its `window` spec. Lenient about string vs numeric fields.
+fn map_usages(body: &serde_json::Value) -> Vec<RateLimitWindow> {
+    let mut out = Vec::new();
+
+    if let Some(usage) = body.get("usage") {
+        if let Some(w) = window_from_detail(usage, "Weekly".into(), Some(604800)) {
+            out.push(w);
+        }
+    }
+
+    if let Some(limits) = body.get("limits").and_then(|v| v.as_array()) {
+        for entry in limits {
+            let Some(detail) = entry.get("detail") else { continue };
+            let window = entry.get("window");
+            let duration = window.and_then(|w| lenient_f64(w.get("duration"))).unwrap_or(0.0);
+            let time_unit = window
+                .and_then(|w| w.get("timeUnit"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let window_seconds = unit_seconds(time_unit).map(|s| (duration as i64) * s);
+            let label = window_label(window_seconds, duration, time_unit);
+            if let Some(w) = window_from_detail(detail, label, window_seconds) {
+                out.push(w);
+            }
+        }
+    }
+
+    out
+}
+
+fn label_to_scope(label: &str) -> LimitScope {
+    let l = label.to_lowercase();
+    if l.contains("session") || l.contains("5h") {
+        LimitScope::Session5h
+    } else if l.contains("weekly") {
+        LimitScope::WeeklyAll
+    } else {
+        LimitScope::Custom(label.to_string())
+    }
+}
+
+/// Derive limit health from the windows (mirrors claude.rs thresholds).
+fn derive_limit_state(rate_limits: &[RateLimitWindow]) -> LimitState {
+    for rl in rate_limits {
+        if rl.used_percent >= 99.0 {
+            return LimitState::Reached {
+                scope: label_to_scope(&rl.label),
+                used_pct: rl.used_percent.min(100.0),
+                cap: None,
+                resets_at: rl.resets_at.clone(),
+            };
+        }
+    }
+    let mut worst: Option<&RateLimitWindow> = None;
+    for rl in rate_limits {
+        if rl.used_percent >= 80.0 && rl.used_percent < 99.0 {
+            worst = Some(match worst {
+                None => rl,
+                Some(w) if rl.used_percent > w.used_percent => rl,
+                Some(w) => w,
+            });
+        }
+    }
+    if let Some(w) = worst {
+        return LimitState::Approaching {
+            worst_pct: w.used_percent,
+            label: w.label.clone(),
+            resets_at: w.resets_at.clone(),
+            scope: label_to_scope(&w.label),
+        };
+    }
+    LimitState::Healthy
+}
+
+/// Resolve the OAuth token, GET the usages endpoint, and map to windows.
+/// Never panics; classifies token errors so the caller can degrade.
+pub fn fetch_kimi_usage_limits() -> UsageBundleResult {
+    use crate::analytics::kimi_auth;
+
+    let (token, method) = match kimi_auth::resolve_kimi_oauth_token() {
+        Ok(t) => t,
+        Err(e) => {
+            // 401/403 (rejected refresh token) → surface a reconnect state.
+            if e.starts_with(kimi_auth::ERR_UNAUTHORIZED) {
+                return UsageBundleResult {
+                    connected: false,
+                    method: "none".into(),
+                    rate_limits: Vec::new(),
+                    limit_state: Some(LimitState::Unauthenticated {
+                        message: e.trim_start_matches(kimi_auth::ERR_UNAUTHORIZED).trim().into(),
+                    }),
+                };
+            }
+            // Missing file / other → just no usage data (no scary banner).
+            return UsageBundleResult::empty();
+        }
+    };
+
+    let url = format!("{}/coding/v1/usages", usages_base_url().trim_end_matches('/'));
+    match crate::analytics::http::authed_get::<serde_json::Value>(&url, &token, None) {
+        Ok(body) => {
+            let rate_limits = map_usages(&body);
+            let limit_state = Some(derive_limit_state(&rate_limits));
+            UsageBundleResult { connected: true, method, rate_limits, limit_state }
+        }
+        Err(crate::analytics::http::HttpCallError::Unsuccessful { status, .. })
+            if status == 401 || status == 403 =>
+        {
+            UsageBundleResult {
+                connected: false,
+                method: "none".into(),
+                rate_limits: Vec::new(),
+                limit_state: Some(LimitState::Unauthenticated {
+                    message: "Kimi session expired — run `kimi login`.".into(),
+                }),
+            }
+        }
+        Err(_) => UsageBundleResult::empty(),
+    }
+}
+
+/// Public result of `fetch_kimi_usage_limits` (also the shape stored in cache).
+#[derive(Clone, Default)]
+pub struct UsageBundleResult {
+    connected: bool,
+    method: String,
+    rate_limits: Vec<RateLimitWindow>,
+    limit_state: Option<LimitState>,
+}
+
+impl UsageBundleResult {
+    fn empty() -> Self {
+        Self { connected: false, method: "none".into(), rate_limits: Vec::new(), limit_state: None }
+    }
+}
+
+// Usage cache: 60s TTL, invalidated when the access-token fingerprint changes.
+struct UsageCache {
+    cred_fp: u64,
+    fetched_at: Instant,
+    data: UsageBundleResult,
+}
+
+lazy_static::lazy_static! {
+    static ref USAGE_CACHE: Mutex<Option<UsageCache>> = Mutex::new(None);
+}
+
+const USAGE_TTL_SECONDS: u64 = 60;
+
+/// Cached usage fetch (60s, cred-fp keyed). Returns an empty bundle on any
+/// failure so the local overview is never blanked.
+fn fetch_kimi_usage_cached(force_refresh: bool) -> UsageBundleResult {
+    let cred_fp = crate::analytics::kimi_auth::kimi_credential_fingerprint();
+    if !force_refresh {
+        if let Ok(guard) = USAGE_CACHE.lock() {
+            if let Some(c) = guard.as_ref() {
+                if c.cred_fp == cred_fp
+                    && c.fetched_at.elapsed() < Duration::from_secs(USAGE_TTL_SECONDS)
+                {
+                    return c.data.clone();
+                }
+            }
+        }
+    }
+    let data = fetch_kimi_usage_limits();
+    if let Ok(mut guard) = USAGE_CACHE.lock() {
+        *guard = Some(UsageCache { cred_fp, fetched_at: Instant::now(), data: data.clone() });
+    }
+    data
+}
+
+/// Merge a usage bundle into an overview (used after building/caching local data).
+fn apply_usage(overview: &mut KimiV2Overview, usage: UsageBundleResult) {
+    overview.usage_connected = usage.connected;
+    overview.usage_connection_method = usage.method;
+    overview.rate_limits = usage.rate_limits;
+    overview.limit_state = usage.limit_state;
 }
 
 // ── Prompt history (user-history/<md5>.jsonl) ────────────────────────────────
@@ -660,24 +953,41 @@ pub async fn get_kimi_v2_overview(
     time_range: String,
     force_refresh: bool,
 ) -> Result<KimiV2Overview, String> {
-    if !force_refresh {
-        if let Ok(cache) = CACHE.lock() {
-            if let Some(entry) = cache.overview.get(&time_range) {
-                if entry.is_valid(cache.ttl_seconds) {
-                    return Ok(entry.data.clone());
+    // Local overview (300s cache). Usage limits are fetched + merged separately
+    // below so a token/API failure never blanks the local sections.
+    let mut overview = {
+        let cached = if force_refresh {
+            None
+        } else {
+            CACHE.lock().ok().and_then(|cache| {
+                cache
+                    .overview
+                    .get(&time_range)
+                    .filter(|e| e.is_valid(cache.ttl_seconds))
+                    .map(|e| e.data.clone())
+            })
+        };
+        match cached {
+            Some(o) => o,
+            None => {
+                let range = time_range.clone();
+                let built = tokio::task::spawn_blocking(move || build_overview(&range))
+                    .await
+                    .map_err(|e| format!("Task error: {}", e))?;
+                if let Ok(mut cache) = CACHE.lock() {
+                    cache.overview.insert(time_range.clone(), CacheEntry::new(built.clone()));
                 }
+                built
             }
         }
-    }
+    };
 
-    let range = time_range.clone();
-    let overview = tokio::task::spawn_blocking(move || build_overview(&range))
+    // Usage limits (60s cache, cred-fp keyed) — failure-tolerant.
+    let usage = tokio::task::spawn_blocking(move || fetch_kimi_usage_cached(force_refresh))
         .await
-        .map_err(|e| format!("Task error: {}", e))?;
+        .unwrap_or_else(|_| UsageBundleResult::empty());
+    apply_usage(&mut overview, usage);
 
-    if let Ok(mut cache) = CACHE.lock() {
-        cache.overview.insert(time_range, CacheEntry::new(overview.clone()));
-    }
     Ok(overview)
 }
 
@@ -807,5 +1117,83 @@ api_key = "should-not-be-parsed"
         assert_eq!(first.capabilities, vec!["video_in", "image_in", "thinking"]);
         // The providers table (with the api_key) must never surface as a model.
         assert!(models.iter().all(|m| m.id.starts_with("moonshot-ai/")));
+    }
+
+    // ── Usage-limits mapping (fixtures, no network) ──
+
+    #[test]
+    fn map_usages_string_numbers_and_minute_window() {
+        // Confirmed shape: string-valued numbers, a 300-minute (5h) window.
+        let body = serde_json::json!({
+            "usage": { "limit": "2048", "used": "214", "remaining": "1834",
+                       "resetTime": "2026-01-09T15:23:13Z" },
+            "limits": [ { "window": { "duration": 300, "timeUnit": "TIME_UNIT_MINUTE" },
+                          "detail": { "limit": "200", "used": "139", "remaining": "61",
+                                      "resetTime": "2026-01-08T20:00:00Z" } } ]
+        });
+        let windows = map_usages(&body);
+        assert_eq!(windows.len(), 2);
+
+        let weekly = &windows[0];
+        assert_eq!(weekly.label, "Weekly");
+        assert!((weekly.used_percent - (214.0 / 2048.0 * 100.0)).abs() < 1e-6);
+        assert_eq!(weekly.window_seconds, Some(604800));
+        assert_eq!(weekly.resets_at.as_deref(), Some("2026-01-09T15:23:13Z"));
+
+        let session = &windows[1];
+        assert_eq!(session.label, "Session (5h)");
+        assert_eq!(session.window_seconds, Some(18000)); // 300 min × 60
+        assert!((session.used_percent - (139.0 / 200.0 * 100.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn map_usages_hour_and_day_units_with_numeric_values() {
+        let body = serde_json::json!({
+            "limits": [
+                { "window": { "duration": 1, "timeUnit": "TIME_UNIT_HOUR" },
+                  "detail": { "limit": 100, "used": 90 } },
+                { "window": { "duration": 7, "timeUnit": "TIME_UNIT_DAY" },
+                  "detail": { "limit": 1000, "used": 1000 } }
+            ]
+        });
+        let windows = map_usages(&body);
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].label, "1h");
+        assert_eq!(windows[0].window_seconds, Some(3600));
+        assert_eq!(windows[1].label, "7d");
+        assert_eq!(windows[1].window_seconds, Some(604800));
+        assert!((windows[1].used_percent - 100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn map_usages_skips_zero_limit_windows() {
+        let body = serde_json::json!({
+            "usage": { "limit": "0", "used": "0" },
+            "limits": [ { "window": { "duration": 5, "timeUnit": "TIME_UNIT_HOUR" },
+                          "detail": { "limit": "0", "used": "0" } } ]
+        });
+        assert!(map_usages(&body).is_empty());
+    }
+
+    #[test]
+    fn derive_limit_state_ladder() {
+        let mk = |label: &str, pct: f64| RateLimitWindow {
+            provider_id: "kimi".into(),
+            label: label.into(),
+            used_percent: pct,
+            remaining_percent: 100.0 - pct,
+            resets_at: None,
+            resets_in_seconds: None,
+            window_seconds: None,
+        };
+        assert!(matches!(derive_limit_state(&[mk("Weekly", 10.0)]), LimitState::Healthy));
+        assert!(matches!(
+            derive_limit_state(&[mk("Session (5h)", 85.0)]),
+            LimitState::Approaching { .. }
+        ));
+        assert!(matches!(
+            derive_limit_state(&[mk("Weekly", 99.5)]),
+            LimitState::Reached { .. }
+        ));
     }
 }

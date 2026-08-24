@@ -11,6 +11,7 @@ import {
   type KimiProjectStat,
   type KimiDailyActivity,
   type KimiPromptEntry,
+  type KimiRateLimitWindow,
 } from "../lib/tauri";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -40,6 +41,92 @@ function timeAgo(iso: string | null): string {
 }
 
 const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// ── Usage-limit helpers (mirror ClaudeAnalyticsV2Page severity/countdown) ──────
+
+function severityLevel(pct: number): "critical" | "warning" | "normal" {
+  if (pct >= 90) return "critical";
+  if (pct >= 75) return "warning";
+  return "normal";
+}
+function severityFillClass(pct: number): string {
+  switch (severityLevel(pct)) {
+    case "critical": return "bg-red-500";
+    case "warning": return "bg-amber-500";
+    default: return "bg-emerald-500";
+  }
+}
+function severityTextClass(pct: number): string {
+  switch (severityLevel(pct)) {
+    case "critical": return "text-red-400";
+    case "warning": return "text-amber-400";
+    default: return "text-emerald-400";
+  }
+}
+
+function resetCountdown(resetsAt: string | null, windowSeconds?: number | null): string {
+  if (resetsAt) {
+    const diff = new Date(resetsAt).getTime() - Date.now();
+    if (Number.isNaN(diff)) return "—";
+    if (diff <= 0) return "now";
+    const s = Math.floor(diff / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h > 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
+  if (windowSeconds) {
+    const h = Math.floor(windowSeconds / 3600);
+    if (h >= 24) return `~${Math.floor(h / 24)}d`;
+    return `~${h}h`;
+  }
+  return "—";
+}
+
+function isSessionWindow(rl: KimiRateLimitWindow): boolean {
+  const l = rl.label.toLowerCase();
+  return l.includes("session") || l.includes("5h");
+}
+
+function LimitMeter({ rl }: { rl: KimiRateLimitWindow }) {
+  const exhausted = rl.used_percent >= 99;
+  return (
+    <div className="mb-3 last:mb-0">
+      <div className="flex justify-between text-xs mb-1">
+        <div className="flex items-center gap-2">
+          <span className="text-text-secondary">{rl.label}</span>
+          <span className="text-text-muted text-[10px]">
+            Resets in {resetCountdown(rl.resets_at, rl.window_seconds)}
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        {exhausted ? (
+          <div className="relative flex-1 h-2.5 rounded-full overflow-hidden bg-red-600">
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span className="text-[8px] font-bold text-white tracking-wider drop-shadow-sm">
+                {resetCountdown(rl.resets_at, rl.window_seconds) !== "—"
+                  ? `RESET · ${resetCountdown(rl.resets_at, rl.window_seconds).toUpperCase()}`
+                  : "LIMIT REACHED"}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 h-2.5 bg-[#0e0f13] rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${severityFillClass(rl.used_percent)}`}
+              style={{ width: `${Math.min(rl.used_percent, 100)}%` }}
+            />
+          </div>
+        )}
+        <span className={`font-semibold text-xs whitespace-nowrap ${severityTextClass(rl.used_percent)}`}>
+          {rl.used_percent.toFixed(0)}% Used
+        </span>
+      </div>
+    </div>
+  );
+}
 
 // ── Small shared components (mirrors ClaudeAnalyticsV2Page) ────────────────────
 
@@ -396,6 +483,48 @@ export function KimiAnalyticsV2Page() {
       )}
 
       <div className={`transition-opacity duration-300 ${loading ? "opacity-60" : "opacity-100"}`}>
+        {/* ── Usage Limits (OAuth subscription quotas) ── */}
+        {(() => {
+          const needsReconnect =
+            overview.limit_state?.kind === "unauthenticated" ||
+            (!overview.usage_connected && overview.limit_state == null && overview.rate_limits.length === 0);
+          const sessionLimits = overview.rate_limits.filter(isSessionWindow);
+          const weeklyLimits = overview.rate_limits.filter((rl) => !isSessionWindow(rl));
+          const hasLimits = overview.rate_limits.length > 0;
+          if (!hasLimits && !needsReconnect) return null;
+          return (
+            <Section
+              title="Usage Limits"
+              info="Kimi subscription quotas from the Kimi Code OAuth token: the rolling 5h session window and weekly request allowance. Read live from api.kimi.com; the token is auto-refreshed."
+            >
+              {needsReconnect && (
+                <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+                  {overview.limit_state?.kind === "unauthenticated" && "message" in overview.limit_state
+                    ? overview.limit_state.message
+                    : "Kimi is not connected."}{" "}
+                  Run <code>kimi login</code> in your terminal to view subscription usage limits.
+                </div>
+              )}
+              {hasLimits && (
+                <div className="space-y-4">
+                  {sessionLimits.length > 0 && (
+                    <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
+                      <h4 className="text-xs font-semibold text-text-primary mb-3">Current Session</h4>
+                      {sessionLimits.map((rl, i) => <LimitMeter key={i} rl={rl} />)}
+                    </div>
+                  )}
+                  {weeklyLimits.length > 0 && (
+                    <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
+                      <h4 className="text-xs font-semibold text-text-primary mb-3">Weekly Limits</h4>
+                      {weeklyLimits.map((rl, i) => <LimitMeter key={i} rl={rl} />)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Section>
+          );
+        })()}
+
         {/* ── Session Overview ── */}
         <Section title="Session Overview">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
