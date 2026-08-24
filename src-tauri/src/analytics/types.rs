@@ -310,6 +310,14 @@ pub fn all_provider_info() -> Vec<ProviderInfo> {
             has_api: true,
         },
         ProviderInfo {
+            id: "moonshot".into(),
+            name: "Moonshot".into(),
+            auth_type: "api-key".into(),
+            description: "Moonshot platform balance (available/voucher/cash)".into(),
+            has_local_data: false,
+            has_api: true,
+        },
+        ProviderInfo {
             id: "kimi-k2".into(),
             name: "Kimi K2".into(),
             auth_type: "api-key".into(),

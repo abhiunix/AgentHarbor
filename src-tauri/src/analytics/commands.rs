@@ -14,7 +14,7 @@ use tauri_plugin_notification::NotificationExt;
 use crate::analytics::types::*;
 use crate::analytics::{
     claude, claude_desktop, codex, gemini, cursor, copilot,
-    openrouter, kimi, deepseek, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
+    openrouter, kimi, deepseek, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
     token_store,
 };
 use crate::commands::config::load_settings;
@@ -364,6 +364,7 @@ pub fn get_all_provider_status() -> Vec<ProviderStatus> {
         kimi::check_connection(),
         kimi::check_k2_connection(),
         deepseek::check_connection(),
+        moonshot::check_connection(),
         zai::check_connection(),
         augment::check_connection(),
         amp::check_connection(),
@@ -388,6 +389,7 @@ pub fn get_provider_analytics(provider_id: String) -> Result<ProviderAnalytics, 
         "kimi" => Ok(kimi::fetch_kimi_analytics()),
         "kimi-k2" => Ok(kimi::fetch_kimi_k2_analytics()),
         "deepseek" => Ok(deepseek::fetch_deepseek_analytics()),
+        "moonshot" => Ok(moonshot::fetch_moonshot_analytics()),
         "zai" => Ok(zai::fetch_zai_analytics()),
         "augment" => Ok(augment::fetch_augment_analytics()),
         "amp" => Ok(amp::fetch_amp_analytics()),
