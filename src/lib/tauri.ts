@@ -1228,6 +1228,42 @@ export async function pruneTranscriptBackups(): Promise<number> {
   return invoke<number>("prune_transcript_backups");
 }
 
+// --- Kimi Transcripts (read-only) ---
+
+export interface KimiTranscriptSession {
+  session_id: string;
+  project_path: string;
+  project_name: string;
+  title: string;
+  message_count: number;
+  first_activity: string | null;
+  last_activity: string | null;
+}
+
+export interface KimiTranscriptMessage {
+  role: string;
+  content: string;
+  timestamp: string | null;
+}
+
+export async function listKimiTranscriptSessions(): Promise<KimiTranscriptSession[]> {
+  return invoke<KimiTranscriptSession[]>("list_kimi_transcript_sessions");
+}
+
+export async function readKimiTranscript(
+  sessionId: string,
+  projectPath?: string
+): Promise<KimiTranscriptMessage[]> {
+  return invoke<KimiTranscriptMessage[]>("read_kimi_transcript", {
+    sessionId,
+    projectPath: projectPath ?? null,
+  });
+}
+
+export async function searchKimiTranscripts(query: string): Promise<KimiTranscriptSession[]> {
+  return invoke<KimiTranscriptSession[]>("search_kimi_transcripts", { query });
+}
+
 // --- Extensions ---
 
 export interface ClaudePlugin {

@@ -19,6 +19,7 @@ pub mod kimi;
 pub mod kimi_auth;
 pub mod kimi_v2;
 pub mod kimi_prompts;
+pub mod kimi_transcripts;
 pub mod deepseek;
 pub mod moonshot;
 pub mod zai;
