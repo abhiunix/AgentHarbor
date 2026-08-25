@@ -835,7 +835,7 @@ pub fn fetch_kimi_usage_limits() -> UsageBundleResult {
                 method: "none".into(),
                 rate_limits: Vec::new(),
                 limit_state: Some(LimitState::Unauthenticated {
-                    message: "Kimi session expired — run `kimi login`.".into(),
+                    message: "Kimi session expired.".into(),
                 }),
             }
         }
