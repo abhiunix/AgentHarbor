@@ -3,15 +3,54 @@
  * plus model switching (there is intentionally no separate "Switch Model"
  * section — it lives here). Mirrors PermissionsPage's section/card styling.
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   getKimiControlSettings,
   setKimiDefaultModel,
-  setKimiControlFlag,
+  getKimiConfigTunables,
+  setKimiConfigValue,
   type KimiControlSettings,
   type KimiModelInfo,
+  type KimiConfigSection,
+  type KimiConfigEntry,
+  type KimiConfigValueType,
 } from "../lib/tauri";
 import { DebugPath } from "../components/common/DebugPath";
+
+const SECTION_ACRONYMS: Record<string, string> = { mcp: "MCP" };
+const KEY_ACRONYMS: Record<string, string> = { yolo: "YOLO", afk: "AFK", mcp: "MCP" };
+
+function humanizeSection(section: string | null): string {
+  if (section === null) return "General";
+  let firstIsAcronym = false;
+  const parts = section.split(".").map((p, i) => {
+    const acronym = SECTION_ACRONYMS[p.toLowerCase()];
+    if (acronym) {
+      if (i === 0) firstIsAcronym = true;
+      return acronym;
+    }
+    return p.replace(/_/g, " ");
+  });
+  const joined = parts.join(" ");
+  return firstIsAcronym ? joined : joined.charAt(0).toUpperCase() + joined.slice(1);
+}
+
+function humanizeKey(key: string): string {
+  const words = key.split("_");
+  let suffix = "";
+  const last = words[words.length - 1];
+  if (words.length > 1 && (last === "ms" || last === "s")) {
+    suffix = ` (${words.pop()})`;
+  }
+  const label = words
+    .map((w, i) => {
+      const lower = w.toLowerCase();
+      if (KEY_ACRONYMS[lower]) return KEY_ACRONYMS[lower];
+      return i === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower;
+    })
+    .join(" ");
+  return label + suffix;
+}
 
 function InfoIcon({ text }: { text: string }) {
   return (
@@ -125,24 +164,181 @@ function ModelCard({
   );
 }
 
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+type SaveTunable = (
+  section: string | null,
+  key: string,
+  rawValue: string,
+  valueType: KimiConfigValueType
+) => Promise<void>;
+
+function parseArrayValue(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw.replace(/'/g, '"'));
+    return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function ConfigEntryRow({
+  section,
+  entry,
+  onSave,
+}: {
+  section: string | null;
+  entry: KimiConfigEntry;
+  onSave: SaveTunable;
+}) {
+  const [value, setValue] = useState(entry.value);
+  const [status, setStatus] = useState<SaveStatus>("idle");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const label = humanizeKey(entry.key);
+
+  useEffect(() => {
+    setValue(entry.value);
+  }, [entry.value]);
+
+  const commit = useCallback(
+    async (next: string) => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      if (next === entry.value) return;
+      setStatus("saving");
+      try {
+        await onSave(section, entry.key, next, entry.value_type);
+        setStatus("saved");
+        setTimeout(() => setStatus((s) => (s === "saved" ? "idle" : s)), 2000);
+      } catch {
+        setValue(entry.value);
+        setStatus("error");
+        setTimeout(() => setStatus((s) => (s === "error" ? "idle" : s)), 3000);
+      }
+    },
+    [entry.key, entry.value, entry.value_type, onSave, section]
+  );
+
+  if (entry.value_type === "bool") {
+    return (
+      <SwitchRow
+        label={label}
+        info={`~/.kimi/config.toml — ${entry.key}`}
+        checked={value === "true"}
+        disabled={status === "saving"}
+        onChange={(next) => {
+          const raw = next ? "true" : "false";
+          setValue(raw);
+          void commit(raw);
+        }}
+      />
+    );
+  }
+
+  if (entry.value_type === "array") {
+    const items = parseArrayValue(entry.value);
+    return (
+      <div className="py-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-text-primary">{label}</span>
+          <span className="text-[10px] uppercase tracking-wide text-text-muted">Read-only</span>
+        </div>
+        {items.length > 0 ? (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {items.map((item) => (
+              <span
+                key={item}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#2a2b36] text-text-secondary"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs font-mono text-text-muted mt-1">{entry.value || "[]"}</p>
+        )}
+      </div>
+    );
+  }
+
+  const isNumeric = entry.value_type === "int" || entry.value_type === "float";
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <label className="text-sm font-medium text-text-primary shrink-0">{label}</label>
+      <div className="flex items-center gap-2">
+        {status === "saved" && <span className="text-xs text-accent-green">Saved</span>}
+        {status === "error" && <span className="text-xs text-red-400">Error</span>}
+        <input
+          type={isNumeric ? "number" : "text"}
+          step={entry.value_type === "float" ? "any" : undefined}
+          value={value}
+          disabled={status === "saving"}
+          onChange={(e) => {
+            const next = e.target.value;
+            setValue(next);
+            if (isNumeric) {
+              if (debounceRef.current) clearTimeout(debounceRef.current);
+              debounceRef.current = setTimeout(() => void commit(next), 600);
+            }
+          }}
+          onBlur={() => void commit(value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="w-40 bg-[#13141a] border border-border rounded px-2 py-1 text-sm text-text-primary font-mono text-right focus:outline-none focus:border-blue-500 disabled:opacity-50"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ConfigSectionCard({ section, onSave }: { section: KimiConfigSection; onSave: SaveTunable }) {
+  if (section.entries.length === 0) return null;
+  return (
+    <div className="bg-app-card border border-border rounded-lg p-5">
+      <h2 className="text-lg font-semibold text-text-primary mb-1">{humanizeSection(section.section)}</h2>
+      <DebugPath
+        path={section.section ? `~/.kimi/config.toml [${section.section}]` : "~/.kimi/config.toml"}
+        className="mb-3"
+      />
+      <div className="divide-y divide-border/50">
+        {section.entries.map((entry) => (
+          <ConfigEntryRow key={entry.key} section={section.section} entry={entry} onSave={onSave} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function KimiControlPage() {
   const [settings, setSettings] = useState<KimiControlSettings | null>(null);
+  const [tunables, setTunables] = useState<KimiConfigSection[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [switchingModel, setSwitchingModel] = useState(false);
   const [switchMessage, setSwitchMessage] = useState<string | null>(null);
-  const [savingFlag, setSavingFlag] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
-      const s = await getKimiControlSettings();
+      const [s, t] = await Promise.all([getKimiControlSettings(), getKimiConfigTunables()]);
       setSettings(s);
+      setTunables(t);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const loadTunables = useCallback(async () => {
+    const t = await getKimiConfigTunables();
+    setTunables(t);
   }, []);
 
   useEffect(() => {
@@ -164,21 +360,13 @@ export function KimiControlPage() {
     }
   }
 
-  async function handleToggleFlag(flag: string, next: boolean) {
-    if (!settings) return;
-    setSavingFlag(flag);
-    // Optimistic update.
-    setSettings({ ...settings, [flag]: next } as KimiControlSettings);
-    try {
-      await setKimiControlFlag(flag, next);
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      await loadData();
-    } finally {
-      setSavingFlag(null);
-    }
-  }
+  const handleSaveTunable: SaveTunable = useCallback(
+    async (section, key, rawValue, valueType) => {
+      await setKimiConfigValue(section, key, rawValue, valueType);
+      await loadTunables();
+    },
+    [loadTunables]
+  );
 
   if (loading) {
     return (
@@ -205,8 +393,6 @@ export function KimiControlPage() {
   }
 
   if (!settings) return null;
-
-  const loop = settings.loop_control;
 
   return (
     <div className="p-6 max-w-6xl">
@@ -252,120 +438,75 @@ export function KimiControlPage() {
               ))}
             </div>
           )}
-
-          <div className="border-t border-border pt-4 mt-4">
-            <h4 className="text-sm font-medium text-text-secondary mb-2">Global defaults</h4>
-            <SwitchRow
-              label="YOLO mode"
-              info="Skip approval prompts by default for new Kimi sessions."
-              checked={settings.default_yolo}
-              disabled={savingFlag === "default_yolo"}
-              onChange={(v) => handleToggleFlag("default_yolo", v)}
-            />
-            <SwitchRow
-              label="Thinking"
-              info="Enable extended thinking by default for new Kimi sessions."
-              checked={settings.default_thinking}
-              disabled={savingFlag === "default_thinking"}
-              onChange={(v) => handleToggleFlag("default_thinking", v)}
-            />
-            <SwitchRow
-              label="Plan mode"
-              info="Start new Kimi sessions in plan mode by default."
-              checked={settings.default_plan_mode}
-              disabled={savingFlag === "default_plan_mode"}
-              onChange={(v) => handleToggleFlag("default_plan_mode", v)}
-            />
-          </div>
         </div>
 
-        <div className="flex flex-col gap-6">
-          <div className="bg-app-card border border-border rounded-lg p-5">
-            <h2 className="text-lg font-semibold text-text-primary mb-1">Loop control</h2>
-            <DebugPath path="~/.kimi/config.toml [loop_control]" className="mb-3" />
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-[#13141a] border border-border rounded-lg px-3 py-2.5">
-                <p className="text-xs text-text-muted mb-0.5">Max steps / turn</p>
-                <p className="text-sm font-mono text-text-primary">
-                  {loop.max_steps_per_turn ?? "—"}
-                </p>
-              </div>
-              <div className="bg-[#13141a] border border-border rounded-lg px-3 py-2.5">
-                <p className="text-xs text-text-muted mb-0.5">Max retries / step</p>
-                <p className="text-sm font-mono text-text-primary">
-                  {loop.max_retries_per_step ?? "—"}
-                </p>
-              </div>
-              <div className="bg-[#13141a] border border-border rounded-lg px-3 py-2.5">
-                <p className="text-xs text-text-muted mb-0.5">Reserved context</p>
-                <p className="text-sm font-mono text-text-primary">
-                  {formatContextSize(loop.reserved_context_size)}
-                </p>
-              </div>
-              <div className="bg-[#13141a] border border-border rounded-lg px-3 py-2.5">
-                <p className="text-xs text-text-muted mb-0.5">Compaction trigger</p>
-                <p className="text-sm font-mono text-text-primary">
-                  {loop.compaction_trigger_ratio != null
-                    ? `${Math.round(loop.compaction_trigger_ratio * 100)}%`
-                    : "—"}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-app-card border border-border rounded-lg p-5 flex-1">
-            <h2 className="text-lg font-semibold text-text-primary mb-1">
-              Per-session approval
-            </h2>
-            <DebugPath path="~/.kimi/sessions/*/*/state.json" className="mb-3" />
-            {settings.sessions_approval.length === 0 ? (
-              <p className="text-sm text-text-muted italic">
-                No session approval data found.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-text-muted border-b border-border">
-                      <th className="pb-2 pr-3 font-medium">Session</th>
-                      <th className="pb-2 pr-3 font-medium">YOLO</th>
-                      <th className="pb-2 pr-3 font-medium">AFK</th>
-                      <th className="pb-2 font-medium">Auto-approve</th>
+        <div className="bg-app-card border border-border rounded-lg p-5">
+          <h2 className="text-lg font-semibold text-text-primary mb-1">
+            Per-session approval
+          </h2>
+          <DebugPath path="~/.kimi/sessions/*/*/state.json" className="mb-3" />
+          {settings.sessions_approval.length === 0 ? (
+            <p className="text-sm text-text-muted italic">
+              No session approval data found.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-text-muted border-b border-border">
+                    <th className="pb-2 pr-3 font-medium">Session</th>
+                    <th className="pb-2 pr-3 font-medium">YOLO</th>
+                    <th className="pb-2 pr-3 font-medium">AFK</th>
+                    <th className="pb-2 font-medium">Auto-approve</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {settings.sessions_approval.map((s) => (
+                    <tr key={s.session_id} className="border-b border-border/50 last:border-0">
+                      <td className="py-2 pr-3">
+                        <p className="text-text-primary">{s.project_name}</p>
+                        <p className="text-text-muted text-xs font-mono truncate max-w-[10rem]">
+                          {s.session_id}
+                        </p>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span className={s.yolo ? "text-accent-green" : "text-text-muted"}>
+                          {s.yolo ? "Yes" : "No"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span className={s.afk ? "text-accent-green" : "text-text-muted"}>
+                          {s.afk ? "Yes" : "No"}
+                        </span>
+                      </td>
+                      <td className="py-2 text-text-secondary">
+                        {s.auto_approve_actions.length > 0
+                          ? s.auto_approve_actions.join(", ")
+                          : "—"}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {settings.sessions_approval.map((s) => (
-                      <tr key={s.session_id} className="border-b border-border/50 last:border-0">
-                        <td className="py-2 pr-3">
-                          <p className="text-text-primary">{s.project_name}</p>
-                          <p className="text-text-muted text-xs font-mono truncate max-w-[10rem]">
-                            {s.session_id}
-                          </p>
-                        </td>
-                        <td className="py-2 pr-3">
-                          <span className={s.yolo ? "text-accent-green" : "text-text-muted"}>
-                            {s.yolo ? "Yes" : "No"}
-                          </span>
-                        </td>
-                        <td className="py-2 pr-3">
-                          <span className={s.afk ? "text-accent-green" : "text-text-muted"}>
-                            {s.afk ? "Yes" : "No"}
-                          </span>
-                        </td>
-                        <td className="py-2 text-text-secondary">
-                          {s.auto_approve_actions.length > 0
-                            ? s.auto_approve_actions.join(", ")
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
+
+      {tunables && tunables.some((s) => s.entries.length > 0) && (
+        <div className="mt-6">
+          <h3 className="text-sm font-medium text-text-secondary mb-3">Config settings</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {tunables.map((section) => (
+              <ConfigSectionCard
+                key={section.section ?? "__top_level__"}
+                section={section}
+                onSave={handleSaveTunable}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

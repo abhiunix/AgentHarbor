@@ -659,6 +659,33 @@ export async function setKimiControlFlag(flag: string, value: boolean): Promise<
   return invoke("set_kimi_control_flag", { flag, value });
 }
 
+export type KimiConfigValueType = "bool" | "int" | "float" | "string" | "array";
+
+export interface KimiConfigEntry {
+  key: string;
+  value_type: KimiConfigValueType;
+  value: string;
+  editable: boolean;
+}
+
+export interface KimiConfigSection {
+  section: string | null;
+  entries: KimiConfigEntry[];
+}
+
+export async function getKimiConfigTunables(): Promise<KimiConfigSection[]> {
+  return invoke<KimiConfigSection[]>("get_kimi_config_tunables");
+}
+
+export async function setKimiConfigValue(
+  section: string | null,
+  key: string,
+  rawValue: string,
+  valueType: KimiConfigValueType
+): Promise<void> {
+  return invoke("set_kimi_config_value", { section, key, rawValue, valueType });
+}
+
 // ── Kimi Prompt History (own sidebar section) ───────────────────────────────
 
 export interface KimiPromptHistoryEntry {
