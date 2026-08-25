@@ -18,6 +18,7 @@ pub mod openrouter;
 pub mod kimi;
 pub mod kimi_auth;
 pub mod kimi_v2;
+pub mod kimi_instructions;
 pub mod kimi_prompts;
 pub mod kimi_transcripts;
 pub mod kimi_plans;

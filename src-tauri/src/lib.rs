@@ -156,6 +156,9 @@ use analytics::claude_v2::{
 use analytics::kimi_v2::{
     get_kimi_v2_overview, get_kimi_v2_prompt_history, get_kimi_v2_connection_status,
 };
+use analytics::kimi_instructions::{
+    list_kimi_instruction_files, read_kimi_instruction, write_kimi_instruction,
+};
 use analytics::kimi_prompts::{
     get_kimi_prompt_history, search_kimi_prompt_history, get_kimi_prompt_stats,
     build_kimi_resume_command, start_kimi_session,
@@ -496,6 +499,10 @@ pub fn run() {
             get_kimi_v2_overview,
             get_kimi_v2_prompt_history,
             get_kimi_v2_connection_status,
+            // Kimi Code Instructions (AGENTS.md, per-project)
+            list_kimi_instruction_files,
+            read_kimi_instruction,
+            write_kimi_instruction,
             // Kimi Prompt History (own section)
             get_kimi_prompt_history,
             search_kimi_prompt_history,

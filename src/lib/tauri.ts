@@ -620,6 +620,29 @@ export async function getKimiV2ConnectionStatus(): Promise<boolean> {
   return invoke<boolean>("get_kimi_v2_connection_status");
 }
 
+// ── Kimi Code Instructions (AGENTS.md, per-project) ──────────────────────────
+
+export interface KimiInstructionFile {
+  project_path: string;
+  project_name: string;
+  abs_path: string;
+  exists: boolean;
+  size_bytes: number | null;
+  modified: string | null;
+}
+
+export async function listKimiInstructionFiles(): Promise<KimiInstructionFile[]> {
+  return invoke<KimiInstructionFile[]>("list_kimi_instruction_files");
+}
+
+export async function readKimiInstruction(absPath: string): Promise<string> {
+  return invoke<string>("read_kimi_instruction", { absPath });
+}
+
+export async function writeKimiInstruction(absPath: string, content: string): Promise<void> {
+  return invoke("write_kimi_instruction", { absPath, content });
+}
+
 // ── Kimi Permissions & Control ───────────────────────────────────────────────
 
 export interface KimiLoopControl {
