@@ -163,6 +163,9 @@ use analytics::kimi_prompts::{
 use analytics::kimi_transcripts::{
     list_kimi_transcript_sessions, read_kimi_transcript, search_kimi_transcripts,
 };
+use analytics::kimi_plans::{
+    list_kimi_plans, read_kimi_plan, list_kimi_todo_groups,
+};
 use analytics::cursor_v2::{
     get_cursor_v2_connection_status, get_cursor_v2_overview, get_cursor_v2_usage_events,
     get_cursor_v2_ai_commits, get_cursor_v2_model_usage, get_cursor_v2_composer_tabs,
@@ -499,6 +502,10 @@ pub fn run() {
             list_kimi_transcript_sessions,
             read_kimi_transcript,
             search_kimi_transcripts,
+            // Kimi Code Plans & Todos (read-only)
+            list_kimi_plans,
+            read_kimi_plan,
+            list_kimi_todo_groups,
             get_claude_history,
             get_claude_active_sessions,
             get_claude_app_info,
