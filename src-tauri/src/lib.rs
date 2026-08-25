@@ -168,6 +168,7 @@ use analytics::kimi_plans::{
 };
 use analytics::kimi_control::{
     get_kimi_control_settings, set_kimi_default_model, set_kimi_control_flag,
+    get_kimi_config_tunables, set_kimi_config_value,
 };
 use analytics::cursor_v2::{
     get_cursor_v2_connection_status, get_cursor_v2_overview, get_cursor_v2_usage_events,
@@ -513,6 +514,8 @@ pub fn run() {
             get_kimi_control_settings,
             set_kimi_default_model,
             set_kimi_control_flag,
+            get_kimi_config_tunables,
+            set_kimi_config_value,
             get_claude_history,
             get_claude_active_sessions,
             get_claude_app_info,
