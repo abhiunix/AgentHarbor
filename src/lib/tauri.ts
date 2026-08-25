@@ -563,6 +563,13 @@ export type KimiLimitState =
   | { kind: "unauthenticated"; message: string }
   | { kind: string };
 
+export interface KimiMoonshotBalance {
+  available: number;
+  voucher: number;
+  cash: number;
+  currency: string;
+}
+
 export interface KimiV2Overview {
   connected: boolean;
   connection_method: string;
@@ -589,6 +596,9 @@ export interface KimiV2Overview {
   usage_connection_method: string;
   rate_limits: KimiRateLimitWindow[];
   limit_state: KimiLimitState | null;
+  auth_mode: string;
+  moonshot_balance: KimiMoonshotBalance | null;
+  moonshot_source: string;
 }
 
 export async function getKimiV2Overview(

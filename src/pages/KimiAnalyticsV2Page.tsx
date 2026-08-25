@@ -611,8 +611,35 @@ export function KimiAnalyticsV2Page() {
       )}
 
       <div className={`transition-opacity duration-300 ${loading ? "opacity-60" : "opacity-100"}`}>
-        {/* ── Usage Limits (OAuth subscription quotas) ── */}
+        {/* ── Usage Limits: Moonshot API-key balance OR OAuth subscription quotas ── */}
         {(() => {
+          if (overview.auth_mode === "api") {
+            const bal = overview.moonshot_balance;
+            if (!bal) return null;
+            return (
+              <Section
+                title="Usage Limits"
+                info="Your Kimi CLI is authenticated with a Moonshot platform API key (found in ~/.kimi/config.toml), not the Kimi Code subscription — this shows your prepaid Moonshot balance instead of subscription quotas."
+              >
+                <div className="text-[10px] text-cyan-400 uppercase tracking-wider mb-2">Auth: Moonshot API key</div>
+                <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-xl p-6 mb-3">
+                  <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">Available balance</div>
+                  <div className="text-3xl font-semibold text-emerald-400">{formatMoney(bal.available, bal.currency)}</div>
+                  <div className="text-[11px] text-text-muted mt-2">From your Kimi config (Moonshot API key)</div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg px-4 py-3">
+                    <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">Voucher balance</div>
+                    <div className="text-lg font-semibold text-text-primary">{formatMoney(bal.voucher, bal.currency)}</div>
+                  </div>
+                  <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg px-4 py-3">
+                    <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">Cash balance</div>
+                    <div className="text-lg font-semibold text-text-primary">{formatMoney(bal.cash, bal.currency)}</div>
+                  </div>
+                </div>
+              </Section>
+            );
+          }
           const needsReconnect =
             overview.limit_state?.kind === "unauthenticated" ||
             (!overview.usage_connected && overview.limit_state == null && overview.rate_limits.length === 0);
@@ -743,8 +770,9 @@ export function KimiAnalyticsV2Page() {
           )}
         </Section>
 
-        {/* ── Moonshot Balance ── */}
-        <MoonshotBalanceSection />
+        {/* ── Moonshot Balance (manual connect) — hidden when the API key was
+             already auto-detected from ~/.kimi/config.toml above ── */}
+        {overview.moonshot_source !== "local-config" && <MoonshotBalanceSection />}
 
         {/* ── Prompt History ── */}
         <Section title="Prompt History" defaultOpen={false} info="Your prompts across Kimi projects, read from ~/.kimi/user-history. Searchable.">

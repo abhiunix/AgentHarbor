@@ -97,6 +97,32 @@ pub struct KimiV2Overview {
     /// Derived health of the usage limits (Healthy/Approaching/Reached/…).
     #[serde(default)]
     pub limit_state: Option<LimitState>,
+
+    // ── Moonshot API-key balance (auto-detected from ~/.kimi/config.toml) ──
+    /// Which auth mode the active `default_model` resolves to: "api" (a
+    /// Moonshot platform API key) or "subscription" (Kimi Code OAuth).
+    #[serde(default = "default_auth_mode")]
+    pub auth_mode: String,
+    /// Prepaid Moonshot balance, populated only in `auth_mode == "api"`.
+    #[serde(default)]
+    pub moonshot_balance: Option<KimiMoonshotBalance>,
+    /// "local-config" when the balance was read via a key found in
+    /// `~/.kimi/config.toml`, else "none".
+    #[serde(default)]
+    pub moonshot_source: String,
+}
+
+fn default_auth_mode() -> String {
+    "subscription".to_string()
+}
+
+/// Prepaid Moonshot Open Platform balance (`GET /users/me/balance`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KimiMoonshotBalance {
+    pub available: f64,
+    pub voucher: f64,
+    pub cash: f64,
+    pub currency: String,
 }
 
 // ── Cache ───────────────────────────────────────────────────────────────────
@@ -238,30 +264,51 @@ fn parse_wire(content: &str) -> WireData {
     w
 }
 
-// ── config.toml (model catalog) ──────────────────────────────────────────────
-// Minimal hand-parse: we only need `default_model`, and the `[models."<id>"]`
-// tables' `provider` / `model` / `max_context_size` / `capabilities`. We never
-// touch the `[providers.*]` tables — they hold the API key.
+// ── config.toml (model catalog + providers) ──────────────────────────────────
+// Minimal hand-parse: `default_model`, the `[models."<id>"]` tables'
+// `provider` / `model` / `max_context_size` / `capabilities`, and the
+// `[providers]` tables' `type` / `base_url` / `api_key` — needed to
+// auto-detect a Moonshot platform API key. The key is read on-demand for a
+// single request and never persisted, logged, or echoed back.
+//
+// Two equivalent TOML shapes are supported for providers:
+//   [providers."managed:moonshot-ai"]        (flat/dotted header)
+//   [providers]                              (nested — header, then a bare
+//     [managed:moonshot-ai]                   sub-header for each provider)
 
 fn toml_string_value(line: &str) -> Option<String> {
     let (_, rhs) = line.split_once('=')?;
     let rhs = rhs.trim();
-    Some(rhs.trim_matches('"').to_string())
+    Some(rhs.trim_matches(|c| c == '"' || c == '\'').to_string())
 }
 
 fn toml_string_array(line: &str) -> Vec<String> {
     let Some((_, rhs)) = line.split_once('=') else { return vec![] };
     let rhs = rhs.trim().trim_start_matches('[').trim_end_matches(']');
     rhs.split(',')
-        .map(|s| s.trim().trim_matches('"').to_string())
+        .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
         .filter(|s| !s.is_empty())
         .collect()
 }
 
-fn parse_config(content: &str) -> (Option<String>, Vec<KimiModelInfo>) {
+/// A parsed `[providers.*]` table. Never `Debug`/`Serialize` — holds `api_key`
+/// and must never be printed, logged, or returned to the frontend.
+#[derive(Default, Clone)]
+struct KimiProviderConfig {
+    kind: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+}
+
+fn parse_config(
+    content: &str,
+) -> (Option<String>, Vec<KimiModelInfo>, HashMap<String, KimiProviderConfig>) {
     let mut default_model: Option<String> = None;
     let mut models: Vec<KimiModelInfo> = vec![];
-    let mut cur: Option<KimiModelInfo> = None;
+    let mut providers: HashMap<String, KimiProviderConfig> = HashMap::new();
+    let mut cur_model: Option<KimiModelInfo> = None;
+    let mut cur_provider: Option<(String, KimiProviderConfig)> = None;
+    let mut in_providers_block = false;
 
     for raw in content.lines() {
         let line = raw.trim();
@@ -269,51 +316,165 @@ fn parse_config(content: &str) -> (Option<String>, Vec<KimiModelInfo>) {
             continue;
         }
         if let Some(rest) = line.strip_prefix('[') {
-            // New table header — flush the current model.
-            if let Some(m) = cur.take() {
+            // New table header — flush whichever table was open.
+            if let Some(m) = cur_model.take() {
                 models.push(m);
             }
-            let header = rest.trim_end_matches(']');
+            if let Some((name, entry)) = cur_provider.take() {
+                providers.insert(name, entry);
+            }
+
+            let header = rest.trim_end_matches(']').trim();
+            let header_unquoted = header.trim_matches(|c| c == '"' || c == '\'');
+
+            if header_unquoted == "providers" {
+                in_providers_block = true;
+                continue;
+            }
+            if let Some(id) = header_unquoted.strip_prefix("providers.") {
+                in_providers_block = false;
+                cur_provider = Some((id.trim_matches(|c| c == '"' || c == '\'').to_string(), KimiProviderConfig::default()));
+                continue;
+            }
             if let Some(id) = header.strip_prefix("models.") {
-                cur = Some(KimiModelInfo {
-                    id: id.trim().trim_matches('"').to_string(),
+                in_providers_block = false;
+                cur_model = Some(KimiModelInfo {
+                    id: id.trim().trim_matches(|c| c == '"' || c == '\'').to_string(),
                     provider: None,
                     model: None,
                     max_context_size: None,
                     capabilities: vec![],
                 });
+                continue;
+            }
+            if in_providers_block {
+                // Nested sub-header, e.g. `[managed:moonshot-ai]`.
+                cur_provider = Some((header_unquoted.to_string(), KimiProviderConfig::default()));
+                continue;
+            }
+            // Any other top-level table — not one we track.
+            in_providers_block = false;
+            continue;
+        }
+        if let Some(m) = cur_model.as_mut() {
+            if line.starts_with("provider") {
+                m.provider = toml_string_value(line);
+            } else if line.starts_with("max_context_size") {
+                m.max_context_size = line.split_once('=').and_then(|(_, v)| v.trim().parse::<u64>().ok());
+            } else if line.starts_with("model") {
+                m.model = toml_string_value(line);
+            } else if line.starts_with("capabilities") {
+                m.capabilities = toml_string_array(line);
             }
             continue;
         }
-        if cur.is_none() {
-            if default_model.is_none() && line.starts_with("default_model") {
-                default_model = toml_string_value(line);
+        if let Some((_, entry)) = cur_provider.as_mut() {
+            if line.starts_with("type") {
+                entry.kind = toml_string_value(line);
+            } else if line.starts_with("base_url") {
+                entry.base_url = toml_string_value(line);
+            } else if line.starts_with("api_key") {
+                entry.api_key = toml_string_value(line);
             }
             continue;
         }
-        let m = cur.as_mut().unwrap();
-        if line.starts_with("provider") {
-            m.provider = toml_string_value(line);
-        } else if line.starts_with("max_context_size") {
-            m.max_context_size = line.split_once('=').and_then(|(_, v)| v.trim().parse::<u64>().ok());
-        } else if line.starts_with("model") {
-            m.model = toml_string_value(line);
-        } else if line.starts_with("capabilities") {
-            m.capabilities = toml_string_array(line);
+        if default_model.is_none() && line.starts_with("default_model") {
+            default_model = toml_string_value(line);
         }
     }
-    if let Some(m) = cur.take() {
+    if let Some(m) = cur_model.take() {
         models.push(m);
     }
-    (default_model, models)
+    if let Some((name, entry)) = cur_provider.take() {
+        providers.insert(name, entry);
+    }
+    (default_model, models, providers)
+}
+
+fn read_full_config() -> (Option<String>, Vec<KimiModelInfo>, HashMap<String, KimiProviderConfig>) {
+    let Some(root) = kimi_root() else { return (None, vec![], HashMap::new()) };
+    match std::fs::read_to_string(root.join("config.toml")) {
+        Ok(text) => parse_config(&text),
+        Err(_) => (None, vec![], HashMap::new()),
+    }
 }
 
 fn read_model_catalog() -> (Option<String>, Vec<KimiModelInfo>) {
-    let Some(root) = kimi_root() else { return (None, vec![]) };
-    match std::fs::read_to_string(root.join("config.toml")) {
-        Ok(text) => parse_config(&text),
-        Err(_) => (None, vec![]),
+    let (default_model, models, _providers) = read_full_config();
+    (default_model, models)
+}
+
+/// Default Moonshot base URL when a provider table omits `base_url`.
+fn default_moonshot_base_url() -> String {
+    "https://api.moonshot.ai/v1".to_string()
+}
+
+fn currency_for_base_url(base_url: &str) -> String {
+    if base_url.contains("moonshot.cn") {
+        "CNY".to_string()
+    } else {
+        "USD".to_string()
     }
+}
+
+/// Resolve which auth mode the active `default_model` uses:
+/// - `default_model` → its `provider` (from the `[models.*]` table) → that
+///   provider's `[providers.*]` table. If it carries a non-empty `api_key`,
+///   that's "api" mode (Moonshot platform key); otherwise "subscription".
+/// - If the chain doesn't resolve (missing default_model/model/provider
+///   entry), fall back to: any provider with an `api_key` → "api", else
+///   "subscription".
+fn resolve_auth_mode(
+    default_model: Option<&str>,
+    models: &[KimiModelInfo],
+    providers: &HashMap<String, KimiProviderConfig>,
+) -> (String, Option<(String, String)>) {
+    let resolved = default_model
+        .and_then(|dm| models.iter().find(|m| m.id == dm))
+        .and_then(|m| m.provider.as_deref())
+        .and_then(|p| providers.get(p));
+
+    if let Some(entry) = resolved {
+        return match entry.api_key.as_ref().filter(|k| !k.trim().is_empty()) {
+            Some(key) => {
+                let base = entry.base_url.clone().unwrap_or_else(default_moonshot_base_url);
+                ("api".to_string(), Some((key.clone(), base)))
+            }
+            None => ("subscription".to_string(), None),
+        };
+    }
+
+    // Fallback: the default_model/provider chain didn't resolve — scan all
+    // provider tables for the first usable API key.
+    for entry in providers.values() {
+        if let Some(key) = entry.api_key.as_ref().filter(|k| !k.trim().is_empty()) {
+            let base = entry.base_url.clone().unwrap_or_else(default_moonshot_base_url);
+            return ("api".to_string(), Some((key.clone(), base)));
+        }
+    }
+    ("subscription".to_string(), None)
+}
+
+fn detect_kimi_auth_mode() -> (String, Option<(String, String)>) {
+    let (default_model, models, providers) = read_full_config();
+    resolve_auth_mode(default_model.as_deref(), &models, &providers)
+}
+
+/// `GET {base_url}/users/me/balance` with the given key — never logs or
+/// returns the key; any failure (network, parse, missing key) yields `None`.
+fn fetch_moonshot_balance(api_key: &str, base_url: &str) -> Option<KimiMoonshotBalance> {
+    let url = format!("{}/users/me/balance", base_url.trim_end_matches('/'));
+    let body = crate::analytics::http::authed_get::<serde_json::Value>(&url, api_key, None).ok()?;
+    let data = body.get("data")?;
+    let available = lenient_f64(data.get("available_balance"))?;
+    let voucher = lenient_f64(data.get("voucher_balance")).unwrap_or(0.0);
+    let cash = lenient_f64(data.get("cash_balance")).unwrap_or(0.0);
+    Some(KimiMoonshotBalance {
+        available,
+        voucher,
+        cash,
+        currency: currency_for_base_url(base_url),
+    })
 }
 
 // ── Session enumeration ──────────────────────────────────────────────────────
@@ -627,6 +788,9 @@ fn build_overview(time_range: &str) -> KimiV2Overview {
         usage_connection_method: "none".into(),
         rate_limits: Vec::new(),
         limit_state: None,
+        auth_mode: default_auth_mode(),
+        moonshot_balance: None,
+        moonshot_source: "none".into(),
     }
 }
 
@@ -796,10 +960,30 @@ fn derive_limit_state(rate_limits: &[RateLimitWindow]) -> LimitState {
     LimitState::Healthy
 }
 
-/// Resolve the OAuth token, GET the usages endpoint, and map to windows.
-/// Never panics; classifies token errors so the caller can degrade.
+/// Detect the active auth mode from `~/.kimi/config.toml`, then either fetch
+/// the Moonshot prepaid balance ("api" mode) or the Kimi Code OAuth usage
+/// limits ("subscription" mode). Never panics; classifies token/HTTP errors
+/// so the caller can degrade gracefully. The Moonshot API key (if any) is
+/// read on-demand here and is never logged, persisted, or included in any
+/// returned error.
 pub fn fetch_kimi_usage_limits() -> UsageBundleResult {
     use crate::analytics::kimi_auth;
+
+    let (auth_mode, moonshot_cfg) = detect_kimi_auth_mode();
+
+    if auth_mode == "api" {
+        let moonshot_balance = moonshot_cfg.and_then(|(key, base_url)| fetch_moonshot_balance(&key, &base_url));
+        let moonshot_source = if moonshot_balance.is_some() { "local-config".to_string() } else { "none".to_string() };
+        return UsageBundleResult {
+            connected: false,
+            method: "none".into(),
+            rate_limits: Vec::new(),
+            limit_state: None,
+            auth_mode,
+            moonshot_balance,
+            moonshot_source,
+        };
+    }
 
     let (token, method) = match kimi_auth::resolve_kimi_oauth_token() {
         Ok(t) => t,
@@ -813,10 +997,13 @@ pub fn fetch_kimi_usage_limits() -> UsageBundleResult {
                     limit_state: Some(LimitState::Unauthenticated {
                         message: e.trim_start_matches(kimi_auth::ERR_UNAUTHORIZED).trim().into(),
                     }),
+                    auth_mode,
+                    moonshot_balance: None,
+                    moonshot_source: "none".into(),
                 };
             }
             // Missing file / other → just no usage data (no scary banner).
-            return UsageBundleResult::empty();
+            return UsageBundleResult { auth_mode, ..UsageBundleResult::empty() };
         }
     };
 
@@ -825,7 +1012,15 @@ pub fn fetch_kimi_usage_limits() -> UsageBundleResult {
         Ok(body) => {
             let rate_limits = map_usages(&body);
             let limit_state = Some(derive_limit_state(&rate_limits));
-            UsageBundleResult { connected: true, method, rate_limits, limit_state }
+            UsageBundleResult {
+                connected: true,
+                method,
+                rate_limits,
+                limit_state,
+                auth_mode,
+                moonshot_balance: None,
+                moonshot_source: "none".into(),
+            }
         }
         Err(crate::analytics::http::HttpCallError::Unsuccessful { status, .. })
             if status == 401 || status == 403 =>
@@ -837,9 +1032,12 @@ pub fn fetch_kimi_usage_limits() -> UsageBundleResult {
                 limit_state: Some(LimitState::Unauthenticated {
                     message: "Kimi session expired.".into(),
                 }),
+                auth_mode,
+                moonshot_balance: None,
+                moonshot_source: "none".into(),
             }
         }
-        Err(_) => UsageBundleResult::empty(),
+        Err(_) => UsageBundleResult { auth_mode, ..UsageBundleResult::empty() },
     }
 }
 
@@ -850,11 +1048,22 @@ pub struct UsageBundleResult {
     method: String,
     rate_limits: Vec<RateLimitWindow>,
     limit_state: Option<LimitState>,
+    auth_mode: String,
+    moonshot_balance: Option<KimiMoonshotBalance>,
+    moonshot_source: String,
 }
 
 impl UsageBundleResult {
     fn empty() -> Self {
-        Self { connected: false, method: "none".into(), rate_limits: Vec::new(), limit_state: None }
+        Self {
+            connected: false,
+            method: "none".into(),
+            rate_limits: Vec::new(),
+            limit_state: None,
+            auth_mode: default_auth_mode(),
+            moonshot_balance: None,
+            moonshot_source: "none".into(),
+        }
     }
 }
 
@@ -899,6 +1108,9 @@ fn apply_usage(overview: &mut KimiV2Overview, usage: UsageBundleResult) {
     overview.usage_connection_method = usage.method;
     overview.rate_limits = usage.rate_limits;
     overview.limit_state = usage.limit_state;
+    overview.auth_mode = usage.auth_mode;
+    overview.moonshot_balance = usage.moonshot_balance;
+    overview.moonshot_source = usage.moonshot_source;
 }
 
 // ── Prompt history (user-history/<md5>.jsonl) ────────────────────────────────
@@ -1105,9 +1317,9 @@ capabilities = ["thinking"]
 
 [providers."managed:moonshot-ai"]
 type = "kimi"
-api_key = "should-not-be-parsed"
+api_key = "sk-test-flat-dotted-header"
 "#;
-        let (default_model, models) = parse_config(content);
+        let (default_model, models, providers) = parse_config(content);
         assert_eq!(default_model.as_deref(), Some("moonshot-ai/kimi-k2.7-code"));
         assert_eq!(models.len(), 2);
         let first = &models[0];
@@ -1117,6 +1329,115 @@ api_key = "should-not-be-parsed"
         assert_eq!(first.capabilities, vec!["video_in", "image_in", "thinking"]);
         // The providers table (with the api_key) must never surface as a model.
         assert!(models.iter().all(|m| m.id.starts_with("moonshot-ai/")));
+
+        // The flat/dotted `[providers."managed:moonshot-ai"]` header is parsed
+        // into the providers map, not into the model catalog.
+        let provider = providers.get("managed:moonshot-ai").expect("provider present");
+        assert_eq!(provider.kind.as_deref(), Some("kimi"));
+        assert_eq!(provider.api_key.as_deref(), Some("sk-test-flat-dotted-header"));
+    }
+
+    #[test]
+    fn parse_config_reads_nested_providers_block() {
+        // The real ~/.kimi/config.toml shape: `[providers]` then a bare
+        // sub-header per provider, single-quoted TOML strings.
+        let content = r#"default_model = 'moonshot-ai/kimi-k2.7-code'
+
+[models."moonshot-ai/kimi-k2.7-code"]
+provider = "managed:moonshot-ai"
+model = "kimi-k2.7-code"
+
+[providers]
+  [managed:moonshot-ai]
+    type = 'kimi'
+    base_url = 'https://api.moonshot.ai/v1'
+    api_key = 'sk-nested-block-key'
+"#;
+        let (default_model, models, providers) = parse_config(content);
+        assert_eq!(default_model.as_deref(), Some("moonshot-ai/kimi-k2.7-code"));
+        assert_eq!(models.len(), 1);
+        let provider = providers.get("managed:moonshot-ai").expect("provider present");
+        assert_eq!(provider.kind.as_deref(), Some("kimi"));
+        assert_eq!(provider.base_url.as_deref(), Some("https://api.moonshot.ai/v1"));
+        assert_eq!(provider.api_key.as_deref(), Some("sk-nested-block-key"));
+    }
+
+    // ── Auth-mode detection (fixtures, no network — the key is never fetched
+    //    or logged in these tests) ──
+
+    #[test]
+    fn resolve_auth_mode_detects_api_mode_from_moonshot_key() {
+        let content = r#"default_model = 'moonshot-ai/kimi-k2.7-code'
+
+[models."moonshot-ai/kimi-k2.7-code"]
+provider = "managed:moonshot-ai"
+model = "kimi-k2.7-code"
+
+[providers]
+  [managed:moonshot-ai]
+    type = 'kimi'
+    base_url = 'https://api.moonshot.ai/v1'
+    api_key = 'sk-live-example-not-a-real-key'
+"#;
+        let (default_model, models, providers) = parse_config(content);
+        let (mode, cfg) = resolve_auth_mode(default_model.as_deref(), &models, &providers);
+        assert_eq!(mode, "api");
+        let (key, base_url) = cfg.expect("api-mode config present");
+        assert_eq!(key, "sk-live-example-not-a-real-key");
+        assert_eq!(base_url, "https://api.moonshot.ai/v1");
+    }
+
+    #[test]
+    fn resolve_auth_mode_detects_subscription_mode_when_provider_has_no_key() {
+        // The Kimi Code subscription platform provider — OAuth-backed, no
+        // api_key in config.toml.
+        let content = r#"default_model = "kimi-code/kimi-k2"
+
+[models."kimi-code/kimi-k2"]
+provider = "managed:kimi-code"
+model = "kimi-k2"
+
+[providers."managed:kimi-code"]
+type = "kimi"
+base_url = "https://api.kimi.com/coding/v1"
+"#;
+        let (default_model, models, providers) = parse_config(content);
+        let (mode, cfg) = resolve_auth_mode(default_model.as_deref(), &models, &providers);
+        assert_eq!(mode, "subscription");
+        assert!(cfg.is_none());
+    }
+
+    #[test]
+    fn resolve_auth_mode_falls_back_to_any_key_when_default_model_chain_missing() {
+        let providers: HashMap<String, KimiProviderConfig> = [(
+            "managed:moonshot-ai".to_string(),
+            KimiProviderConfig {
+                kind: Some("kimi".into()),
+                base_url: Some("https://api.moonshot.cn/v1".into()),
+                api_key: Some("sk-fallback-key".into()),
+            },
+        )]
+        .into_iter()
+        .collect();
+        // No default_model at all — falls back to scanning providers.
+        let (mode, cfg) = resolve_auth_mode(None, &[], &providers);
+        assert_eq!(mode, "api");
+        let (key, base_url) = cfg.expect("fallback config present");
+        assert_eq!(key, "sk-fallback-key");
+        assert_eq!(base_url, "https://api.moonshot.cn/v1");
+    }
+
+    #[test]
+    fn resolve_auth_mode_defaults_to_subscription_with_no_providers() {
+        let (mode, cfg) = resolve_auth_mode(None, &[], &HashMap::new());
+        assert_eq!(mode, "subscription");
+        assert!(cfg.is_none());
+    }
+
+    #[test]
+    fn currency_for_base_url_follows_moonshot_tld() {
+        assert_eq!(currency_for_base_url("https://api.moonshot.ai/v1"), "USD");
+        assert_eq!(currency_for_base_url("https://api.moonshot.cn/v1"), "CNY");
     }
 
     // ── Usage-limits mapping (fixtures, no network) ──
