@@ -1264,6 +1264,42 @@ export async function searchKimiTranscripts(query: string): Promise<KimiTranscri
   return invoke<KimiTranscriptSession[]>("search_kimi_transcripts", { query });
 }
 
+// --- Kimi Plans & Todos ---
+
+export interface KimiPlan {
+  slug: string;
+  name: string;
+  path: string;
+  size_bytes: number;
+  modified: string | null;
+}
+
+export interface KimiTodoItem {
+  title: string;
+  status: string;
+}
+
+export interface KimiTodoGroup {
+  session_id: string;
+  project_path: string;
+  project_name: string;
+  title: string;
+  plan_slug: string | null;
+  todos: KimiTodoItem[];
+}
+
+export async function listKimiPlans(): Promise<KimiPlan[]> {
+  return invoke<KimiPlan[]>("list_kimi_plans");
+}
+
+export async function readKimiPlan(path: string): Promise<string> {
+  return invoke<string>("read_kimi_plan", { path });
+}
+
+export async function listKimiTodoGroups(): Promise<KimiTodoGroup[]> {
+  return invoke<KimiTodoGroup[]>("list_kimi_todo_groups");
+}
+
 // --- Extensions ---
 
 export interface ClaudePlugin {
