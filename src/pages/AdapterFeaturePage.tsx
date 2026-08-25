@@ -168,9 +168,6 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
   deepseek: {
     analytics: ProviderBalancePage as LazyPage,
   },
-  moonshot: {
-    analytics: ProviderBalancePage as LazyPage,
-  },
   kimi: {
     "analytics-v2": KimiAnalyticsV2Page as LazyPage,
     prompts: KimiPromptsPage as LazyPage,

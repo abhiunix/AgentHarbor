@@ -177,16 +177,6 @@ export const adapterPlugins: AdapterPlugin[] = [
     ],
   },
   {
-    id: "moonshot",
-    name: "Moonshot",
-    icon: "\uD83C\uDF11",
-    color: "#7c4dff",
-    defaultExpanded: false,
-    features: [
-      { id: "analytics", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/moonshot/analytics" },
-    ],
-  },
-  {
     id: "kimi",
     name: "Kimi",
     icon: "\uD83C\uDF19",
@@ -247,7 +237,7 @@ function getDefaultEnabledAdapterIds(): string[] {
 // predates them, so a one-time migration adds each default-on newcomer once
 // (without touching adapters the user explicitly disabled).
 const NEW_DEFAULT_ADAPTERS_MIGRATION_KEY = "agentharbor-adapters-migrated-v2";
-const NEW_DEFAULT_ADAPTERS = ["deepseek", "moonshot", "kimi"];
+const NEW_DEFAULT_ADAPTERS = ["deepseek", "kimi"];
 
 /** Get the set of enabled adapter IDs from localStorage. Falls back to plugin defaults. */
 export function getEnabledAdapterIds(): string[] {
