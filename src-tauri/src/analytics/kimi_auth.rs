@@ -85,7 +85,7 @@ fn read_credentials() -> Result<KimiCredentials, String> {
         .ok_or_else(|| format!("{ERR_NOT_LOGGED_IN} home directory not found"))?;
     let text = std::fs::read_to_string(&path).map_err(|_| {
         format!(
-            "{ERR_NOT_LOGGED_IN} no Kimi credentials at {} — run `kimi login`",
+            "{ERR_NOT_LOGGED_IN} No Kimi credentials found ({}).",
             path.display()
         )
     })?;
@@ -160,10 +160,8 @@ fn refresh_and_store(mut creds: KimiCredentials) -> Result<String, String> {
                 write_credentials(&creds)?;
                 return Ok(r.access_token);
             }
-            RefreshOutcome::Rejected(body) => {
-                return Err(format!(
-                    "{ERR_UNAUTHORIZED} Kimi refresh token rejected — run `kimi login`. {body}"
-                ));
+            RefreshOutcome::Rejected(_body) => {
+                return Err(format!("{ERR_UNAUTHORIZED} Kimi session expired."));
             }
             RefreshOutcome::Transient(msg) => {
                 last_transient = Some(msg);
