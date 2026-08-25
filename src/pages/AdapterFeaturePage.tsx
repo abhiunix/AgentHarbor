@@ -64,6 +64,9 @@ const KimiTranscriptsPage = lazy(() =>
 const KimiPlansPage = lazy(() =>
   import("./KimiPlansPage").then((m) => ({ default: m.KimiPlansPage }))
 );
+const KimiControlPage = lazy(() =>
+  import("./KimiControlPage").then((m) => ({ default: m.KimiControlPage }))
+);
 
 // Windsurf-specific
 const WindsurfRulesPage = lazy(() =>
@@ -170,6 +173,7 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
     prompts: KimiPromptsPage as LazyPage,
     transcripts: KimiTranscriptsPage as LazyPage,
     plans: KimiPlansPage as LazyPage,
+    control: KimiControlPage as LazyPage,
   },
 };
 

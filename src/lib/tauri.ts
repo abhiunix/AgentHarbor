@@ -620,6 +620,45 @@ export async function getKimiV2ConnectionStatus(): Promise<boolean> {
   return invoke<boolean>("get_kimi_v2_connection_status");
 }
 
+// ── Kimi Permissions & Control ───────────────────────────────────────────────
+
+export interface KimiLoopControl {
+  max_steps_per_turn: number | null;
+  max_retries_per_step: number | null;
+  reserved_context_size: number | null;
+  compaction_trigger_ratio: number | null;
+}
+
+export interface KimiSessionApproval {
+  session_id: string;
+  project_name: string;
+  yolo: boolean;
+  afk: boolean;
+  auto_approve_actions: string[];
+}
+
+export interface KimiControlSettings {
+  default_model: string | null;
+  default_yolo: boolean;
+  default_thinking: boolean;
+  default_plan_mode: boolean;
+  loop_control: KimiLoopControl;
+  models: KimiModelInfo[];
+  sessions_approval: KimiSessionApproval[];
+}
+
+export async function getKimiControlSettings(): Promise<KimiControlSettings> {
+  return invoke<KimiControlSettings>("get_kimi_control_settings");
+}
+
+export async function setKimiDefaultModel(modelId: string): Promise<void> {
+  return invoke("set_kimi_default_model", { modelId });
+}
+
+export async function setKimiControlFlag(flag: string, value: boolean): Promise<void> {
+  return invoke("set_kimi_control_flag", { flag, value });
+}
+
 // ── Kimi Prompt History (own sidebar section) ───────────────────────────────
 
 export interface KimiPromptHistoryEntry {

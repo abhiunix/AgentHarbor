@@ -166,6 +166,9 @@ use analytics::kimi_transcripts::{
 use analytics::kimi_plans::{
     list_kimi_plans, read_kimi_plan, list_kimi_todo_groups,
 };
+use analytics::kimi_control::{
+    get_kimi_control_settings, set_kimi_default_model, set_kimi_control_flag,
+};
 use analytics::cursor_v2::{
     get_cursor_v2_connection_status, get_cursor_v2_overview, get_cursor_v2_usage_events,
     get_cursor_v2_ai_commits, get_cursor_v2_model_usage, get_cursor_v2_composer_tabs,
@@ -506,6 +509,10 @@ pub fn run() {
             list_kimi_plans,
             read_kimi_plan,
             list_kimi_todo_groups,
+            // Kimi Permissions & Control
+            get_kimi_control_settings,
+            set_kimi_default_model,
+            set_kimi_control_flag,
             get_claude_history,
             get_claude_active_sessions,
             get_claude_app_info,
