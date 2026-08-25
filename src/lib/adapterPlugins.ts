@@ -194,6 +194,7 @@ export const adapterPlugins: AdapterPlugin[] = [
     defaultExpanded: false,
     features: [
       { id: "analytics-v2", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/kimi/analytics-v2" },
+      { id: "prompts", label: "Prompt History", icon: "\uD83D\uDCAC", route: "/adapters/kimi/prompts" },
     ],
   },
   // ── Coming soon ──
