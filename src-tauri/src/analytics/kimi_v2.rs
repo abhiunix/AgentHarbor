@@ -158,12 +158,12 @@ const ACTIVE_NOW_MINUTES: i64 = 15;
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
-fn kimi_root() -> Option<std::path::PathBuf> {
+pub(crate) fn kimi_root() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join(".kimi"))
 }
 
 /// The session directory name for a project path is the md5 hex of the path.
-fn md5_dir(path: &str) -> String {
+pub(crate) fn md5_dir(path: &str) -> String {
     format!("{:x}", md5::compute(path.as_bytes()))
 }
 
@@ -196,7 +196,7 @@ fn read_work_dirs() -> Vec<WorkDir> {
 }
 
 /// md5(dir) → (project path, last_session_id).
-fn build_dir_map() -> HashMap<String, (String, Option<String>)> {
+pub(crate) fn build_dir_map() -> HashMap<String, (String, Option<String>)> {
     read_work_dirs()
         .into_iter()
         .map(|w| (md5_dir(&w.path), (w.path, w.last_session_id)))

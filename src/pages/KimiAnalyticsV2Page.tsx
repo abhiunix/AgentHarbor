@@ -6,12 +6,10 @@ import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getKimiV2Overview,
-  getKimiV2PromptHistory,
   startKimiInProject,
   type KimiV2Overview,
   type KimiProjectStat,
   type KimiDailyActivity,
-  type KimiPromptEntry,
   type KimiRateLimitWindow,
 } from "../lib/tauri";
 import type { ProviderAnalytics, ProviderInfo } from "../stores/analyticsStore";
@@ -513,10 +511,6 @@ export function KimiAnalyticsV2Page() {
   const [timeRange, setTimeRange] = useState("all");
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
 
-  const [prompts, setPrompts] = useState<KimiPromptEntry[]>([]);
-  const [promptTotal, setPromptTotal] = useState(0);
-  const [promptQuery, setPromptQuery] = useState("");
-
   const loadData = useCallback(async (range: string, force: boolean) => {
     setLoading(true);
     setError(null);
@@ -531,19 +525,7 @@ export function KimiAnalyticsV2Page() {
     }
   }, []);
 
-  const loadPrompts = useCallback(async (query: string) => {
-    try {
-      const page = await getKimiV2PromptHistory(query.trim() ? query.trim() : null, 1, 200);
-      setPrompts(page.entries);
-      setPromptTotal(page.total_count);
-    } catch { /* noop */ }
-  }, []);
-
   useEffect(() => { loadData("all", false); }, [loadData]);
-  useEffect(() => {
-    const id = setTimeout(() => loadPrompts(promptQuery), 250);
-    return () => clearTimeout(id);
-  }, [promptQuery, loadPrompts]);
 
   if (loading && !overview) {
     return <div className="p-6 text-text-muted">Loading Kimi analytics…</div>;
@@ -773,32 +755,6 @@ export function KimiAnalyticsV2Page() {
         {/* ── Moonshot Balance (manual connect) — hidden when the API key was
              already auto-detected from ~/.kimi/config.toml above ── */}
         {overview.moonshot_source !== "local-config" && <MoonshotBalanceSection />}
-
-        {/* ── Prompt History ── */}
-        <Section title="Prompt History" defaultOpen={false} info="Your prompts across Kimi projects, read from ~/.kimi/user-history. Searchable.">
-          <div className="mb-3">
-            <input
-              type="text"
-              value={promptQuery}
-              onChange={(e) => setPromptQuery(e.target.value)}
-              placeholder="Search prompts…"
-              className="w-full max-w-md px-3 py-1.5 rounded bg-[#1a1b23] border border-[#2a2b36] text-xs text-text-primary placeholder-text-muted focus:outline-none focus:border-cyan-500/50"
-            />
-            <span className="ml-2 text-[10px] text-text-muted">{formatNum(promptTotal)} total</span>
-          </div>
-          {prompts.length === 0 ? (
-            <p className="text-sm text-text-muted">No prompts found.</p>
-          ) : (
-            <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] divide-y divide-[#1e1f2a] max-h-[420px] overflow-y-auto">
-              {prompts.map((p, i) => (
-                <div key={i} className="px-3 py-2 hover:bg-[#22232e]">
-                  <div className="text-xs text-text-primary whitespace-pre-wrap break-words">{p.content}</div>
-                  <div className="text-[10px] text-text-muted mt-0.5">{p.project_name}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
       </div>
     </div>
   );

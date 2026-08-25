@@ -620,6 +620,46 @@ export async function getKimiV2ConnectionStatus(): Promise<boolean> {
   return invoke<boolean>("get_kimi_v2_connection_status");
 }
 
+// ── Kimi Prompt History (own sidebar section) ───────────────────────────────
+
+export interface KimiPromptHistoryEntry {
+  display: string;
+  timestamp: string;
+  timestamp_ms: number;
+  project?: string;
+  project_name?: string;
+  session_id?: string;
+}
+
+export interface KimiPromptHistoryResult {
+  entries: KimiPromptHistoryEntry[];
+  total: number;
+}
+
+export interface KimiPromptHistoryStats {
+  total: number;
+}
+
+export async function getKimiPromptHistory(limit: number, offset: number): Promise<KimiPromptHistoryResult> {
+  return invoke<KimiPromptHistoryResult>("get_kimi_prompt_history", { limit, offset });
+}
+
+export async function searchKimiPromptHistory(query: string): Promise<KimiPromptHistoryEntry[]> {
+  return invoke<KimiPromptHistoryEntry[]>("search_kimi_prompt_history", { query });
+}
+
+export async function getKimiPromptStats(): Promise<KimiPromptHistoryStats> {
+  return invoke<KimiPromptHistoryStats>("get_kimi_prompt_stats");
+}
+
+export async function buildKimiResumeCommand(sessionId: string, project?: string): Promise<string> {
+  return invoke<string>("build_kimi_resume_command", { sessionId, project: project ?? null });
+}
+
+export async function startKimiSession(sessionId: string, project?: string): Promise<void> {
+  return invoke("start_kimi_session", { sessionId, project: project ?? null });
+}
+
 export interface InstalledItem {
   name: string;
   item_type: string;

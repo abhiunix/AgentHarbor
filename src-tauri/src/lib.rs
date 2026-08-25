@@ -156,6 +156,10 @@ use analytics::claude_v2::{
 use analytics::kimi_v2::{
     get_kimi_v2_overview, get_kimi_v2_prompt_history, get_kimi_v2_connection_status,
 };
+use analytics::kimi_prompts::{
+    get_kimi_prompt_history, search_kimi_prompt_history, get_kimi_prompt_stats,
+    build_kimi_resume_command, start_kimi_session,
+};
 use analytics::cursor_v2::{
     get_cursor_v2_connection_status, get_cursor_v2_overview, get_cursor_v2_usage_events,
     get_cursor_v2_ai_commits, get_cursor_v2_model_usage, get_cursor_v2_composer_tabs,
@@ -482,6 +486,12 @@ pub fn run() {
             get_kimi_v2_overview,
             get_kimi_v2_prompt_history,
             get_kimi_v2_connection_status,
+            // Kimi Prompt History (own section)
+            get_kimi_prompt_history,
+            search_kimi_prompt_history,
+            get_kimi_prompt_stats,
+            build_kimi_resume_command,
+            start_kimi_session,
             get_claude_history,
             get_claude_active_sessions,
             get_claude_app_info,
