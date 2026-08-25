@@ -64,6 +64,9 @@ const KimiTranscriptsPage = lazy(() =>
 const KimiPlansPage = lazy(() =>
   import("./KimiPlansPage").then((m) => ({ default: m.KimiPlansPage }))
 );
+const KimiInstructionsPage = lazy(() =>
+  import("./KimiInstructionsPage").then((m) => ({ default: m.KimiInstructionsPage }))
+);
 const KimiControlPage = lazy(() =>
   import("./KimiControlPage").then((m) => ({ default: m.KimiControlPage }))
 );
@@ -173,6 +176,7 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
     prompts: KimiPromptsPage as LazyPage,
     transcripts: KimiTranscriptsPage as LazyPage,
     plans: KimiPlansPage as LazyPage,
+    instructions: KimiInstructionsPage as LazyPage,
     control: KimiControlPage as LazyPage,
   },
 };
