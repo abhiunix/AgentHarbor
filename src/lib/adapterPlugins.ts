@@ -197,6 +197,7 @@ export const adapterPlugins: AdapterPlugin[] = [
       { id: "prompts", label: "Prompt History", icon: "\uD83D\uDCAC", route: "/adapters/kimi/prompts" },
       { id: "transcripts", label: "Transcripts", icon: "\uD83D\uDCDC", route: "/adapters/kimi/transcripts" },
       { id: "plans", label: "Plans & Todos", icon: "\uD83D\uDCCB", route: "/adapters/kimi/plans" },
+      { id: "control", label: "Permissions & Control", icon: "\uD83D\uDD12", route: "/adapters/kimi/control" },
     ],
   },
   // ── Coming soon ──

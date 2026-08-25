@@ -293,14 +293,17 @@ fn toml_string_array(line: &str) -> Vec<String> {
 
 /// A parsed `[providers.*]` table. Never `Debug`/`Serialize` — holds `api_key`
 /// and must never be printed, logged, or returned to the frontend.
+/// `pub(crate)` only so other analytics modules (e.g. `kimi_control`) can
+/// call `parse_config` — the fields themselves stay module-private, so
+/// callers can never read `api_key` even with crate-wide access.
 #[derive(Default, Clone)]
-struct KimiProviderConfig {
+pub(crate) struct KimiProviderConfig {
     kind: Option<String>,
     base_url: Option<String>,
     api_key: Option<String>,
 }
 
-fn parse_config(
+pub(crate) fn parse_config(
     content: &str,
 ) -> (Option<String>, Vec<KimiModelInfo>, HashMap<String, KimiProviderConfig>) {
     let mut default_model: Option<String> = None;
