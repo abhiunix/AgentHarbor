@@ -816,6 +816,43 @@ export async function startKimiSession(sessionId: string, project?: string): Pro
   return invoke("start_kimi_session", { sessionId, project: project ?? null });
 }
 
+// ── DeepSeek Prompt History (own sidebar section) ────────────────────────────
+// NOTE: dsh has no resume-by-id CLI, so — unlike Kimi — there is no
+// buildResumeCommand/startSession pair here.
+
+export interface DeepSeekPromptEntry {
+  display: string;
+  timestamp: string;
+  timestamp_ms: number;
+  project?: string;
+  project_name?: string;
+  session_id?: string;
+}
+
+export interface DeepSeekPromptHistoryPage {
+  entries: DeepSeekPromptEntry[];
+  total: number;
+}
+
+export interface DeepSeekPromptHistoryStats {
+  total: number;
+}
+
+export async function getDeepSeekPromptHistory(
+  limit: number,
+  offset: number
+): Promise<DeepSeekPromptHistoryPage> {
+  return invoke<DeepSeekPromptHistoryPage>("get_deepseek_prompt_history", { limit, offset });
+}
+
+export async function searchDeepSeekPromptHistory(query: string): Promise<DeepSeekPromptEntry[]> {
+  return invoke<DeepSeekPromptEntry[]>("search_deepseek_prompt_history", { query });
+}
+
+export async function getDeepSeekPromptStats(): Promise<DeepSeekPromptHistoryStats> {
+  return invoke<DeepSeekPromptHistoryStats>("get_deepseek_prompt_stats");
+}
+
 export interface InstalledItem {
   name: string;
   item_type: string;
@@ -1418,6 +1455,42 @@ export async function readKimiTranscript(
 
 export async function searchKimiTranscripts(query: string): Promise<KimiTranscriptSession[]> {
   return invoke<KimiTranscriptSession[]>("search_kimi_transcripts", { query });
+}
+
+// --- DeepSeek Transcripts (read-only) ---
+
+export interface DeepSeekTranscriptSession {
+  session_id: string;
+  workspace_path: string;
+  workspace_name: string;
+  title: string;
+  message_count: number;
+  first_activity: string | null;
+  last_activity: string | null;
+}
+
+export interface DeepSeekTranscriptMessage {
+  role: string;
+  content: string;
+  timestamp: string | null;
+}
+
+export async function listDeepSeekTranscriptSessions(): Promise<DeepSeekTranscriptSession[]> {
+  return invoke<DeepSeekTranscriptSession[]>("list_deepseek_transcript_sessions");
+}
+
+export async function readDeepSeekTranscript(
+  sessionId: string,
+  workspacePath?: string
+): Promise<DeepSeekTranscriptMessage[]> {
+  return invoke<DeepSeekTranscriptMessage[]>("read_deepseek_transcript", {
+    sessionId,
+    workspacePath: workspacePath ?? null,
+  });
+}
+
+export async function searchDeepSeekTranscripts(query: string): Promise<DeepSeekTranscriptSession[]> {
+  return invoke<DeepSeekTranscriptSession[]>("search_deepseek_transcripts", { query });
 }
 
 // --- Kimi Plans & Todos ---

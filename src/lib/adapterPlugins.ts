@@ -174,6 +174,8 @@ export const adapterPlugins: AdapterPlugin[] = [
     defaultExpanded: false,
     features: [
       { id: "analytics-v2", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/deepseek/analytics-v2" },
+      { id: "prompts", label: "Prompt History", icon: "\uD83D\uDCAC", route: "/adapters/deepseek/prompts" },
+      { id: "transcripts", label: "Transcripts", icon: "\uD83D\uDCDC", route: "/adapters/deepseek/transcripts" },
     ],
   },
   {
