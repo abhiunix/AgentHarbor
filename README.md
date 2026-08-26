@@ -8,7 +8,7 @@
 
 **One tray app to manage all your AI coding agents.**
 
-For developers running Claude Code, Cursor, Codex, Gemini CLI, or Windsurf: track usage and spend, manage configurations, deploy capabilities, and keep every tool in sync — all from one native app.
+For developers running Claude Code, Cursor, Codex, Gemini CLI, Kimi, DeepSeek, or Windsurf: track usage and spend, manage configurations, deploy capabilities, and keep every tool in sync — all from one native app.
 
 <p align="center"><img src="docs/assets/demo.gif" alt="Live per-provider rate limits and spend in the AgentHarbor tray popover (stylized)" width="720"></p>
 <p align="center"><sub><a href="docs/assets/agentharbor-launch-1080p.mp4">▶ Watch the 36-second launch video</a></sub></p>
@@ -113,6 +113,8 @@ Tools like [ccusage](https://github.com/ryoppippi/ccusage) and [Claude Code Usag
 | **Cursor** | Full | Plan included + bonus + on-demand $, team OD | MCP, rules, agents |
 | **Codex (OpenAI)** | Full | Primary 5h, Weekly 7d, per-model $ | MCP, skills |
 | **Gemini CLI** | Quota | Pro → Flash → Flash Lite tier waterfall | Skills, hooks, agents |
+| **Kimi (Moonshot)** | Full (local sessions) | Subscription 5h/weekly or Moonshot balance | — |
+| **DeepSeek** | Full (local sessions) | Account balance | — |
 | **Windsurf** | Config | — | MCP, rules |
 | **GitHub Copilot** | — | — | Skills |
 | **VS Code** | — | — | Skills |
