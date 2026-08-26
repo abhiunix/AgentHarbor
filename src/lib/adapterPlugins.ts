@@ -15,7 +15,7 @@ import antigravityIcon from "../assets/antigravity_logo.jpg";
 import vscodeIcon from "../assets/vs_code_logo.png";
 import copilotIcon from "../assets/codex-icon.svg";
 import codexIcon from "../assets/codex-icon.svg";
-import deepseekIcon from "../assets/deepseek_logo.svg";
+import deepseekIcon from "../assets/deepseek_logo.png";
 import kimiIcon from "../assets/kimi_logo.png";
 
 export interface AdapterFeature {
