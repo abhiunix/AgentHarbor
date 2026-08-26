@@ -70,6 +70,42 @@ interface OrgInfo {
   role: string | null;
 }
 
+interface TokenBreakdown {
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_write_input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens: number;
+  total_tokens: number;
+  cache_hit_percent: number;
+  sessions_scanned: number;
+}
+
+interface ProjectBreakdown {
+  cwd: string;
+  project_name: string;
+  session_count: number;
+  total_tokens: number;
+  git_branch: string | null;
+  git_sha: string | null;
+  source: string | null;
+  sandbox_policy: string | null;
+  approval_mode: string | null;
+}
+
+interface ModelCatalogEntry {
+  slug: string;
+  display_name: string;
+  description: string | null;
+  context_window: number | null;
+  max_context_window: number | null;
+  reasoning_levels: string[];
+  default_reasoning_level: string | null;
+  visibility: string | null;
+}
+
+type DailyActivityPoint = [string, number];
+
 interface ProviderAnalytics {
   provider_id: string;
   provider_name: string;
@@ -144,6 +180,17 @@ function projectName(cwd: string | null): string {
   if (!cwd) return "Unknown";
   const parts = cwd.split("/");
   return parts[parts.length - 1] || cwd;
+}
+
+function shortSha(sha: string | null | undefined): string | null {
+  if (!sha) return null;
+  return sha.slice(0, 7);
+}
+
+function formatHour(hour: number): string {
+  const h = hour % 12 === 0 ? 12 : hour % 12;
+  const ampm = hour < 12 ? "AM" : "PM";
+  return `${h}${ampm}`;
 }
 
 function formatDate(iso: string | null): string {
@@ -280,6 +327,152 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
   );
 }
 
+// ── Activity heatmap & hourly chart ─────────────────────────────────────────
+
+const HEATMAP_COLORS = ["#161b22", "#1a3d2e", "#1f6b45", "#10a37f", "#2fe0a8"];
+
+function ActivityHeatmap({ daily }: { daily: DailyActivityPoint[] }) {
+  const dayMap = new Map<string, number>(daily);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const startOfYear = new Date(today.getFullYear(), 0, 1);
+  const firstSunday = new Date(startOfYear);
+  firstSunday.setDate(firstSunday.getDate() - firstSunday.getDay());
+  const dayMs = 86400000;
+
+  type DayCell = { dateKey: string; date: Date; value: number };
+  const weeks: DayCell[][] = [];
+  const cur = new Date(firstSunday.getTime());
+
+  while (cur.getTime() <= today.getTime()) {
+    const week: DayCell[] = [];
+    for (let d = 0; d < 7; d++) {
+      const t = cur.getTime();
+      if (t > today.getTime()) break;
+      const dk = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(cur.getDate()).padStart(2, "0")}`;
+      week.push({ dateKey: dk, date: new Date(t), value: dayMap.get(dk) ?? 0 });
+      cur.setTime(t + dayMs);
+    }
+    if (week.length > 0) weeks.push(week);
+    if (cur.getTime() > today.getTime()) break;
+  }
+
+  const monthLabels: { month: string; weekIndex: number }[] = [];
+  weeks.forEach((week, wi) => {
+    if (!week.length) return;
+    const mn = week[0].date.toLocaleDateString(undefined, { month: "short" });
+    const prev = wi > 0 && weeks[wi - 1]?.[0] ? weeks[wi - 1][0].date.toLocaleDateString(undefined, { month: "short" }) : "";
+    if (wi === 0 || prev !== mn) monthLabels.push({ month: mn, weekIndex: wi });
+  });
+
+  const allValues = weeks.flatMap((w) => w.map((d) => d.value)).filter((v) => v > 0);
+  const sorted = [...allValues].sort((a, b) => a - b);
+  const len = sorted.length;
+  const getLevel = (v: number) => {
+    if (v === 0 || len === 0) return 0;
+    if (v >= sorted[Math.floor(len * 0.9)]) return 4;
+    if (v >= sorted[Math.floor(len * 0.7)]) return 3;
+    if (v >= sorted[Math.floor(len * 0.5)]) return 2;
+    if (v >= sorted[Math.floor(len * 0.3)]) return 1;
+    return 0;
+  };
+
+  const weekCount = weeks.length;
+  if (weekCount === 0) return null;
+
+  return (
+    <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4 flex flex-col min-w-0">
+      <p className="text-[10px] text-text-muted uppercase tracking-wider mb-3">Daily Sessions</p>
+      <div
+        className="w-full min-h-[100px]"
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${weekCount}, minmax(0, 1fr))`,
+          gridTemplateRows: "auto repeat(7, minmax(0, 1fr))",
+          gap: 1,
+        }}
+      >
+        {weeks.map((_, wi) => {
+          const label = monthLabels.find((m) => m.weekIndex === wi);
+          return (
+            <div
+              key={`month-${wi}`}
+              className="min-w-0 h-4 flex items-center justify-center overflow-hidden"
+              title={label?.month}
+              style={{ gridColumn: wi + 1, gridRow: 1 }}
+            >
+              {label && <span className="text-[10px] text-text-muted truncate">{label.month}</span>}
+            </div>
+          );
+        })}
+        {weeks.map((week, wi) =>
+          week.map((day, di) => {
+            const level = getLevel(day.value);
+            const color = HEATMAP_COLORS[level];
+            return (
+              <div
+                key={`${wi}-${di}`}
+                className="rounded-sm border border-white/5 min-h-[10px] min-w-[8px]"
+                style={{
+                  backgroundColor: color,
+                  gridColumn: wi + 1,
+                  gridRow: di + 2,
+                }}
+                title={`${day.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} — ${day.value > 0 ? `${day.value} session${day.value === 1 ? "" : "s"}` : "No activity"}`}
+              />
+            );
+          })
+        )}
+      </div>
+      <div className="flex items-center gap-2 mt-2 text-[10px] text-text-muted flex-shrink-0">
+        <span>Less</span>
+        {HEATMAP_COLORS.map((color, i) => (
+          <div key={i} className="w-3 h-3 rounded-sm border border-white/5" style={{ backgroundColor: color }} />
+        ))}
+        <span>More</span>
+      </div>
+    </div>
+  );
+}
+
+function HourlyActivityChart({ hourCounts }: { hourCounts: number[] }) {
+  const data = hourCounts.map((value, hour) => ({ hour, value }));
+  return (
+    <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
+      <p className="text-[10px] text-text-muted uppercase tracking-wider mb-3">Sessions by Hour of Day</p>
+      <div className="h-48">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ left: 0, right: 10, top: 0, bottom: 0 }}>
+            <XAxis
+              dataKey="hour"
+              tickFormatter={(h: number) => (h % 6 === 0 ? formatHour(h) : "")}
+              tick={{ fontSize: 9, fill: "#9394a1" }}
+              tickLine={false}
+              axisLine={false}
+              interval={0}
+            />
+            <YAxis hide />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const p = payload[0].payload as { hour: number; value: number };
+                return (
+                  <div className="bg-[#1a1b23] border border-[#2a2b36] rounded px-3 py-2 text-xs shadow-lg">
+                    <p className="text-text-primary font-medium">{formatHour(p.hour)}</p>
+                    <p className="text-text-muted">{p.value} sessions</p>
+                  </div>
+                );
+              }}
+            />
+            <Bar dataKey="value" fill={ACCENT} radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export function CodexAnalyticsPage() {
@@ -371,6 +564,24 @@ export function CodexAnalyticsPage() {
   const estimatedTotalCost = (extra.estimated_total_cost as number) ?? 0;
   const costByModel = (extra.cost_by_model as Record<string, number> | undefined) ?? {};
   const hasLocalData = totalSessions > 0;
+
+  // Enrichment data from extra
+  const tokenBreakdown = (extra.token_breakdown as TokenBreakdown | undefined) ?? null;
+  const tokenBreakdownCost = (extra.token_breakdown_estimated_cost as number | undefined) ?? 0;
+  const tokenBreakdownCostModel = (extra.token_breakdown_cost_model as string | undefined) ?? null;
+  const projectBreakdown = (extra.project_breakdown as ProjectBreakdown[] | undefined) ?? [];
+  const modelCatalog = (extra.model_catalog as ModelCatalogEntry[] | undefined) ?? [];
+  const dailyActivity = (extra.daily_activity as DailyActivityPoint[] | undefined) ?? [];
+  const hourCounts = (extra.hour_counts as number[] | undefined) ?? [];
+  const activeDays = (extra.active_days as number | undefined) ?? 0;
+  const longestStreak = (extra.longest_streak as number | undefined) ?? 0;
+  const currentStreak = (extra.current_streak as number | undefined) ?? 0;
+  const peakHour = (extra.peak_hour as number | undefined) ?? null;
+  const offlineRateLimits = (extra.offline_rate_limits as RateLimitWindow[] | undefined) ?? [];
+  const offlinePlanType = (extra.offline_plan_type as string | undefined) ?? null;
+  const usingOfflineRateLimits = rate_limits.length === 0 && offlineRateLimits.length > 0;
+  const effectiveRateLimits = rate_limits.length > 0 ? rate_limits : offlineRateLimits;
+  const hasActivity = dailyActivity.length > 0;
 
   // Paginated sessions
   const paginatedSessions = sessions.slice(
@@ -514,6 +725,45 @@ export function CodexAnalyticsPage() {
                 label="Projects"
                 value={Object.keys(sessionsByProject).length}
               />
+            </div>
+          </Section>
+        )}
+
+        {/* Token Breakdown — input/output/cache/reasoning split from rollout logs */}
+        {tokenBreakdown && tokenBreakdown.total_tokens > 0 && (
+          <Section title="Token Breakdown">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <StatCard label="Input" value={formatTokens(tokenBreakdown.input_tokens)} />
+              <StatCard label="Output" value={formatTokens(tokenBreakdown.output_tokens)} />
+              <StatCard
+                label="Cache Read"
+                value={formatTokens(tokenBreakdown.cached_input_tokens)}
+                sub={`${tokenBreakdown.cache_hit_percent.toFixed(1)}% hit rate`}
+              />
+              <StatCard label="Cache Write" value={formatTokens(tokenBreakdown.cache_write_input_tokens)} />
+              <StatCard label="Reasoning" value={formatTokens(tokenBreakdown.reasoning_output_tokens)} />
+            </div>
+            <p className="text-[10px] text-text-muted mt-2">
+              Aggregated from the last {tokenBreakdown.sessions_scanned} session{tokenBreakdown.sessions_scanned === 1 ? "" : "s"}&apos; rollout logs (~/.codex/sessions).
+              {tokenBreakdownCostModel && (
+                <> Split-rate estimate at {tokenBreakdownCostModel} rates: <span className="text-emerald-400 font-medium">{formatUsd(tokenBreakdownCost)}</span>.</>
+              )}
+            </p>
+          </Section>
+        )}
+
+        {/* Activity — daily heatmap, streaks, peak hour */}
+        {hasActivity && (
+          <Section title="Activity">
+            <div className="grid grid-cols-4 gap-4 mb-4">
+              <StatCard label="Active Days" value={activeDays} />
+              <StatCard label="Current Streak" value={`${currentStreak}d`} />
+              <StatCard label="Longest Streak" value={`${longestStreak}d`} />
+              <StatCard label="Peak Hour" value={peakHour !== null ? formatHour(peakHour) : "--"} />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <ActivityHeatmap daily={dailyActivity} />
+              {hourCounts.length === 24 && <HourlyActivityChart hourCounts={hourCounts} />}
             </div>
           </Section>
         )}
@@ -721,11 +971,67 @@ export function CodexAnalyticsPage() {
           </Section>
         )}
 
+        {/* Per-Project Deep Breakdown */}
+        {projectBreakdown.length > 0 && (
+          <Section title="Projects">
+            <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-[#2a2b36]">
+                      <th className="text-left px-4 py-2.5 text-text-muted font-medium uppercase tracking-wider text-[10px]">Project</th>
+                      <th className="text-left px-4 py-2.5 text-text-muted font-medium uppercase tracking-wider text-[10px]">Branch</th>
+                      <th className="text-left px-4 py-2.5 text-text-muted font-medium uppercase tracking-wider text-[10px]">Source</th>
+                      <th className="text-right px-4 py-2.5 text-text-muted font-medium uppercase tracking-wider text-[10px]">Sessions</th>
+                      <th className="text-right px-4 py-2.5 text-text-muted font-medium uppercase tracking-wider text-[10px]">Tokens</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {projectBreakdown.slice(0, 20).map((p) => (
+                      <tr key={p.cwd} className="border-b border-[#2a2b36] last:border-b-0 hover:bg-[#22232e] transition-colors">
+                        <td className="px-4 py-2.5 max-w-[280px]">
+                          <div className="text-text-primary font-medium truncate">{p.project_name}</div>
+                          <div className="text-text-muted text-[10px] truncate" title={p.cwd}>{p.cwd}</div>
+                        </td>
+                        <td className="px-4 py-2.5 text-text-muted max-w-[140px] truncate">
+                          {p.git_branch || "--"}
+                          {shortSha(p.git_sha) && (
+                            <span className="text-text-muted/70 font-mono text-[10px]"> @{shortSha(p.git_sha)}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {p.source ? <Badge color="#6366f1">{p.source}</Badge> : <span className="text-text-muted">--</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-text-secondary font-mono">{p.session_count}</td>
+                        <td className="px-4 py-2.5 text-right text-text-secondary font-mono">{formatTokens(p.total_tokens)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {projectBreakdown.length > 20 && (
+                <div className="px-4 py-2 text-[10px] text-text-muted border-t border-[#2a2b36]">
+                  Showing top 20 of {projectBreakdown.length} projects by token usage.
+                </div>
+              )}
+            </div>
+          </Section>
+        )}
+
         {/* Rate Limits */}
-        {rate_limits.length > 0 && (
+        {effectiveRateLimits.length > 0 && (
           <Section title="Rate Limits">
+            {usingOfflineRateLimits && (
+              <div className="flex items-center gap-2 mb-3">
+                <Badge color="#f59e0b">Offline snapshot</Badge>
+                <span className="text-[10px] text-text-muted">
+                  Live API unreachable &mdash; showing the last rate-limit snapshot from local session logs
+                  {offlinePlanType && ` (plan: ${offlinePlanType})`}.
+                </span>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {rate_limits.map((rl) => {
+              {effectiveRateLimits.map((rl) => {
                 const resetInfo = rl.resets_at
                   ? formatResetTime(rl.resets_at)
                   : rl.resets_in_seconds
@@ -867,22 +1173,65 @@ export function CodexAnalyticsPage() {
         )}
 
         {/* Available Models */}
-        {availableModels.length > 0 && (
+        {modelCatalog.length > 0 ? (
           <Section title="Available Models">
-            <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
-              <div className="flex flex-wrap gap-2">
-                {availableModels.map((model) => (
-                  <Badge
-                    key={model}
-                    color={model === configModel ? ACCENT : "#6366f1"}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {modelCatalog.map((model) => {
+                const isActive = model.slug === configModel;
+                return (
+                  <div
+                    key={model.slug}
+                    className="bg-[#1a1b23] border rounded-lg p-4"
+                    style={{ borderColor: isActive ? ACCENT : "#2a2b36" }}
                   >
-                    {model}
-                    {model === configModel && " (active)"}
-                  </Badge>
-                ))}
-              </div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-sm font-medium text-text-primary">{model.display_name}</p>
+                      {isActive && <Badge>active</Badge>}
+                    </div>
+                    {model.description && (
+                      <p className="text-[10px] text-text-muted mb-2 line-clamp-2">{model.description}</p>
+                    )}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-text-muted">
+                      {model.context_window && <span>Context: {formatTokens(model.context_window)}</span>}
+                      {model.max_context_window && model.max_context_window !== model.context_window && (
+                        <span>Max: {formatTokens(model.max_context_window)}</span>
+                      )}
+                    </div>
+                    {model.reasoning_levels.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {model.reasoning_levels.map((level) => (
+                          <Badge
+                            key={level}
+                            color={level === model.default_reasoning_level ? ACCENT : "#6366f1"}
+                          >
+                            {level}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </Section>
+        ) : (
+          availableModels.length > 0 && (
+            <Section title="Available Models">
+              <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
+                <div className="flex flex-wrap gap-2">
+                  {availableModels.map((model) => (
+                    <Badge
+                      key={model}
+                      color={model === configModel ? ACCENT : "#6366f1"}
+                    >
+                      {model}
+                      {model === configModel && " (active)"}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </Section>
+          )
         )}
 
         {/* Extra info badges — filter out keys we already display */}
@@ -892,6 +1241,11 @@ export function CodexAnalyticsPage() {
             "sessions", "tokens_by_model", "sessions_by_project", "available_models",
             "config_model", "config_reasoning_effort", "account_name", "organizations",
             "estimated_total_cost", "cost_by_model", "start_today_cost",
+            "start_today_sessions", "start_today_tokens", "this_week_sessions",
+            "this_week_tokens", "this_week_cost", "model_catalog", "project_breakdown",
+            "token_breakdown", "token_breakdown_estimated_cost", "token_breakdown_cost_model",
+            "daily_activity", "hour_counts", "active_days", "longest_streak",
+            "current_streak", "peak_hour", "offline_rate_limits", "offline_plan_type",
           ]);
           const remainingExtra = Object.entries(extra).filter(([key]) => !displayedKeys.has(key));
           if (remainingExtra.length === 0) return null;

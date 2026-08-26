@@ -124,10 +124,12 @@ fn parse_wham_window(w: &Option<WhamRateWindow>, label: &str) -> Option<RateLimi
 
 // ── Cost estimation ─────────────────────────────────────────────────────────
 
-/// Estimate USD cost for a Codex session based on model and token count.
-/// Uses combined (average of input+output) per-million-token rates.
-fn estimate_codex_cost(model: &str, tokens: i64) -> f64 {
-    let rate_per_million = match model.to_lowercase().as_str() {
+/// Combined (blended average of input+output) per-million-token rate for a model.
+/// Labeled estimates — Codex plans are flat-fee, this is API-equivalent value only.
+fn combined_rate_per_million(model: &str) -> f64 {
+    match model.to_lowercase().as_str() {
+        m if m.contains("gpt-5.6") => 12.0,
+        m if m.contains("gpt-5.5") => 10.0,
         m if m.contains("gpt-5.4-mini") => 2.5,
         m if m.contains("gpt-5.4") => 10.0,
         m if m.contains("gpt-5.3-codex") => 10.0,
@@ -136,8 +138,40 @@ fn estimate_codex_cost(model: &str, tokens: i64) -> f64 {
         m if m.contains("gpt-5.1-codex") => 7.5,
         m if m.contains("gpt-5") => 5.0,
         _ => 5.0, // default
-    };
-    (tokens as f64 / 1_000_000.0) * rate_per_million
+    }
+}
+
+/// Estimate USD cost for a Codex session based on model and token count.
+/// Uses combined (average of input+output) per-million-token rates.
+fn estimate_codex_cost(model: &str, tokens: i64) -> f64 {
+    (tokens as f64 / 1_000_000.0) * combined_rate_per_million(model)
+}
+
+/// Distinct per-token-type rates, derived from the combined rate. Labeled
+/// estimate: cached input is cheap, output is the most expensive tier.
+struct ModelRates {
+    input: f64,
+    cached_input: f64,
+    output: f64,
+}
+
+fn split_rates_per_million(model: &str) -> ModelRates {
+    let combined = combined_rate_per_million(model);
+    ModelRates {
+        input: combined * 0.5,
+        cached_input: combined * 0.05,
+        output: combined * 4.0,
+    }
+}
+
+/// Estimate cost for a rollout token usage snapshot using distinct
+/// input/cached-input/output rates instead of one blended figure.
+fn estimate_split_cost(usage: &RolloutTokenUsage, model: &str) -> f64 {
+    let rates = split_rates_per_million(model);
+    let uncached_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
+    (uncached_input as f64 / 1_000_000.0) * rates.input
+        + (usage.cached_input_tokens as f64 / 1_000_000.0) * rates.cached_input
+        + (usage.output_tokens as f64 / 1_000_000.0) * rates.output
 }
 
 // ── Local data types ────────────────────────────────────────────────────────
@@ -187,18 +221,509 @@ fn codex_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".codex")
 }
 
-/// Read sessions from ~/.codex/state_5.sqlite
-fn fetch_local_stats() -> Result<CodexLocalStats, String> {
+/// Convert a millisecond epoch timestamp (as stored in `threads.created_at_ms`
+/// / `updated_at_ms`) to an RFC3339 string for display. Returns `None` for 0/invalid.
+fn ms_to_rfc3339(ms: i64) -> Option<String> {
+    if ms <= 0 {
+        return None;
+    }
+    chrono::DateTime::from_timestamp_millis(ms).map(|dt| dt.to_rfc3339())
+}
+
+/// Open `~/.codex/state_5.sqlite` read-only, or `None` if missing/unreadable.
+fn open_codex_db() -> Option<rusqlite::Connection> {
     let db_path = codex_dir().join("state_5.sqlite");
     if !db_path.exists() {
-        return Err("state_5.sqlite not found".into());
+        return None;
     }
-
-    let conn = rusqlite::Connection::open_with_flags(
+    rusqlite::Connection::open_with_flags(
         &db_path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .map_err(|e| format!("Cannot open Codex DB: {}", e))?;
+    .ok()
+}
+
+// ── Rollout JSONL parsing (~/.codex/sessions/<Y>/<M>/<D>/rollout-*.jsonl) ───
+
+/// Cumulative token usage as reported by a `token_count` event_msg. Numeric
+/// fields default to 0 so unfamiliar/older rollout shapes don't fail parsing.
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+struct RolloutTokenUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    cached_input_tokens: u64,
+    #[serde(default)]
+    cache_write_input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    reasoning_output_tokens: u64,
+    #[serde(default)]
+    total_tokens: u64,
+}
+
+impl RolloutTokenUsage {
+    fn add(&mut self, other: &RolloutTokenUsage) {
+        self.input_tokens += other.input_tokens;
+        self.cached_input_tokens += other.cached_input_tokens;
+        self.cache_write_input_tokens += other.cache_write_input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.reasoning_output_tokens += other.reasoning_output_tokens;
+        self.total_tokens += other.total_tokens;
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+struct RolloutRateWindow {
+    used_percent: Option<f64>,
+    window_minutes: Option<i64>,
+    resets_at: Option<i64>,
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+struct RolloutRateLimits {
+    primary: Option<RolloutRateWindow>,
+    secondary: Option<RolloutRateWindow>,
+    plan_type: Option<String>,
+}
+
+/// Parse one rollout JSONL line; returns `Some` only for an `event_msg` of
+/// subtype `token_count`. Tries the observed `payload.info.total_token_usage`
+/// shape first, then a flat `payload.total_token_usage` as a fallback for
+/// forward/backward compatibility. Never panics on malformed input.
+fn parse_token_count_line(line: &str) -> Option<(RolloutTokenUsage, Option<RolloutRateLimits>)> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    if value.get("type")?.as_str()? != "event_msg" {
+        return None;
+    }
+    let payload = value.get("payload")?;
+    if payload.get("type")?.as_str()? != "token_count" {
+        return None;
+    }
+    let usage_value = payload
+        .pointer("/info/total_token_usage")
+        .or_else(|| payload.get("total_token_usage"))?;
+    let usage: RolloutTokenUsage = serde_json::from_value(usage_value.clone()).ok()?;
+    let rate_limits = payload
+        .get("rate_limits")
+        .and_then(|v| serde_json::from_value::<RolloutRateLimits>(v.clone()).ok());
+    Some((usage, rate_limits))
+}
+
+/// Scan a rollout file for its *last* `token_count` event — the cumulative
+/// usage for that session — plus the rate limits attached to that event.
+/// Skips oversized/corrupt files rather than failing the whole enrichment.
+fn scan_rollout_file(path: &std::path::Path) -> Option<(RolloutTokenUsage, Option<RolloutRateLimits>)> {
+    const MAX_ROLLOUT_BYTES: u64 = 25 * 1024 * 1024;
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.len() > MAX_ROLLOUT_BYTES {
+            return None;
+        }
+    }
+    let content = fs::read_to_string(path).ok()?;
+    scan_rollout_content(&content)
+}
+
+/// Keep only the *last* `token_count` event in a rollout's JSONL content —
+/// pulled out of `scan_rollout_file` so it's testable without touching disk.
+fn scan_rollout_content(content: &str) -> Option<(RolloutTokenUsage, Option<RolloutRateLimits>)> {
+    let mut last = None;
+    for line in content.lines() {
+        if let Some(parsed) = parse_token_count_line(line) {
+            last = Some(parsed);
+        }
+    }
+    last
+}
+
+fn rollout_window_label(minutes: Option<i64>, secondary: bool) -> String {
+    let prefix = if secondary { "Secondary" } else { "Primary" };
+    match minutes {
+        Some(m) if m <= 60 * 6 => format!("{prefix} (5h)"),
+        Some(m) if m >= 60 * 24 * 6 => format!("{prefix} (7d)"),
+        Some(m) => format!("{prefix} ({m}m)"),
+        None => format!("{prefix} (offline)"),
+    }
+}
+
+fn rollout_rate_window_to_window(w: &RolloutRateWindow, secondary: bool) -> Option<RateLimitWindow> {
+    let used = w.used_percent?;
+    Some(RateLimitWindow {
+        provider_id: "codex".into(),
+        label: rollout_window_label(w.window_minutes, secondary),
+        used_percent: used,
+        remaining_percent: (100.0 - used).max(0.0),
+        resets_at: w.resets_at.map(|ts| {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_default()
+        }),
+        resets_in_seconds: None,
+        window_seconds: w.window_minutes.map(|m| m * 60),
+    })
+}
+
+/// Map an offline (rollout-derived) rate-limit snapshot into the same
+/// `RateLimitWindow` shape the WHAM API produces, for use as a fallback.
+fn rollout_rate_limits_to_windows(rl: &RolloutRateLimits) -> Vec<RateLimitWindow> {
+    let mut out = Vec::new();
+    if let Some(ref w) = rl.primary {
+        if let Some(win) = rollout_rate_window_to_window(w, false) {
+            out.push(win);
+        }
+    }
+    if let Some(ref w) = rl.secondary {
+        if let Some(win) = rollout_rate_window_to_window(w, true) {
+            out.push(win);
+        }
+    }
+    out
+}
+
+/// Aggregate token usage summed across the most recently touched sessions.
+const ROLLOUT_SCAN_LIMIT: i64 = 150;
+
+#[derive(Serialize, Clone, Debug, Default)]
+struct CodexTokenBreakdown {
+    input_tokens: u64,
+    cached_input_tokens: u64,
+    cache_write_input_tokens: u64,
+    output_tokens: u64,
+    reasoning_output_tokens: u64,
+    total_tokens: u64,
+    cache_hit_percent: f64,
+    sessions_scanned: usize,
+}
+
+struct RolloutScanResult {
+    token_breakdown: CodexTokenBreakdown,
+    /// Rate limits from the newest rollout that reported any (offline fallback).
+    offline_rate_limits: Option<RolloutRateLimits>,
+}
+
+/// Scan the most recently updated sessions' rollout files: sum token usage
+/// across all of them, and capture the newest available rate-limit snapshot
+/// for use when the WHAM API is unreachable.
+fn scan_recent_rollouts(conn: &rusqlite::Connection) -> RolloutScanResult {
+    let empty = RolloutScanResult {
+        token_breakdown: CodexTokenBreakdown::default(),
+        offline_rate_limits: None,
+    };
+    let mut stmt = match conn.prepare(
+        "SELECT rollout_path FROM threads WHERE rollout_path IS NOT NULL \
+         ORDER BY COALESCE(updated_at_ms, updated_at * 1000) DESC LIMIT ?1",
+    ) {
+        Ok(s) => s,
+        Err(_) => return empty,
+    };
+    let paths: Vec<String> = match stmt.query_map([ROLLOUT_SCAN_LIMIT], |row| row.get::<_, String>(0)) {
+        Ok(rows) => rows.flatten().collect(),
+        Err(_) => return empty,
+    };
+
+    let mut total = RolloutTokenUsage::default();
+    let mut scanned = 0usize;
+    let mut offline_rate_limits = None;
+    for p in &paths {
+        let path = std::path::Path::new(p);
+        if !path.exists() {
+            continue;
+        }
+        if let Some((usage, rate_limits)) = scan_rollout_file(path) {
+            total.add(&usage);
+            scanned += 1;
+            if offline_rate_limits.is_none() && rate_limits.is_some() {
+                offline_rate_limits = rate_limits;
+            }
+        }
+    }
+
+    let cache_hit_percent = if total.input_tokens > 0 {
+        (total.cached_input_tokens as f64 / total.input_tokens as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    RolloutScanResult {
+        token_breakdown: CodexTokenBreakdown {
+            input_tokens: total.input_tokens,
+            cached_input_tokens: total.cached_input_tokens,
+            cache_write_input_tokens: total.cache_write_input_tokens,
+            output_tokens: total.output_tokens,
+            reasoning_output_tokens: total.reasoning_output_tokens,
+            total_tokens: total.total_tokens,
+            cache_hit_percent,
+            sessions_scanned: scanned,
+        },
+        offline_rate_limits,
+    }
+}
+
+// ── Activity stats (daily heatmap, streaks, peak hour) ──────────────────────
+
+#[derive(Debug, Clone, Default)]
+struct CodexActivityStats {
+    daily_activity: Vec<(String, u32)>,
+    hour_counts: [u32; 24],
+    active_days: u32,
+    longest_streak: u32,
+    current_streak: u32,
+    peak_hour: Option<u32>,
+}
+
+/// Derive daily-activity heatmap, streaks, and peak hour from a set of
+/// thread `created_at` timestamps (milliseconds, local time — mirrors the
+/// claude_v2 `active_days`/`longest_streak`/`peak_hour` derivation).
+fn compute_activity_stats(created_at_ms: &[i64]) -> CodexActivityStats {
+    use chrono::{Local, TimeZone, Timelike};
+
+    let mut daily: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    let mut hour_counts = [0u32; 24];
+    for &ms in created_at_ms {
+        if let chrono::LocalResult::Single(dt) = Local.timestamp_millis_opt(ms) {
+            *daily.entry(dt.format("%Y-%m-%d").to_string()).or_insert(0) += 1;
+            hour_counts[dt.hour() as usize] += 1;
+        }
+    }
+
+    let active_days = daily.len() as u32;
+
+    let mut dates: Vec<chrono::NaiveDate> = daily
+        .keys()
+        .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .collect();
+    dates.sort();
+
+    let longest_streak: u32 = if dates.is_empty() {
+        0
+    } else {
+        let mut max_streak = 1u32;
+        let mut cur = 1u32;
+        for w in dates.windows(2) {
+            if w[1] - w[0] == chrono::Duration::days(1) {
+                cur += 1;
+                max_streak = max_streak.max(cur);
+            } else {
+                cur = 1;
+            }
+        }
+        max_streak
+    };
+
+    let current_streak: u32 = if dates.is_empty() {
+        0
+    } else {
+        let today = Local::now().date_naive();
+        let last = *dates.last().unwrap();
+        if (today - last).num_days() > 1 {
+            0
+        } else {
+            let mut streak = 1u32;
+            for w in dates.windows(2).rev() {
+                if w[1] - w[0] == chrono::Duration::days(1) {
+                    streak += 1;
+                } else {
+                    break;
+                }
+            }
+            streak
+        }
+    };
+
+    let peak_hour = {
+        let max_val = hour_counts.iter().copied().max().unwrap_or(0);
+        if max_val == 0 {
+            None
+        } else {
+            hour_counts.iter().position(|&v| v == max_val).map(|i| i as u32)
+        }
+    };
+
+    CodexActivityStats {
+        daily_activity: daily.into_iter().collect(),
+        hour_counts,
+        active_days,
+        longest_streak,
+        current_streak,
+        peak_hour,
+    }
+}
+
+fn fetch_activity_timestamps(conn: &rusqlite::Connection) -> Vec<i64> {
+    let mut stmt = match conn.prepare("SELECT COALESCE(created_at_ms, created_at * 1000) FROM threads") {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    let timestamps: Vec<i64> = match stmt.query_map([], |row| row.get::<_, i64>(0)) {
+        Ok(rows) => rows.flatten().collect(),
+        Err(_) => vec![],
+    };
+    timestamps
+}
+
+// ── Per-project deep breakdown ───────────────────────────────────────────────
+
+/// One row read back from `threads` for per-project aggregation.
+type ThreadProjectRow = (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, i64);
+
+#[derive(Serialize, Clone, Debug)]
+struct CodexProjectBreakdown {
+    cwd: String,
+    project_name: String,
+    session_count: i64,
+    total_tokens: i64,
+    git_branch: Option<String>,
+    git_sha: Option<String>,
+    source: Option<String>,
+    sandbox_policy: Option<String>,
+    approval_mode: Option<String>,
+}
+
+/// Full per-project breakdown (cwd, git branch/sha, source, tokens, session
+/// count) — git/source/sandbox fields come from that project's most recently
+/// updated thread since threads are read newest-first.
+fn fetch_project_breakdown(conn: &rusqlite::Connection) -> Vec<CodexProjectBreakdown> {
+    let mut stmt = match conn.prepare(
+        "SELECT cwd, git_branch, git_sha, source, sandbox_policy, approval_mode, COALESCE(tokens_used, 0) \
+         FROM threads WHERE cwd IS NOT NULL AND cwd != '' \
+         ORDER BY COALESCE(updated_at_ms, updated_at * 1000) DESC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    let rows = match stmt.query_map([], |row| -> rusqlite::Result<ThreadProjectRow> {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
+            row.get(6)?,
+        ))
+    }) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    let mut agg: HashMap<String, CodexProjectBreakdown> = HashMap::new();
+    for row in rows.flatten() {
+        let (cwd, git_branch, git_sha, source, sandbox_policy, approval_mode, tokens) = row;
+        let entry = agg.entry(cwd.clone()).or_insert_with(|| {
+            let project_name = std::path::Path::new(&cwd)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| cwd.clone());
+            CodexProjectBreakdown {
+                cwd: cwd.clone(),
+                project_name,
+                session_count: 0,
+                total_tokens: 0,
+                git_branch,
+                git_sha,
+                source,
+                sandbox_policy,
+                approval_mode,
+            }
+        });
+        entry.session_count += 1;
+        entry.total_tokens += tokens;
+    }
+
+    let mut out: Vec<CodexProjectBreakdown> = agg.into_values().collect();
+    out.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    out
+}
+
+// ── Model catalog (~/.codex/models_cache.json) ──────────────────────────────
+
+#[derive(Deserialize, Debug, Clone)]
+struct ModelCacheReasoningLevel {
+    effort: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct ModelCacheEntry {
+    slug: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    context_window: Option<i64>,
+    #[serde(default)]
+    max_context_window: Option<i64>,
+    #[serde(default)]
+    supported_reasoning_levels: Option<Vec<ModelCacheReasoningLevel>>,
+    #[serde(default)]
+    default_reasoning_level: Option<String>,
+    #[serde(default)]
+    visibility: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct ModelsCacheFile {
+    #[serde(default)]
+    models: Vec<ModelCacheEntry>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+struct ModelCatalogEntry {
+    slug: String,
+    display_name: String,
+    description: Option<String>,
+    context_window: Option<i64>,
+    max_context_window: Option<i64>,
+    reasoning_levels: Vec<String>,
+    default_reasoning_level: Option<String>,
+    visibility: Option<String>,
+}
+
+/// Parse `~/.codex/models_cache.json`'s `.models[]` array (the file is an
+/// object with `fetched_at`/`etag`/`client_version`/`models`, not a bare array).
+fn parse_models_cache_json(content: &str) -> Vec<ModelCatalogEntry> {
+    let parsed: ModelsCacheFile = match serde_json::from_str(content) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    parsed
+        .models
+        .into_iter()
+        .map(|m| {
+            let display_name = m.display_name.unwrap_or_else(|| m.slug.clone());
+            let reasoning_levels = m
+                .supported_reasoning_levels
+                .unwrap_or_default()
+                .into_iter()
+                .map(|l| l.effort)
+                .collect();
+            ModelCatalogEntry {
+                slug: m.slug,
+                display_name,
+                description: m.description,
+                context_window: m.context_window,
+                max_context_window: m.max_context_window,
+                reasoning_levels,
+                default_reasoning_level: m.default_reasoning_level,
+                visibility: m.visibility,
+            }
+        })
+        .collect()
+}
+
+fn read_model_catalog() -> Vec<ModelCatalogEntry> {
+    let path = codex_dir().join("models_cache.json");
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    parse_models_cache_json(&content)
+}
+
+/// Read sessions from ~/.codex/state_5.sqlite
+fn fetch_local_stats() -> Result<CodexLocalStats, String> {
+    let conn = open_codex_db().ok_or("state_5.sqlite not found")?;
 
     // Get total counts
     let total_sessions: i64 = conn
@@ -209,17 +734,22 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
         .query_row("SELECT COALESCE(SUM(tokens_used), 0) FROM threads", [], |row| row.get(0))
         .unwrap_or(0);
 
-    // Get recent sessions (last 50)
+    // Get recent sessions (last 50). created_at/updated_at are epoch-second
+    // INTEGER columns (not strings) — read the millisecond variants (falling
+    // back to seconds*1000 for older rows) and convert to RFC3339 for display.
     let mut stmt = conn
         .prepare(
             "SELECT id, title, model, COALESCE(tokens_used, 0), source, cwd, git_branch, \
-             reasoning_effort, created_at, updated_at \
+             reasoning_effort, COALESCE(created_at_ms, created_at * 1000), \
+             COALESCE(updated_at_ms, updated_at * 1000) \
              FROM threads ORDER BY updated_at DESC LIMIT 50",
         )
         .map_err(|e| format!("Query prepare error: {}", e))?;
 
     let sessions: Vec<CodexSession> = stmt
         .query_map([], |row| {
+            let created_at_ms: i64 = row.get(8)?;
+            let updated_at_ms: i64 = row.get(9)?;
             Ok(CodexSession {
                 id: row.get(0)?,
                 title: row.get(1)?,
@@ -229,8 +759,8 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
                 cwd: row.get(5)?,
                 git_branch: row.get(6)?,
                 reasoning_effort: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                created_at: ms_to_rfc3339(created_at_ms),
+                updated_at: ms_to_rfc3339(updated_at_ms),
             })
         })
         .map_err(|e| format!("Query error: {}", e))?
@@ -297,36 +827,6 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
     })
 }
 
-/// Read available models from ~/.codex/models_cache.json
-fn read_models_cache() -> Vec<String> {
-    let path = codex_dir().join("models_cache.json");
-    if !path.exists() {
-        return vec![];
-    }
-    let content = match fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    // models_cache.json is an array of objects with "slug" or "id" fields,
-    // or just an array of strings. Try both.
-    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
-        arr.iter()
-            .filter_map(|v| {
-                if let Some(s) = v.as_str() {
-                    Some(s.to_string())
-                } else {
-                    v.get("slug")
-                        .or_else(|| v.get("id"))
-                        .and_then(|s| s.as_str())
-                        .map(|s| s.to_string())
-                }
-            })
-            .collect()
-    } else {
-        vec![]
-    }
-}
-
 /// Read config from ~/.codex/config.toml (simple key=value parsing)
 fn read_codex_config() -> (Option<String>, Option<String>) {
     let path = codex_dir().join("config.toml");
@@ -373,14 +873,40 @@ struct CodexWindowStats {
     cost: f64,
 }
 
+/// Run a windowed session/token/cost query against `threads`. Hoisted to
+/// module scope (rather than nested in `fetch_multi_window_stats`) so the
+/// date-window SQL fix is directly unit-testable against a fixture DB.
+fn query_window(conn: &rusqlite::Connection, where_clause: &str, params: &[&str]) -> CodexWindowStats {
+    let sql_count = format!(
+        "SELECT COUNT(*), COALESCE(SUM(tokens_used), 0) FROM threads WHERE {}",
+        where_clause
+    );
+    let (sessions, tokens): (i64, i64) = conn.query_row(&sql_count, rusqlite::params_from_iter(params.iter()), |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    }).unwrap_or((0, 0));
+
+    let sql_cost = format!(
+        "SELECT COALESCE(model, 'unknown'), COALESCE(tokens_used, 0) FROM threads WHERE {}",
+        where_clause
+    );
+    let mut cost = 0.0f64;
+    if let Ok(mut stmt) = conn.prepare(&sql_cost) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            let model: String = row.get(0)?;
+            let tok: i64 = row.get(1)?;
+            Ok((model, tok))
+        }) {
+            for row in rows.flatten() {
+                cost += estimate_codex_cost(&row.0, row.1);
+            }
+        }
+    }
+    CodexWindowStats { sessions, tokens, cost }
+}
+
 /// Get stats for 2 time windows from SQLite: today (since midnight), this week (since Monday)
 fn fetch_multi_window_stats() -> Option<(CodexWindowStats, CodexWindowStats)> {
-    let db_path = codex_dir().join("state_5.sqlite");
-    if !db_path.exists() { return None; }
-    let conn = rusqlite::Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ).ok()?;
+    let conn = open_codex_db()?;
 
     let local_now = chrono::Local::now();
     let today_str = local_now.format("%Y-%m-%d").to_string();
@@ -391,44 +917,23 @@ fn fetch_multi_window_stats() -> Option<(CodexWindowStats, CodexWindowStats)> {
     let monday = local_now.date_naive() - chrono::Duration::days(weekday as i64);
     let monday_str = monday.format("%Y-%m-%d").to_string();
 
-    fn query_window(conn: &rusqlite::Connection, where_clause: &str, params: &[&str]) -> CodexWindowStats {
-        let sql_count = format!(
-            "SELECT COUNT(*), COALESCE(SUM(tokens_used), 0) FROM threads WHERE {}",
-            where_clause
-        );
-        let (sessions, tokens): (i64, i64) = conn.query_row(&sql_count, rusqlite::params_from_iter(params.iter()), |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        }).unwrap_or((0, 0));
-
-        let sql_cost = format!(
-            "SELECT COALESCE(model, 'unknown'), COALESCE(tokens_used, 0) FROM threads WHERE {}",
-            where_clause
-        );
-        let mut cost = 0.0f64;
-        if let Ok(mut stmt) = conn.prepare(&sql_cost) {
-            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                let model: String = row.get(0)?;
-                let tok: i64 = row.get(1)?;
-                Ok((model, tok))
-            }) {
-                for row in rows.flatten() {
-                    cost += estimate_codex_cost(&row.0, row.1);
-                }
-            }
-        }
-        CodexWindowStats { sessions, tokens, cost }
-    }
-
+    // created_at/updated_at are epoch-second INTEGER columns, not date strings —
+    // date() needs the 'unixepoch' modifier or it silently returns NULL and
+    // these windows are always empty.
     let stats_today = query_window(&conn,
-        "date(created_at) = ?1 OR date(updated_at) = ?1", &[&today_str]);
+        "date(created_at, 'unixepoch', 'localtime') = ?1 OR date(updated_at, 'unixepoch', 'localtime') = ?1",
+        &[&today_str]);
     let stats_week = query_window(&conn,
-        "date(created_at) >= ?1 OR date(updated_at) >= ?1", &[&monday_str]);
+        "date(created_at, 'unixepoch', 'localtime') >= ?1 OR date(updated_at, 'unixepoch', 'localtime') >= ?1",
+        &[&monday_str]);
 
     Some((stats_today, stats_week))
 }
 
-/// Enrich an extra HashMap with all local data
-fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) {
+/// Enrich an extra HashMap with all local data. Returns offline (rollout-derived)
+/// rate-limit windows so the caller can fall back to them when the WHAM API
+/// call fails or returns nothing.
+fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) -> Option<Vec<RateLimitWindow>> {
     // SQLite local stats
     if let Ok(stats) = fetch_local_stats() {
         extra.insert("total_sessions".into(), serde_json::json!(stats.total_sessions));
@@ -450,20 +955,80 @@ fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) {
         extra.insert("this_week_cost".into(), serde_json::json!(stats_week.cost));
     }
 
-    // Models cache
-    let models = read_models_cache();
-    if !models.is_empty() {
-        extra.insert("available_models".into(), serde_json::json!(models));
+    // Model catalog (rich cards) + slug list for existing badges
+    let model_catalog = read_model_catalog();
+    if !model_catalog.is_empty() {
+        extra.insert(
+            "available_models".into(),
+            serde_json::json!(model_catalog.iter().map(|m| m.slug.clone()).collect::<Vec<_>>()),
+        );
+        extra.insert("model_catalog".into(), serde_json::to_value(&model_catalog).unwrap_or_default());
     }
 
     // Config
     let (config_model, config_reasoning) = read_codex_config();
-    if let Some(m) = config_model {
-        extra.insert("config_model".into(), serde_json::Value::String(m));
+    if let Some(ref m) = config_model {
+        extra.insert("config_model".into(), serde_json::Value::String(m.clone()));
     }
     if let Some(r) = config_reasoning {
         extra.insert("config_reasoning_effort".into(), serde_json::Value::String(r));
     }
+
+    // Activity (daily heatmap, streaks, peak hour) + per-project breakdown +
+    // rollout-derived token totals & offline rate-limit fallback.
+    let mut offline_windows = None;
+    if let Some(conn) = open_codex_db() {
+        let timestamps = fetch_activity_timestamps(&conn);
+        if !timestamps.is_empty() {
+            let activity = compute_activity_stats(&timestamps);
+            extra.insert(
+                "daily_activity".into(),
+                serde_json::to_value(&activity.daily_activity).unwrap_or_default(),
+            );
+            extra.insert("hour_counts".into(), serde_json::json!(activity.hour_counts.to_vec()));
+            extra.insert("active_days".into(), serde_json::json!(activity.active_days));
+            extra.insert("longest_streak".into(), serde_json::json!(activity.longest_streak));
+            extra.insert("current_streak".into(), serde_json::json!(activity.current_streak));
+            if let Some(ph) = activity.peak_hour {
+                extra.insert("peak_hour".into(), serde_json::json!(ph));
+            }
+        }
+
+        let projects = fetch_project_breakdown(&conn);
+        if !projects.is_empty() {
+            extra.insert("project_breakdown".into(), serde_json::to_value(&projects).unwrap_or_default());
+        }
+
+        let scan = scan_recent_rollouts(&conn);
+        extra.insert("token_breakdown".into(), serde_json::to_value(&scan.token_breakdown).unwrap_or_default());
+        let cost_model = config_model.as_deref().unwrap_or("gpt-5.5");
+        let breakdown_usage = RolloutTokenUsage {
+            input_tokens: scan.token_breakdown.input_tokens,
+            cached_input_tokens: scan.token_breakdown.cached_input_tokens,
+            cache_write_input_tokens: scan.token_breakdown.cache_write_input_tokens,
+            output_tokens: scan.token_breakdown.output_tokens,
+            reasoning_output_tokens: scan.token_breakdown.reasoning_output_tokens,
+            total_tokens: scan.token_breakdown.total_tokens,
+        };
+        extra.insert(
+            "token_breakdown_estimated_cost".into(),
+            serde_json::json!(estimate_split_cost(&breakdown_usage, cost_model)),
+        );
+        extra.insert("token_breakdown_cost_model".into(), serde_json::Value::String(cost_model.to_string()));
+
+        if let Some(rl) = scan.offline_rate_limits {
+            let windows = rollout_rate_limits_to_windows(&rl);
+            if let Some(pt) = rl.plan_type {
+                extra.insert("offline_plan_type".into(), serde_json::Value::String(pt));
+            }
+            if !windows.is_empty() {
+                extra.insert("offline_rate_limits".into(), serde_json::to_value(&windows).unwrap_or_default());
+                offline_windows = Some(windows);
+            }
+        }
+    }
+
+    offline_windows
 }
 
 /// Enrich extra HashMap with account profile from /v1/me
@@ -539,7 +1104,7 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
         Err(e) => {
             // Even without a token, enrich with local data if available
             let mut extra = HashMap::new();
-            enrich_with_local_data(&mut extra);
+            let offline_rate_limits = enrich_with_local_data(&mut extra).unwrap_or_default();
             let has_local = extra.contains_key("total_sessions");
 
             return ProviderAnalytics {
@@ -553,7 +1118,7 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
                     account_email: None, plan_name: None, org_name: None,
                     error: if has_local { None } else { Some(e) },
                 },
-                rate_limits: vec![], credit_usage: None, token_counts: None,
+                rate_limits: offline_rate_limits, credit_usage: None, token_counts: None,
                 limit_state: None,
                 extra, fetched_at: now,
             };
@@ -629,10 +1194,14 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
             }
 
             // Enrich with local data (SQLite, models_cache, config)
-            enrich_with_local_data(&mut extra);
+            let offline_rate_limits = enrich_with_local_data(&mut extra).unwrap_or_default();
 
             // Enrich with account profile from /v1/me
             enrich_with_account_profile(&mut extra, &token);
+
+            // WHAM returned no usable windows (e.g. empty rate_limit object) —
+            // fall back to the rollout-derived offline snapshot.
+            let rate_limits = if rate_limits.is_empty() { offline_rate_limits } else { rate_limits };
 
             ProviderAnalytics {
                 provider_id: "codex".into(),
@@ -656,9 +1225,10 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
             }
         }
         Err(e) => {
-            // Even if API fails, enrich with local data
+            // Even if API fails, enrich with local data — including the
+            // rollout-derived rate-limit fallback, since WHAM is unreachable.
             let mut extra = HashMap::new();
-            enrich_with_local_data(&mut extra);
+            let offline_rate_limits = enrich_with_local_data(&mut extra).unwrap_or_default();
 
             ProviderAnalytics {
                 provider_id: "codex".into(),
@@ -671,7 +1241,7 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
                     account_email: None, plan_name: None, org_name: None,
                     error: Some(e),
                 },
-                rate_limits: vec![], credit_usage: None, token_counts: None,
+                rate_limits: offline_rate_limits, credit_usage: None, token_counts: None,
                 limit_state: None,
                 extra, fetched_at: now,
             }
@@ -717,5 +1287,303 @@ pub fn check_connection() -> ProviderStatus {
         plan_name: None,
         org_name: None,
         error: Some("Codex not installed or not signed in".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Rollout token_count parsing ─────────────────────────────────────────
+
+    const NESTED_TOKEN_COUNT_LINE: &str = r#"{"timestamp":"2026-08-18T06:28:21.274Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12515,"cached_input_tokens":4864,"cache_write_input_tokens":0,"output_tokens":161,"reasoning_output_tokens":95,"total_tokens":12676},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110},"model_context_window":258400},"rate_limits":{"limit_id":"codex","primary":{"used_percent":3.0,"window_minutes":10080,"resets_at":1787421418},"secondary":null,"plan_type":"team"}}}"#;
+
+    #[test]
+    fn parses_nested_token_count_line() {
+        let (usage, rate_limits) = parse_token_count_line(NESTED_TOKEN_COUNT_LINE).unwrap();
+        assert_eq!(usage.input_tokens, 12515);
+        assert_eq!(usage.cached_input_tokens, 4864);
+        assert_eq!(usage.output_tokens, 161);
+        assert_eq!(usage.reasoning_output_tokens, 95);
+        assert_eq!(usage.total_tokens, 12676);
+
+        let rl = rate_limits.unwrap();
+        assert_eq!(rl.plan_type.as_deref(), Some("team"));
+        let primary = rl.primary.unwrap();
+        assert_eq!(primary.used_percent, Some(3.0));
+        assert_eq!(primary.window_minutes, Some(10080));
+        assert_eq!(primary.resets_at, Some(1787421418));
+        assert!(rl.secondary.is_none());
+    }
+
+    #[test]
+    fn parses_flat_token_count_fallback_shape() {
+        let line = r#"{"type":"event_msg","payload":{"type":"token_count","total_token_usage":{"input_tokens":50,"cached_input_tokens":10,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0,"total_tokens":55}}}"#;
+        let (usage, rate_limits) = parse_token_count_line(line).unwrap();
+        assert_eq!(usage.input_tokens, 50);
+        assert_eq!(usage.total_tokens, 55);
+        assert!(rate_limits.is_none());
+    }
+
+    #[test]
+    fn ignores_non_token_count_events() {
+        let session_meta = r#"{"type":"session_meta","payload":{"type":"session_meta_data"}}"#;
+        assert!(parse_token_count_line(session_meta).is_none());
+
+        let other_event = r#"{"type":"event_msg","payload":{"type":"agent_message"}}"#;
+        assert!(parse_token_count_line(other_event).is_none());
+    }
+
+    #[test]
+    fn skips_corrupt_lines_without_panicking() {
+        assert!(parse_token_count_line("not json at all").is_none());
+        assert!(parse_token_count_line("").is_none());
+        assert!(parse_token_count_line(r#"{"type":"event_msg"}"#).is_none());
+    }
+
+    #[test]
+    fn scan_rollout_content_keeps_last_token_count_line() {
+        let first = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0,"total_tokens":11}}}}"#;
+        let second = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":5,"total_tokens":110}},"rate_limits":{"primary":{"used_percent":50.0,"window_minutes":10080,"resets_at":1700000000}}}}"#;
+        let content = [first, "garbage line", second].join("\n");
+
+        let (usage, rate_limits) = scan_rollout_content(&content).unwrap();
+        // Last-wins: cumulative usage should be the second (later) event, not a sum of both lines.
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.total_tokens, 110);
+        assert!(rate_limits.is_some());
+    }
+
+    #[test]
+    fn rollout_token_usage_add_sums_across_sessions() {
+        let mut total = RolloutTokenUsage {
+            input_tokens: 10,
+            cached_input_tokens: 2,
+            cache_write_input_tokens: 1,
+            output_tokens: 5,
+            reasoning_output_tokens: 1,
+            total_tokens: 15,
+        };
+        let other = RolloutTokenUsage {
+            input_tokens: 90,
+            cached_input_tokens: 8,
+            cache_write_input_tokens: 0,
+            output_tokens: 15,
+            reasoning_output_tokens: 4,
+            total_tokens: 105,
+        };
+        total.add(&other);
+        assert_eq!(total.input_tokens, 100);
+        assert_eq!(total.cached_input_tokens, 10);
+        assert_eq!(total.output_tokens, 20);
+        assert_eq!(total.total_tokens, 120);
+    }
+
+    // ── models_cache.json `.models[]` parsing ───────────────────────────────
+
+    const MODELS_CACHE_FIXTURE: &str = r#"{
+        "fetched_at": "2026-08-26T00:00:00Z",
+        "etag": "abc123",
+        "client_version": "0.147.0",
+        "models": [
+            {
+                "slug": "gpt-5.6-sol",
+                "display_name": "GPT-5.6-Sol",
+                "description": "Latest frontier agentic coding model.",
+                "context_window": 272000,
+                "max_context_window": 872000,
+                "default_reasoning_level": "medium",
+                "supported_reasoning_levels": [
+                    {"effort": "low", "description": "Fast"},
+                    {"effort": "medium", "description": "Balanced"},
+                    {"effort": "high", "description": "Deep"}
+                ],
+                "visibility": "list"
+            },
+            {
+                "slug": "gpt-5.4-mini",
+                "context_window": 272000,
+                "max_context_window": 272000
+            }
+        ]
+    }"#;
+
+    #[test]
+    fn parses_models_cache_dot_models_array() {
+        let models = parse_models_cache_json(MODELS_CACHE_FIXTURE);
+        assert_eq!(models.len(), 2);
+
+        let sol = models.iter().find(|m| m.slug == "gpt-5.6-sol").unwrap();
+        assert_eq!(sol.display_name, "GPT-5.6-Sol");
+        assert_eq!(sol.context_window, Some(272000));
+        assert_eq!(sol.max_context_window, Some(872000));
+        assert_eq!(sol.reasoning_levels, ["low", "medium", "high"]);
+        assert_eq!(sol.default_reasoning_level.as_deref(), Some("medium"));
+
+        let mini = models.iter().find(|m| m.slug == "gpt-5.4-mini").unwrap();
+        // display_name falls back to slug when absent.
+        assert_eq!(mini.display_name, "gpt-5.4-mini");
+        assert!(mini.reasoning_levels.is_empty());
+    }
+
+    #[test]
+    fn rejects_a_top_level_array_shape() {
+        // The old (buggy) assumption was a bare top-level array — that shape
+        // must not be mistaken for the real `{ models: [...] }` object.
+        let bare_array = r#"[{"slug":"gpt-5.5"}]"#;
+        assert!(parse_models_cache_json(bare_array).is_empty());
+    }
+
+    // ── Rate-limit fallback mapping ──────────────────────────────────────────
+
+    #[test]
+    fn maps_rollout_rate_limits_to_windows() {
+        let rl = RolloutRateLimits {
+            primary: Some(RolloutRateWindow {
+                used_percent: Some(29.0),
+                window_minutes: Some(10080),
+                resets_at: Some(1786827418),
+            }),
+            secondary: Some(RolloutRateWindow {
+                used_percent: Some(5.0),
+                window_minutes: Some(300),
+                resets_at: None,
+            }),
+            plan_type: Some("team".into()),
+        };
+        let windows = rollout_rate_limits_to_windows(&rl);
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].label, "Primary (7d)");
+        assert_eq!(windows[0].used_percent, 29.0);
+        assert_eq!(windows[0].remaining_percent, 71.0);
+        assert!(windows[0].resets_at.is_some());
+
+        assert_eq!(windows[1].label, "Secondary (5h)");
+        assert_eq!(windows[1].used_percent, 5.0);
+        assert!(windows[1].resets_at.is_none());
+    }
+
+    #[test]
+    fn skips_rate_windows_without_used_percent() {
+        let rl = RolloutRateLimits {
+            primary: Some(RolloutRateWindow { used_percent: None, window_minutes: Some(10080), resets_at: None }),
+            secondary: None,
+            plan_type: None,
+        };
+        assert!(rollout_rate_limits_to_windows(&rl).is_empty());
+    }
+
+    // ── SQLite date-window fix (today/this-week) ────────────────────────────
+
+    fn make_fixture_threads_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE threads (
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                model TEXT,
+                tokens_used INTEGER NOT NULL DEFAULT 0
+            );",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn date_window_query_matches_todays_epoch_row_with_unixepoch_modifier() {
+        let conn = make_fixture_threads_db();
+        let now = chrono::Local::now().timestamp();
+        let ten_days_ago = now - 10 * 24 * 60 * 60;
+        conn.execute(
+            "INSERT INTO threads (created_at, updated_at, model, tokens_used) VALUES (?1, ?1, 'gpt-5.5', 1000)",
+            [now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO threads (created_at, updated_at, model, tokens_used) VALUES (?1, ?1, 'gpt-5.5', 2000)",
+            [ten_days_ago],
+        )
+        .unwrap();
+
+        let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let stats = query_window(
+            &conn,
+            "date(created_at, 'unixepoch', 'localtime') = ?1 OR date(updated_at, 'unixepoch', 'localtime') = ?1",
+            &[&today_str],
+        );
+        assert_eq!(stats.sessions, 1);
+        assert_eq!(stats.tokens, 1000);
+    }
+
+    #[test]
+    fn buggy_date_query_without_unixepoch_modifier_finds_nothing() {
+        // Regression guard: demonstrates the original bug — date() on a raw
+        // epoch integer (without the 'unixepoch' modifier) never matches.
+        let conn = make_fixture_threads_db();
+        let now = chrono::Local::now().timestamp();
+        conn.execute(
+            "INSERT INTO threads (created_at, updated_at, model, tokens_used) VALUES (?1, ?1, 'gpt-5.5', 1000)",
+            [now],
+        )
+        .unwrap();
+
+        let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let stats = query_window(&conn, "date(created_at) = ?1 OR date(updated_at) = ?1", &[&today_str]);
+        assert_eq!(stats.sessions, 0);
+    }
+
+    // ── Activity stats (daily heatmap, streaks, peak hour) ──────────────────
+
+    #[test]
+    fn computes_active_days_and_current_streak_for_consecutive_days() {
+        use chrono::{Local, TimeZone};
+        let today = Local::now().date_naive();
+        let mk_ms = |days_ago: i64| {
+            let date = today - chrono::Duration::days(days_ago);
+            Local
+                .from_local_datetime(&date.and_hms_opt(10, 0, 0).unwrap())
+                .single()
+                .unwrap()
+                .timestamp_millis()
+        };
+        let timestamps = [mk_ms(0), mk_ms(1), mk_ms(2), mk_ms(5)];
+        let stats = compute_activity_stats(&timestamps);
+        assert_eq!(stats.active_days, 4);
+        assert_eq!(stats.current_streak, 3); // today, yesterday, day before
+        assert_eq!(stats.longest_streak, 3);
+    }
+
+    #[test]
+    fn empty_timestamps_yield_zeroed_activity() {
+        let stats = compute_activity_stats(&[]);
+        assert_eq!(stats.active_days, 0);
+        assert_eq!(stats.current_streak, 0);
+        assert_eq!(stats.longest_streak, 0);
+        assert!(stats.peak_hour.is_none());
+    }
+
+    // ── Cost estimation ──────────────────────────────────────────────────────
+
+    #[test]
+    fn split_cost_weighs_output_more_than_cached_input() {
+        let usage = RolloutTokenUsage {
+            input_tokens: 1_000_000,
+            cached_input_tokens: 1_000_000,
+            cache_write_input_tokens: 0,
+            output_tokens: 1_000_000,
+            reasoning_output_tokens: 0,
+            total_tokens: 2_000_000,
+        };
+        let cost = estimate_split_cost(&usage, "gpt-5.5");
+        // All-cached input (no uncached input) + 1M output at the output rate.
+        let rates = split_rates_per_million("gpt-5.5");
+        assert!((cost - (rates.cached_input + rates.output)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn combined_rate_covers_newer_model_families() {
+        assert_eq!(combined_rate_per_million("gpt-5.6-sol"), 12.0);
+        assert_eq!(combined_rate_per_million("gpt-5.5"), 10.0);
+        assert_eq!(combined_rate_per_million("gpt-5.1-codex-max"), 7.5);
     }
 }
