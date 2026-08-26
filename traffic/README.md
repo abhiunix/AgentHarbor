@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-08-25.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-08-26.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 417 | 121 |
-| Clones | 715 | 351 |
+| Views | 420 | 123 |
+| Clones | 754 | 365 |
 
 Stars 11 | Forks 1 | Open issues 8
 
@@ -28,22 +28,22 @@ Stars 11 | Forks 1 | Open issues 8
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| reddit.com | 23 | 11 |
-| github.com | 21 | 6 |
-| com.reddit.frontpage | 2 | 2 |
+| github.com | 16 | 6 |
+| reddit.com | 10 | 5 |
+| com.reddit.frontpage | 1 | 1 |
 | stahuj.cz | 1 | 1 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 93 | 38 |
-| /graphs/traffic | 11 | 1 |
-| /pulse | 8 | 2 |
+| / | 75 | 29 |
+| /graphs/traffic | 8 | 1 |
+| /pulse | 7 | 2 |
 | /releases/tag/v1.1.4 | 5 | 4 |
 | /issues | 3 | 3 |
 | /pulls | 3 | 3 |
 | /releases | 3 | 2 |
-| /releases/tag/v1.1.1 | 3 | 2 |
 | /stargazers | 3 | 1 |
-| /tree/main/src | 2 | 2 |
+| /blob/main/.github/FUNDING.yml | 2 | 1 |
+| /blob/main/docs/assets/screenshot-cost-analysis.webp | 2 | 1 |
