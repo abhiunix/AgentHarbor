@@ -24,6 +24,7 @@ pub mod kimi_transcripts;
 pub mod kimi_plans;
 pub mod kimi_control;
 pub mod deepseek;
+pub mod deepseek_v2;
 pub mod moonshot;
 pub mod zai;
 pub mod augment;

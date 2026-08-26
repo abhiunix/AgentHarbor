@@ -620,6 +620,73 @@ export async function getKimiV2ConnectionStatus(): Promise<boolean> {
   return invoke<boolean>("get_kimi_v2_connection_status");
 }
 
+// ── DeepSeek Harness (dsh) Analytics V2 (local) ─────────────────────────────
+
+export interface DeepSeekWorkspaceStat {
+  path: string;
+  title: string;
+  sessions: number;
+  turns: number;
+  steps: number;
+  tokens: number;
+  last_activity: string | null;
+}
+
+export interface DeepSeekSessionStat {
+  session_id: string;
+  title: string;
+  workspace_path: string;
+  workspace_name: string;
+  created_at: string;
+  turns: number;
+  steps: number;
+  tokens: number;
+}
+
+export interface DeepSeekBalance {
+  available: number;
+  currency: string;
+}
+
+export interface DeepSeekV2Overview {
+  connected: boolean;
+  connection_method: string;
+  default_model: string | null;
+  default_model_reasoning_effort: string | null;
+  total_sessions: number;
+  total_turns: number;
+  total_steps: number;
+  total_tokens: number;
+  total_llm_ms: number;
+  total_tool_ms: number;
+  active_now: number;
+  hour_counts: number[];
+  daily_activity: KimiDailyActivity[];
+  first_session_date: string | null;
+  active_days: number;
+  total_days: number;
+  longest_streak: number;
+  current_streak: number;
+  most_active_weekday: string | null;
+  peak_hour: number | null;
+  workspaces: DeepSeekWorkspaceStat[];
+  recent_sessions: DeepSeekSessionStat[];
+  auth_mode: string;
+  balance: DeepSeekBalance | null;
+  balance_connected: boolean;
+}
+
+export async function getDeepSeekV2Overview(
+  timeRange: string,
+  forceRefresh: boolean
+): Promise<DeepSeekV2Overview> {
+  return invoke<DeepSeekV2Overview>("get_deepseek_v2_overview", { timeRange, forceRefresh });
+}
+
+export async function getDeepSeekV2ConnectionStatus(): Promise<boolean> {
+  return invoke<boolean>("get_deepseek_v2_connection_status");
+}
+
 // ── Kimi Code Instructions (AGENTS.md, per-project) ──────────────────────────
 
 export interface KimiInstructionFile {
