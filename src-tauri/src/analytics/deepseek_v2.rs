@@ -364,6 +364,121 @@ fn derive_sessions(
         .collect()
 }
 
+// ── Shared session-log helpers (deepseek_prompts / deepseek_transcripts) ────
+// Session transcripts live under sessions/<workspace-slug>/session-<uuid>/
+// session.jsonl.zstd — zstd-compressed JSONL, decoded here once and reused by
+// both the Prompt History and Transcripts features.
+
+/// One discovered session log on disk.
+pub(crate) struct DshSessionFile {
+    pub session_id: String,
+    pub log_path: std::path::PathBuf,
+}
+
+/// Walk `sessions/<workspace-slug>/session-<uuid>/session.jsonl.zstd`.
+pub(crate) fn discover_dsh_sessions(root: &std::path::Path) -> Vec<DshSessionFile> {
+    let mut out = Vec::new();
+    let sessions_root = root.join("sessions");
+    let Ok(workspace_dirs) = std::fs::read_dir(&sessions_root) else { return out };
+    for ws_entry in workspace_dirs.flatten() {
+        if !ws_entry.path().is_dir() {
+            continue;
+        }
+        let Ok(session_dirs) = std::fs::read_dir(ws_entry.path()) else { continue };
+        for sess_entry in session_dirs.flatten() {
+            let sess_path = sess_entry.path();
+            if !sess_path.is_dir() {
+                continue;
+            }
+            let log_path = sess_path.join("session.jsonl.zstd");
+            if log_path.is_file() {
+                out.push(DshSessionFile {
+                    session_id: sess_entry.file_name().to_string_lossy().to_string(),
+                    log_path,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Decode a `session.jsonl.zstd` file into its JSON event lines. Returns
+/// `None` if the file can't be read or decompressed (a corrupt session is
+/// skipped by the caller, never panics); malformed individual lines are
+/// dropped rather than failing the whole session.
+pub(crate) fn decode_session_events(path: &std::path::Path) -> Option<Vec<serde_json::Value>> {
+    let bytes = std::fs::read(path).ok()?;
+    let decoded = zstd::decode_all(&bytes[..]).ok()?;
+    let text = String::from_utf8(decoded).ok()?;
+    Some(
+        text.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.is_empty() { None } else { serde_json::from_str(line).ok() }
+            })
+            .collect(),
+    )
+}
+
+/// Session metadata resolved from `session_projcache.json` / `workspace.json`
+/// (see `load_session_metadata`).
+pub(crate) struct DshSessionMeta {
+    pub workspace_path: String,
+    pub workspace_name: String,
+    pub title: Option<String>,
+}
+
+/// `<workspace path file name>`, or the path itself if it has none.
+pub(crate) fn workspace_name_from_path(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+/// session id → resolved workspace path/title, built from
+/// `session_projcache.json` (`identity.cwd`) and `workspace.json`.
+pub(crate) fn load_session_metadata(root: &std::path::Path) -> HashMap<String, DshSessionMeta> {
+    let workspaces = read_workspaces(root);
+    let ws_map = build_session_workspace_map(&workspaces);
+    let session_cache = read_session_cache(root);
+
+    session_cache
+        .into_iter()
+        .map(|(sid, entry)| {
+            let title = entry.rows.title.as_ref().map(|w| w.val.clone());
+            let (workspace_path, workspace_name) = ws_map.get(&sid).cloned().unwrap_or_else(|| {
+                let cwd = entry.identity.cwd.clone().unwrap_or_else(|| "unknown".to_string());
+                let name = workspace_name_from_path(&cwd);
+                (cwd, name)
+            });
+            (sid, DshSessionMeta { workspace_path, workspace_name, title })
+        })
+        .collect()
+}
+
+/// Resolve a session's workspace path/name: prefer the projcache/workspace
+/// metadata, falling back to the first `session` event's `cwd` for sessions
+/// dsh hasn't indexed yet.
+pub(crate) fn resolve_session_workspace(
+    session_id: &str,
+    events: &[serde_json::Value],
+    metadata: &HashMap<String, DshSessionMeta>,
+) -> (Option<String>, Option<String>) {
+    if let Some(m) = metadata.get(session_id) {
+        return (Some(m.workspace_path.clone()), Some(m.workspace_name.clone()));
+    }
+    let cwd = events.iter().find_map(|e| {
+        if e.get("type").and_then(|t| t.as_str()) == Some("session") {
+            e.get("data").and_then(|d| d.get("cwd")).and_then(|c| c.as_str()).map(String::from)
+        } else {
+            None
+        }
+    });
+    let name = cwd.as_deref().map(workspace_name_from_path);
+    (cwd, name)
+}
+
 // ── settings.yaml (agent-default-model) ──────────────────────────────────────
 
 #[derive(Debug, Default, Deserialize)]
