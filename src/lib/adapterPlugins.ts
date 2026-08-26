@@ -178,6 +178,7 @@ export const adapterPlugins: AdapterPlugin[] = [
       { id: "transcripts", label: "Transcripts", icon: "\uD83D\uDCDC", route: "/adapters/deepseek/transcripts" },
       { id: "plans", label: "Plans & Todos", icon: "\uD83D\uDCCB", route: "/adapters/deepseek/plans" },
       { id: "instructions", label: "Instructions", icon: "\uD83D\uDCDD", route: "/adapters/deepseek/instructions" },
+      { id: "control", label: "Permissions & Control", icon: "\uD83D\uDD12", route: "/adapters/deepseek/control" },
     ],
   },
   {

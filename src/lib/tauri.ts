@@ -1549,6 +1549,38 @@ export async function writeDeepSeekInstruction(absPath: string, content: string)
   return invoke("write_deepseek_instruction", { absPath, content });
 }
 
+// --- DeepSeek Permissions & Control ---
+
+export interface DeepSeekSessionPolicy {
+  session_id: string;
+  workspace_name: string;
+  permission_preset: string | null;
+  sandbox_mode: string | null;
+  approval_policy: string | null;
+}
+
+export interface DeepSeekControlSettings {
+  provider: string | null;
+  model: string | null;
+  reasoning_effort: string | null;
+  model_options: string[];
+  reasoning_options: string[];
+  sessions_policies: DeepSeekSessionPolicy[];
+  other_settings: string[];
+}
+
+export async function getDeepSeekControlSettings(): Promise<DeepSeekControlSettings> {
+  return invoke<DeepSeekControlSettings>("get_deepseek_control_settings");
+}
+
+export async function setDeepSeekDefaultModel(model: string): Promise<void> {
+  return invoke("set_deepseek_default_model", { model });
+}
+
+export async function setDeepSeekReasoningEffort(effort: string): Promise<void> {
+  return invoke("set_deepseek_reasoning_effort", { effort });
+}
+
 // --- Kimi Plans & Todos ---
 
 export interface KimiPlan {

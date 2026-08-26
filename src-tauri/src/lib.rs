@@ -167,6 +167,9 @@ use analytics::deepseek_plans::{list_deepseek_todo_groups, list_deepseek_plans};
 use analytics::deepseek_instructions::{
     list_deepseek_instruction_files, read_deepseek_instruction, write_deepseek_instruction,
 };
+use analytics::deepseek_control::{
+    get_deepseek_control_settings, set_deepseek_default_model, set_deepseek_reasoning_effort,
+};
 use analytics::kimi_instructions::{
     list_kimi_instruction_files, read_kimi_instruction, write_kimi_instruction,
 };
@@ -528,6 +531,10 @@ pub fn run() {
             list_deepseek_instruction_files,
             read_deepseek_instruction,
             write_deepseek_instruction,
+            // DeepSeek Permissions & Control
+            get_deepseek_control_settings,
+            set_deepseek_default_model,
+            set_deepseek_reasoning_effort,
             // Kimi Code Instructions (AGENTS.md, per-project)
             list_kimi_instruction_files,
             read_kimi_instruction,
