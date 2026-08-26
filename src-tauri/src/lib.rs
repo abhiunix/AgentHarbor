@@ -25,6 +25,7 @@ use commands::presets::{
 use commands::config::{
     get_settings, update_settings, update_general_settings,
     update_registry_settings, update_deploy_settings, update_analytics_settings,
+    update_tray_settings,
     get_username, get_author_id,
     get_claude_code_settings, apply_claude_code_provider,
 };
@@ -287,6 +288,7 @@ pub fn run() {
             update_registry_settings,
             update_deploy_settings,
             update_analytics_settings,
+            update_tray_settings,
             get_username,
             get_author_id,
             get_global_config,

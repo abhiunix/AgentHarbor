@@ -262,12 +262,28 @@ export interface AnalyticsSettings {
   limit_notifications_enabled?: boolean;
 }
 
+/** Provider ids that can be surfaced in the tray popover, in canonical display order. */
+export const ALL_TRAY_PROVIDER_IDS = [
+  "claude-code",
+  "cursor",
+  "codex",
+  "gemini",
+  "kimi",
+  "deepseek",
+] as const;
+
+export interface TraySettings {
+  /** Provider ids to show in the tray popover. */
+  providers: string[];
+}
+
 export interface AppSettings {
   general: GeneralSettings;
   registry: RegistrySettings;
   deploy: DeploySettings;
   secrets: SecretsInfo;
   analytics: AnalyticsSettings;
+  tray: TraySettings;
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -292,6 +308,10 @@ export async function updateDeploySettings(deploy: DeploySettings): Promise<AppS
 
 export async function updateAnalyticsSettings(analytics: AnalyticsSettings): Promise<AppSettings> {
   return invoke<AppSettings>("update_analytics_settings", { analytics });
+}
+
+export async function updateTraySettings(tray: TraySettings): Promise<AppSettings> {
+  return invoke<AppSettings>("update_tray_settings", { tray });
 }
 
 export async function getUsername(): Promise<string> {

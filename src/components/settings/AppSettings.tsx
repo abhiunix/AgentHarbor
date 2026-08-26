@@ -7,15 +7,18 @@ import {
   updateRegistrySettings,
   updateDeploySettings,
   updateAnalyticsSettings,
+  updateTraySettings,
   syncRegistryNow,
   getSyncStatus,
   startRegistryPolling,
   stopRegistryPolling,
+  ALL_TRAY_PROVIDER_IDS,
   type AppSettings as AppSettingsType,
   type GeneralSettings,
   type RegistrySettings,
   type DeploySettings,
   type AnalyticsSettings,
+  type TraySettings,
   type SyncState,
   type SyncConfig,
 } from "../../lib/tauri";
@@ -27,6 +30,8 @@ import {
   adapterPlugins,
   getEnabledAdapterIds,
   setEnabledAdapterIds,
+  getAdapterIconImg,
+  getAdapterName,
 } from "../../lib/adapterPlugins";
 import { useDebugMode } from "../../hooks/useDebugMode";
 import { credentialStoreName } from "../../lib/platform";
@@ -342,6 +347,28 @@ export function AppSettings() {
     }
   };
 
+  const handleTrayChange = async (updates: Partial<TraySettings>) => {
+    if (!settings) return;
+    setSaving(true);
+    try {
+      const newTray = { ...settings.tray, ...updates };
+      const updated = await updateTraySettings(newTray);
+      setSettings(updated);
+    } catch (error) {
+      console.error("Failed to save tray settings:", error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleTrayProvider = (providerId: string, checked: boolean) => {
+    const current = settings?.tray?.providers ?? [];
+    const next = checked
+      ? [...current, providerId]
+      : current.filter((id) => id !== providerId);
+    handleTrayChange({ providers: next });
+  };
+
   if (loading) {
     return (
       <div className="p-6 text-center">
@@ -578,6 +605,36 @@ export function AppSettings() {
             }
           />
         </SettingRow>
+      </SectionCard>
+
+      <SectionCard title="Tray Config">
+        <p className="text-xs text-text-muted -mt-2 mb-2">
+          Choose which providers appear in the menu-bar tray popover.
+        </p>
+        {ALL_TRAY_PROVIDER_IDS.map((providerId) => {
+          const iconImg = getAdapterIconImg(providerId);
+          const name = getAdapterName(providerId);
+          const checked = (settings.tray?.providers ?? []).includes(providerId);
+          return (
+            <SettingRow
+              key={providerId}
+              label={name}
+              description={`Show ${name} in the tray popover`}
+            >
+              <div className="flex items-center gap-3">
+                {iconImg ? (
+                  <img src={iconImg} alt="" className="w-5 h-5 rounded" />
+                ) : (
+                  <div className="w-5 h-5 rounded bg-white/10" />
+                )}
+                <Toggle
+                  checked={checked}
+                  onChange={(c) => handleToggleTrayProvider(providerId, c)}
+                />
+              </div>
+            </SettingRow>
+          );
+        })}
       </SectionCard>
 
       <AdapterVisibilityCard />
