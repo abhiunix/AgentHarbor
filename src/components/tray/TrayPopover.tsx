@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
-import { getAdapterIconImg } from "../../lib/adapterPlugins";
+import { getAdapterIconImg, getAdapterName } from "../../lib/adapterPlugins";
 import {
   TrayProviderCard,
   type RateLimitWindow,
@@ -33,7 +33,7 @@ interface ProviderTabConfig {
   route: string;
 }
 
-const PROVIDER_TABS: ProviderTabConfig[] = [
+const ALL_PROVIDER_TABS: ProviderTabConfig[] = [
   {
     id: "claude-code",
     name: "Claude Code",
@@ -57,6 +57,18 @@ const PROVIDER_TABS: ProviderTabConfig[] = [
     name: "Gemini",
     accent: "#4285f4",
     route: "/adapters/gemini/analytics",
+  },
+  {
+    id: "kimi",
+    name: getAdapterName("kimi"),
+    accent: "#00b8d4",
+    route: "/adapters/kimi/analytics-v2",
+  },
+  {
+    id: "deepseek",
+    name: getAdapterName("deepseek"),
+    accent: "#4d6bfe",
+    route: "/adapters/deepseek/analytics-v2",
   },
 ];
 
@@ -138,7 +150,9 @@ function TrayHealthBar({
       {/* Left: connection dots + active agent count */}
       <div className="flex items-center gap-1.5 text-xs text-[#9394a1]">
         <div className="flex items-center gap-1">
-          {PROVIDER_TABS.map((tab) => {
+          {ALL_PROVIDER_TABS.filter((tab) =>
+            summary.providers.some((p) => p.provider_id === tab.id)
+          ).map((tab) => {
             const provider = summary.providers.find(
               (p) => p.provider_id === tab.id
             );
@@ -433,7 +447,7 @@ export function TrayPopover() {
 
   const handleOpenDashboard = async () => {
     setShowSettingsMenu(false);
-    const tab = PROVIDER_TABS.find((t) => t.id === activeTab);
+    const tab = ALL_PROVIDER_TABS.find((t) => t.id === activeTab);
     if (tab) {
       await navigateAndHide(tab.route);
     }
@@ -443,7 +457,7 @@ export function TrayPopover() {
   // analytics page with ?reconnect=1 so it goes straight to browser OAuth,
   // then close the popover.
   const handleReconnect = async (providerId: string) => {
-    const tab = PROVIDER_TABS.find((t) => t.id === providerId);
+    const tab = ALL_PROVIDER_TABS.find((t) => t.id === providerId);
     if (tab) {
       await navigateAndHide(`${tab.route}?reconnect=1`);
     }
@@ -503,7 +517,10 @@ export function TrayPopover() {
   const activeProvider = summary?.providers.find(
     (p) => p.provider_id === activeTab
   );
-  const activeTabConfig = PROVIDER_TABS.find((t) => t.id === activeTab);
+  const activeTabConfig = ALL_PROVIDER_TABS.find((t) => t.id === activeTab);
+  const visibleTabs = ALL_PROVIDER_TABS.filter((tab) =>
+    summary?.providers.some((p) => p.provider_id === tab.id)
+  );
 
   return (
     <div className="w-full h-screen bg-transparent overflow-hidden">
@@ -519,7 +536,7 @@ export function TrayPopover() {
 
         {/* Provider tabs */}
         <div className="flex items-center gap-0.5 px-2 pt-2 pb-1">
-          {PROVIDER_TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const isActive = activeTab === tab.id;
             const provider = summary?.providers.find(
               (p) => p.provider_id === tab.id

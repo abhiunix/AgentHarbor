@@ -137,6 +137,31 @@ impl Default for ClaudeCodeSettings {
     }
 }
 
+/// Provider ids that can be surfaced in the tray popover, in canonical display order.
+pub const ALL_TRAY_PROVIDER_IDS: [&str; 6] =
+    ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek"];
+
+fn default_tray_providers() -> Vec<String> {
+    ALL_TRAY_PROVIDER_IDS.iter().map(|s| s.to_string()).collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraySettings {
+    /// Provider ids to show in the tray popover. Missing (not present in
+    /// settings.json) defaults to all tray-capable providers; an explicit
+    /// empty list means the user chose to show none.
+    #[serde(default = "default_tray_providers")]
+    pub providers: Vec<String>,
+}
+
+impl Default for TraySettings {
+    fn default() -> Self {
+        Self {
+            providers: default_tray_providers(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
     pub general: GeneralSettings,
@@ -147,6 +172,8 @@ pub struct AppSettings {
     pub analytics: AnalyticsSettings,
     #[serde(default)]
     pub claude_code: ClaudeCodeSettings,
+    #[serde(default)]
+    pub tray: TraySettings,
 }
 
 fn get_settings_file_path() -> PathBuf {
@@ -233,6 +260,17 @@ pub fn update_analytics_settings(analytics: AnalyticsSettings) -> Result<AppSett
 }
 
 #[tauri::command]
+pub fn update_tray_settings(tray: TraySettings) -> Result<AppSettings, String> {
+    let _lock = SETTINGS_MUTEX.lock().map_err(|e| format!("Settings lock error: {}", e))?;
+    let mut settings = load_settings();
+    settings.tray = tray;
+    save_settings(&settings)?;
+    // Reflect the new provider selection in the tray popover immediately.
+    crate::analytics::commands::refresh_tray_data();
+    Ok(settings)
+}
+
+#[tauri::command]
 pub fn get_username() -> String {
     load_settings().general.username
 }
@@ -305,5 +343,38 @@ mod tests {
         assert_eq!(cc.ollama_base_url, "http://localhost:11434");
         assert_eq!(cc.ollama_auth_token, "ollama");
         assert_eq!(cc.ollama_model, "");
+    }
+
+    #[test]
+    fn test_default_tray_settings() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.tray.providers.len(), 6);
+        assert!(settings.tray.providers.contains(&"kimi".to_string()));
+        assert!(settings.tray.providers.contains(&"deepseek".to_string()));
+    }
+
+    #[test]
+    fn test_tray_settings_missing_field_defaults_to_all() {
+        let json = r#"{
+            "general": {"theme":"dark","launch_at_login":true,"username":"user"},
+            "registry": {"github_repo":"","github_branch":"main","poll_interval_minutes":30,"auto_update":true,"last_sync":null},
+            "deploy": {"default_strategy":"merge","create_backups":true,"default_adapters":[]},
+            "secrets": {"count":0}
+        }"#;
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.tray.providers.len(), 6);
+    }
+
+    #[test]
+    fn test_tray_settings_explicit_empty_stays_empty() {
+        let json = r#"{
+            "general": {"theme":"dark","launch_at_login":true,"username":"user"},
+            "registry": {"github_repo":"","github_branch":"main","poll_interval_minutes":30,"auto_update":true,"last_sync":null},
+            "deploy": {"default_strategy":"merge","create_backups":true,"default_adapters":[]},
+            "secrets": {"count":0},
+            "tray": {"providers":[]}
+        }"#;
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(settings.tray.providers.is_empty());
     }
 }

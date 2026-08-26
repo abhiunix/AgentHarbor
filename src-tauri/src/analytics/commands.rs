@@ -17,7 +17,7 @@ use crate::analytics::{
     openrouter, kimi, deepseek, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
     token_store,
 };
-use crate::commands::config::load_settings;
+use crate::commands::config::{load_settings, ALL_TRAY_PROVIDER_IDS};
 use crate::utils::paths::app_data_dir;
 
 // ── Tray background refresh infrastructure ──────────────────────────────────
@@ -883,20 +883,63 @@ fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
     }
 }
 
-/// Build a TraySummary by fetching all 4 providers IN PARALLEL.
+/// Human-readable display name for each tray-capable provider id, used only
+/// for the synthetic "fetch failed" placeholder below.
+fn tray_provider_display_name(id: &str) -> &'static str {
+    match id {
+        "claude-code" => "Claude Code",
+        "cursor" => "Cursor",
+        "codex" => "Codex",
+        "gemini" => "Gemini CLI",
+        "kimi" => "Kimi",
+        "deepseek" => "DeepSeek",
+        _ => "Unknown",
+    }
+}
+
+/// Filter + order the configured tray provider ids against the canonical
+/// tray-capable id list. Unknown ids are dropped; canonical order is
+/// preserved regardless of the order ids appear in `configured`. Pure and
+/// network-free so it can be unit tested directly.
+fn select_tray_providers(configured: &[String]) -> Vec<&'static str> {
+    ALL_TRAY_PROVIDER_IDS
+        .iter()
+        .copied()
+        .filter(|id| configured.iter().any(|c| c == id))
+        .collect()
+}
+
+/// Build a TraySummary by fetching only the configured providers IN PARALLEL.
 /// Each provider runs in its own thread, so total time = max(provider_times).
 fn build_tray_summary() -> TraySummary {
-    let claude_h = thread::spawn(|| claude::fetch_claude_analytics());
-    let cursor_h = thread::spawn(|| cursor::fetch_cursor_analytics());
-    let codex_h = thread::spawn(|| codex::fetch_codex_analytics());
-    let gemini_h = thread::spawn(|| gemini::fetch_gemini_analytics());
+    let settings = load_settings();
+    let enabled = select_tray_providers(&settings.tray.providers);
 
-    let disconnected = |id: &str, name: &str| ProviderAnalytics {
+    let claude_h = enabled
+        .contains(&"claude-code")
+        .then(|| thread::spawn(claude::fetch_claude_analytics));
+    let cursor_h = enabled
+        .contains(&"cursor")
+        .then(|| thread::spawn(cursor::fetch_cursor_analytics));
+    let codex_h = enabled
+        .contains(&"codex")
+        .then(|| thread::spawn(codex::fetch_codex_analytics));
+    let gemini_h = enabled
+        .contains(&"gemini")
+        .then(|| thread::spawn(gemini::fetch_gemini_analytics));
+    let kimi_h = enabled
+        .contains(&"kimi")
+        .then(|| thread::spawn(kimi::fetch_kimi_analytics));
+    let deepseek_h = enabled
+        .contains(&"deepseek")
+        .then(|| thread::spawn(deepseek::fetch_deepseek_analytics));
+
+    let disconnected = |id: &str| ProviderAnalytics {
         provider_id: id.to_string(),
-        provider_name: name.to_string(),
+        provider_name: tray_provider_display_name(id).to_string(),
         status: ProviderStatus {
             provider_id: id.to_string(),
-            provider_name: name.to_string(),
+            provider_name: tray_provider_display_name(id).to_string(),
             connected: false,
             connection_method: "none".into(),
             account_email: None,
@@ -912,12 +955,25 @@ fn build_tray_summary() -> TraySummary {
         fetched_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    let analytics_list = vec![
-        claude_h.join().unwrap_or_else(|_| disconnected("claude-code", "Claude Code")),
-        cursor_h.join().unwrap_or_else(|_| disconnected("cursor", "Cursor")),
-        codex_h.join().unwrap_or_else(|_| disconnected("codex", "Codex")),
-        gemini_h.join().unwrap_or_else(|_| disconnected("gemini", "Gemini CLI")),
-    ];
+    let mut analytics_list: Vec<ProviderAnalytics> = Vec::new();
+    if let Some(h) = claude_h {
+        analytics_list.push(h.join().unwrap_or_else(|_| disconnected("claude-code")));
+    }
+    if let Some(h) = cursor_h {
+        analytics_list.push(h.join().unwrap_or_else(|_| disconnected("cursor")));
+    }
+    if let Some(h) = codex_h {
+        analytics_list.push(h.join().unwrap_or_else(|_| disconnected("codex")));
+    }
+    if let Some(h) = gemini_h {
+        analytics_list.push(h.join().unwrap_or_else(|_| disconnected("gemini")));
+    }
+    if let Some(h) = kimi_h {
+        analytics_list.push(h.join().unwrap_or_else(|_| disconnected("kimi")));
+    }
+    if let Some(h) = deepseek_h {
+        analytics_list.push(h.join().unwrap_or_else(|_| disconnected("deepseek")));
+    }
 
     let mut providers: Vec<TrayProviderSummary> = analytics_list
         .into_iter()
@@ -967,7 +1023,7 @@ fn build_tray_summary() -> TraySummary {
     TraySummary {
         providers,
         connected_count,
-        total_count: 4,
+        total_count: enabled.len() as u32,
         worst_rate_limit,
         fetched_at: chrono::Utc::now().to_rfc3339(),
     }
@@ -1141,4 +1197,44 @@ pub fn copilot_start_device_flow() -> Result<copilot::DeviceFlowInfo, String> {
 #[tauri::command]
 pub fn copilot_poll_device_flow(device_code: String) -> Result<String, String> {
     copilot::poll_device_flow(device_code)
+}
+
+#[cfg(test)]
+mod tray_provider_filter_tests {
+    use super::select_tray_providers;
+
+    #[test]
+    fn all_six_when_all_configured() {
+        let configured = [
+            "claude-code".to_string(),
+            "cursor".to_string(),
+            "codex".to_string(),
+            "gemini".to_string(),
+            "kimi".to_string(),
+            "deepseek".to_string(),
+        ];
+        assert_eq!(
+            select_tray_providers(&configured),
+            ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek"]
+        );
+    }
+
+    #[test]
+    fn filters_to_configured_subset_in_canonical_order() {
+        // Configured out of order — result should still follow canonical order.
+        let configured = ["kimi".to_string(), "cursor".to_string()];
+        assert_eq!(select_tray_providers(&configured), ["cursor", "kimi"]);
+    }
+
+    #[test]
+    fn empty_configured_yields_none() {
+        let configured: [String; 0] = [];
+        assert_eq!(select_tray_providers(&configured), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn unknown_ids_are_ignored() {
+        let configured = ["deepseek".to_string(), "not-a-real-provider".to_string()];
+        assert_eq!(select_tray_providers(&configured), ["deepseek"]);
+    }
 }

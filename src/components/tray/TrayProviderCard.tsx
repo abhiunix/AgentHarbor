@@ -49,6 +49,8 @@ const PROVIDER_ROUTES: Record<string, string> = {
   cursor: "/adapters/cursor/analytics-v2",
   codex: "/adapters/codex/analytics",
   gemini: "/adapters/gemini/analytics",
+  kimi: "/adapters/kimi/analytics-v2",
+  deepseek: "/adapters/deepseek/analytics-v2",
 };
 
 function barColor(percent: number): string {
