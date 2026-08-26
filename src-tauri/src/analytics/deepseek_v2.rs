@@ -225,6 +225,8 @@ struct SessionRows {
     token_usage: Option<ValWrap<TokenUsageVal>>,
     #[serde(default, rename = "sessionListMetadata")]
     session_list_metadata: Option<ValWrap<SessionListMetadataVal>>,
+    #[serde(default)]
+    permissions: Option<ValWrap<PermissionsVal>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -268,6 +270,19 @@ struct TokenTotals {
 struct SessionListMetadataVal {
     #[serde(default, rename = "lastPromptAt")]
     last_prompt_at: Option<i64>,
+}
+
+/// `rows.permissions.val` — the session's permission preset / sandbox mode /
+/// approval policy, as also emitted by the `permission/preset`, `sandbox/mode`,
+/// and `approval/policy` session-log events at session start.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct PermissionsVal {
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    sandbox: Option<String>,
+    #[serde(default)]
+    approval: Option<String>,
 }
 
 fn parse_session_cache_file(content: &str) -> HashMap<String, SessionEntry> {
@@ -455,6 +470,36 @@ pub(crate) fn load_session_metadata(root: &std::path::Path) -> HashMap<String, D
             (sid, DshSessionMeta { workspace_path, workspace_name, title })
         })
         .collect()
+}
+
+/// One session's permission/sandbox/approval snapshot, sourced from
+/// `session_projcache.json`'s `rows.permissions.val` (used by the
+/// "Permissions & Control" page's read-only per-session table).
+pub(crate) struct DshSessionPermissions {
+    pub preset: Option<String>,
+    pub sandbox: Option<String>,
+    pub approval: Option<String>,
+}
+
+/// session id → its recorded permission/sandbox/approval snapshot, for
+/// sessions that have one. Pure parse, no filesystem access — see
+/// `read_session_permissions` for the disk-backed wrapper.
+pub(crate) fn parse_session_permissions(content: &str) -> HashMap<String, DshSessionPermissions> {
+    parse_session_cache_file(content)
+        .into_iter()
+        .filter_map(|(sid, entry)| {
+            let val = entry.rows.permissions?.val;
+            Some((sid, DshSessionPermissions { preset: val.preset, sandbox: val.sandbox, approval: val.approval }))
+        })
+        .collect()
+}
+
+/// session id → its recorded permission/sandbox/approval snapshot, read from
+/// `session_projcache.json` under `root`.
+pub(crate) fn read_session_permissions(root: &std::path::Path) -> HashMap<String, DshSessionPermissions> {
+    std::fs::read_to_string(session_cache_path(root))
+        .map(|text| parse_session_permissions(&text))
+        .unwrap_or_default()
 }
 
 /// Resolve a session's workspace path/name: prefer the projcache/workspace
@@ -1060,6 +1105,40 @@ mod tests {
         let paths: Vec<&str> = overview.workspaces.iter().map(|w| w.path.as_str()).collect();
         assert!(paths.contains(&"/Users/dev/projects/alpha"));
         assert!(paths.contains(&"/Users/dev/projects/beta"));
+    }
+
+    const SESSION_PERMISSIONS_FIXTURE: &str = r#"{
+        "tables": {
+            "sessions": {
+                "session-1": {
+                    "identity": { "createdAt": 1787661503700 },
+                    "rows": {
+                        "permissions": { "ver": 1, "seq": 1, "val": {
+                            "preset": "workspace-write",
+                            "sandbox": "workspace-write",
+                            "approval": "ask"
+                        }}
+                    }
+                },
+                "session-2": {
+                    "identity": { "createdAt": 1787661503700 },
+                    "rows": {}
+                }
+            }
+        }
+    }"#;
+
+    #[test]
+    fn parses_session_permissions_from_projcache() {
+        let permissions = parse_session_permissions(SESSION_PERMISSIONS_FIXTURE);
+        assert_eq!(permissions.len(), 1, "only sessions with a recorded permissions row are included");
+
+        let p = permissions.get("session-1").expect("session-1 present");
+        assert_eq!(p.preset.as_deref(), Some("workspace-write"));
+        assert_eq!(p.sandbox.as_deref(), Some("workspace-write"));
+        assert_eq!(p.approval.as_deref(), Some("ask"));
+
+        assert!(!permissions.contains_key("session-2"), "session-2 has no permissions row");
     }
 
     #[test]

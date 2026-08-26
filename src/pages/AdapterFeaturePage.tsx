@@ -126,6 +126,9 @@ const DeepSeekPlansPage = lazy(() =>
 const DeepSeekInstructionsPage = lazy(() =>
   import("./DeepSeekInstructionsPage").then((m) => ({ default: m.DeepSeekInstructionsPage }))
 );
+const DeepSeekControlPage = lazy(() =>
+  import("./DeepSeekControlPage").then((m) => ({ default: m.DeepSeekControlPage }))
+);
 
 // ── Adapter+Feature → Component mapping ──────────────────────────────────────
 
@@ -185,6 +188,7 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
     transcripts: DeepSeekTranscriptsPage as LazyPage,
     plans: DeepSeekPlansPage as LazyPage,
     instructions: DeepSeekInstructionsPage as LazyPage,
+    control: DeepSeekControlPage as LazyPage,
   },
   kimi: {
     "analytics-v2": KimiAnalyticsV2Page as LazyPage,
