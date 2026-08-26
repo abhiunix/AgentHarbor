@@ -27,6 +27,8 @@ pub mod deepseek;
 pub mod deepseek_v2;
 pub mod deepseek_prompts;
 pub mod deepseek_transcripts;
+pub mod deepseek_plans;
+pub mod deepseek_instructions;
 pub mod moonshot;
 pub mod zai;
 pub mod augment;

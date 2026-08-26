@@ -1493,6 +1493,62 @@ export async function searchDeepSeekTranscripts(query: string): Promise<DeepSeek
   return invoke<DeepSeekTranscriptSession[]>("search_deepseek_transcripts", { query });
 }
 
+// --- DeepSeek Plans & Todos ---
+
+export interface DeepSeekTodoItem {
+  title: string;
+  status: string;
+}
+
+export interface DeepSeekTodoGroup {
+  session_id: string;
+  workspace_path: string;
+  workspace_name: string;
+  title: string;
+  todos: DeepSeekTodoItem[];
+}
+
+export interface DeepSeekPlan {
+  session_id: string;
+  workspace_path: string;
+  workspace_name: string;
+  title: string;
+  active: boolean;
+  wanted: string | null;
+  running: string | null;
+}
+
+export async function listDeepSeekTodoGroups(): Promise<DeepSeekTodoGroup[]> {
+  return invoke<DeepSeekTodoGroup[]>("list_deepseek_todo_groups");
+}
+
+export async function listDeepSeekPlans(): Promise<DeepSeekPlan[]> {
+  return invoke<DeepSeekPlan[]>("list_deepseek_plans");
+}
+
+// --- DeepSeek Instructions (AGENTS.md, per-workspace) ---
+
+export interface DeepSeekInstructionFile {
+  project_path: string;
+  project_name: string;
+  abs_path: string;
+  exists: boolean;
+  size_bytes: number | null;
+  modified: string | null;
+}
+
+export async function listDeepSeekInstructionFiles(): Promise<DeepSeekInstructionFile[]> {
+  return invoke<DeepSeekInstructionFile[]>("list_deepseek_instruction_files");
+}
+
+export async function readDeepSeekInstruction(absPath: string): Promise<string> {
+  return invoke<string>("read_deepseek_instruction", { absPath });
+}
+
+export async function writeDeepSeekInstruction(absPath: string, content: string): Promise<void> {
+  return invoke("write_deepseek_instruction", { absPath, content });
+}
+
 // --- Kimi Plans & Todos ---
 
 export interface KimiPlan {

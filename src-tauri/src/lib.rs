@@ -163,6 +163,10 @@ use analytics::deepseek_prompts::{
 use analytics::deepseek_transcripts::{
     list_deepseek_transcript_sessions, read_deepseek_transcript, search_deepseek_transcripts,
 };
+use analytics::deepseek_plans::{list_deepseek_todo_groups, list_deepseek_plans};
+use analytics::deepseek_instructions::{
+    list_deepseek_instruction_files, read_deepseek_instruction, write_deepseek_instruction,
+};
 use analytics::kimi_instructions::{
     list_kimi_instruction_files, read_kimi_instruction, write_kimi_instruction,
 };
@@ -517,6 +521,13 @@ pub fn run() {
             list_deepseek_transcript_sessions,
             read_deepseek_transcript,
             search_deepseek_transcripts,
+            // DeepSeek Plans & Todos (read-only)
+            list_deepseek_todo_groups,
+            list_deepseek_plans,
+            // DeepSeek Instructions (AGENTS.md, per-workspace)
+            list_deepseek_instruction_files,
+            read_deepseek_instruction,
+            write_deepseek_instruction,
             // Kimi Code Instructions (AGENTS.md, per-project)
             list_kimi_instruction_files,
             read_kimi_instruction,
