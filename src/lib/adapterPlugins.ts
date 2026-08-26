@@ -173,7 +173,7 @@ export const adapterPlugins: AdapterPlugin[] = [
     color: "#4d6bfe",
     defaultExpanded: false,
     features: [
-      { id: "analytics", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/deepseek/analytics" },
+      { id: "analytics-v2", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/deepseek/analytics-v2" },
     ],
   },
   {

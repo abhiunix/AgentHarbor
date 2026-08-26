@@ -156,6 +156,7 @@ use analytics::claude_v2::{
 use analytics::kimi_v2::{
     get_kimi_v2_overview, get_kimi_v2_prompt_history, get_kimi_v2_connection_status,
 };
+use analytics::deepseek_v2::{get_deepseek_v2_overview, get_deepseek_v2_connection_status};
 use analytics::kimi_instructions::{
     list_kimi_instruction_files, read_kimi_instruction, write_kimi_instruction,
 };
@@ -499,6 +500,9 @@ pub fn run() {
             get_kimi_v2_overview,
             get_kimi_v2_prompt_history,
             get_kimi_v2_connection_status,
+            // DeepSeek Analytics V2 (local)
+            get_deepseek_v2_overview,
+            get_deepseek_v2_connection_status,
             // Kimi Code Instructions (AGENTS.md, per-project)
             list_kimi_instruction_files,
             read_kimi_instruction,

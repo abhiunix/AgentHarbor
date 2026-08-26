@@ -95,9 +95,6 @@ const GeminiAgentsPage = lazy(() =>
 const GeminiExtensionsPage = lazy(() =>
   import("./GeminiExtensionsPage").then((m) => ({ default: m.GeminiExtensionsPage }))
 );
-const ProviderBalancePage = lazy(() =>
-  import("./ProviderBalancePage").then((m) => ({ default: m.ProviderBalancePage }))
-);
 const GeminiAnalyticsPage = lazy(() =>
   import("./GeminiAnalyticsPage").then((m) => ({ default: m.GeminiAnalyticsPage }))
 );
@@ -111,6 +108,11 @@ const CodexSkillsPage = lazy(() =>
 );
 const CodexGlobalConfigPage = lazy(() =>
   import("./CodexGlobalConfigPage").then((m) => ({ default: m.CodexGlobalConfigPage }))
+);
+
+// DeepSeek-specific
+const DeepSeekAnalyticsV2Page = lazy(() =>
+  import("./DeepSeekAnalyticsV2Page").then((m) => ({ default: m.DeepSeekAnalyticsV2Page }))
 );
 
 // ── Adapter+Feature → Component mapping ──────────────────────────────────────
@@ -166,7 +168,7 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
     analytics: CodexAnalyticsPage as LazyPage,
   },
   deepseek: {
-    analytics: ProviderBalancePage as LazyPage,
+    "analytics-v2": DeepSeekAnalyticsV2Page as LazyPage,
   },
   kimi: {
     "analytics-v2": KimiAnalyticsV2Page as LazyPage,
