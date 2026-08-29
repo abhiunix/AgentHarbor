@@ -113,10 +113,14 @@ function TrayHealthBar({
   summary,
   activeProviderId,
   onShowApp,
+  locked,
+  onToggleLock,
 }: {
   summary: TraySummary;
   activeProviderId: string;
   onShowApp: () => void;
+  locked: boolean;
+  onToggleLock: () => void;
 }) {
   const activeProvider = summary.providers.find(
     (p) => p.provider_id === activeProviderId
@@ -174,8 +178,20 @@ function TrayHealthBar({
         </span>
       </div>
 
-      {/* Right: Enterprise spend, active-provider rate limit warning, or button */}
-      <div className="text-xs">
+      {/* Right: lock toggle + Enterprise spend / rate-limit warning / button */}
+      <div className="flex items-center gap-2 text-xs">
+        <button
+          onClick={onToggleLock}
+          title={locked ? "Tabs locked — unlock to reorder, hide, or add" : "Lock tabs (hide the reorder, remove, and add controls)"}
+          aria-label={locked ? "Unlock tray tabs" : "Lock tray tabs"}
+          className={`flex items-center justify-center w-5 h-5 rounded-md transition-colors ${locked ? "text-amber-400 hover:text-amber-300" : "text-[#6f7080] hover:text-[#e8e9ed] hover:bg-[#1a1b23]"}`}
+        >
+          {locked ? (
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2.5" y="6.5" width="9" height="6" rx="1.2"/><path d="M4.5 6.5V4.5a2.5 2.5 0 015 0v2" strokeLinecap="round"/></svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2.5" y="6.5" width="9" height="6" rx="1.2"/><path d="M4.5 6.5V4.5a2.5 2.5 0 015-.5" strokeLinecap="round"/></svg>
+          )}
+        </button>
         {isUncappedEnterprise && activeProvider?.credit_usage ? (
           <span className="text-amber-400">
             Enterprise ·{" "}
@@ -266,6 +282,32 @@ export function TrayPopover() {
   const [dragId, setDragId] = useState<string | null>(null);
   // Optimistic tab order during a drag; null = follow the summary's order.
   const [localOrder, setLocalOrder] = useState<string[] | null>(null);
+  const [locked, setLocked] = useState<boolean>(() => {
+    try { return localStorage.getItem("agentharbor-tray-locked") === "1"; } catch { return false; }
+  });
+  const toggleLock = useCallback(() => {
+    setLocked((v) => {
+      const next = !v;
+      try { localStorage.setItem("agentharbor-tray-locked", next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const updateScrollAffordance = useCallback(() => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    setCanScrollRight(el.scrollWidth - el.clientWidth - el.scrollLeft > 2);
+  }, []);
+  const scrollTabsRight = useCallback(() => {
+    const el = tabScrollRef.current;
+    if (el) el.scrollBy({ left: Math.max(120, el.clientWidth * 0.7), behavior: "smooth" });
+  }, []);
+  useEffect(() => {
+    updateScrollAffordance();
+    window.addEventListener("resize", updateScrollAffordance);
+    return () => window.removeEventListener("resize", updateScrollAffordance);
+  }, [updateScrollAffordance, summary, localOrder]);
   const [activeTab, setActiveTab] = useState<string>(() => {
     try {
       return localStorage.getItem(TAB_STORAGE_KEY) || "claude-code";
@@ -575,11 +617,18 @@ export function TrayPopover() {
             summary={summary}
             activeProviderId={activeTab}
             onShowApp={handleShowApp}
+            locked={locked}
+            onToggleLock={toggleLock}
           />
         )}
 
         {/* Provider tabs — horizontally scrollable, drag to reorder */}
-        <div className="flex items-center gap-0.5 px-2 pt-2 pb-1 overflow-x-auto flex-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="relative">
+        <div
+          ref={tabScrollRef}
+          onScroll={updateScrollAffordance}
+          className="flex items-center gap-0.5 px-2 pt-2 pb-1 overflow-x-auto flex-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           {visibleTabs.map((tab) => {
             const isActive = activeTab === tab.id;
             const provider = summary?.providers.find(
@@ -592,10 +641,10 @@ export function TrayPopover() {
               <div
                 key={tab.id}
                 className={`relative group shrink-0 ${dragId === tab.id ? "opacity-50" : ""}`}
-                draggable
-                onDragStart={() => setDragId(tab.id)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => { e.preventDefault(); handleReorder(tab.id); }}
+                draggable={!locked}
+                onDragStart={() => !locked && setDragId(tab.id)}
+                onDragOver={(e) => { if (!locked) e.preventDefault(); }}
+                onDrop={(e) => { if (!locked) { e.preventDefault(); handleReorder(tab.id); } }}
                 onDragEnd={() => setDragId(null)}
               >
                 <button
@@ -624,26 +673,44 @@ export function TrayPopover() {
                     <div className="w-1.5 h-1.5 rounded-full bg-[#2a2b36] shrink-0" />
                   )}
                 </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDisableProvider(tab.id); }}
-                  title={`Hide ${tab.name} from the tray (re-enable in Settings › Tray Config)`}
-                  aria-label={`Hide ${tab.name} from the tray`}
-                  className="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center w-4 h-4 rounded-full bg-[#2a2b36] text-[#c7c8d1] hover:bg-red-500/80 hover:text-white shadow ring-1 ring-[#12131a] leading-none"
-                >
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M1 1l6 6M7 1L1 7"/></svg>
-                </button>
+                {!locked && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDisableProvider(tab.id); }}
+                    title={`Hide ${tab.name} from the tray (re-enable in Settings › Tray Config)`}
+                    aria-label={`Hide ${tab.name} from the tray`}
+                    className="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center w-4 h-4 rounded-full bg-[#2a2b36] text-[#c7c8d1] hover:bg-red-500/80 hover:text-white shadow ring-1 ring-[#12131a] leading-none"
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M1 1l6 6M7 1L1 7"/></svg>
+                  </button>
+                )}
               </div>
             );
           })}
           {/* Add provider → opens Tray Config */}
+          {!locked && (
+            <button
+              onClick={handleOpenSettings}
+              title="Add a provider to the tray (Settings › Tray Config)"
+              aria-label="Add a provider to the tray"
+              className="flex items-center justify-center w-6 h-6 ml-0.5 rounded-md text-[#6f7080] hover:text-[#e8e9ed] hover:bg-[#1a1b23] transition-colors shrink-0"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
+            </button>
+          )}
+        </div>
+        {/* Scroll-right affordance — appears when tabs overflow to the right */}
+        {canScrollRight && (
           <button
-            onClick={handleOpenSettings}
-            title="Add a provider to the tray (Settings › Tray Config)"
-            aria-label="Add a provider to the tray"
-            className="flex items-center justify-center w-6 h-6 ml-0.5 rounded-md text-[#6f7080] hover:text-[#e8e9ed] hover:bg-[#1a1b23] transition-colors shrink-0"
+            onClick={scrollTabsRight}
+            title="More providers — scroll right"
+            aria-label="Scroll tabs right"
+            className="absolute right-0 top-0 bottom-0 flex items-center justify-end pl-6 pr-1.5 bg-gradient-to-l from-[#0e0f13] via-[#0e0f13] to-transparent"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-[#1a1b23] text-[#c7c8d1] hover:text-white ring-1 ring-[#2a2b36]">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 1.5L7 5l-3.5 3.5"/></svg>
+            </span>
           </button>
+        )}
         </div>
 
         {/* Provider card — scrollable */}
