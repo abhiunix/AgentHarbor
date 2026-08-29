@@ -263,6 +263,9 @@ export function TrayPopover() {
   const [initialLoad, setInitialLoad] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  // Optimistic tab order during a drag; null = follow the summary's order.
+  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
     try {
       return localStorage.getItem(TAB_STORAGE_KEY) || "claude-code";
@@ -297,6 +300,7 @@ export function TrayPopover() {
     try {
       const data = await invoke<TraySummary>("get_tray_summary");
       setSummary(data);
+      setLocalOrder(null);
       setError(null);
       setInitialLoad(false);
 
@@ -342,6 +346,7 @@ export function TrayPopover() {
     let unlistenUpdate: (() => void) | null = null;
     listen<TraySummary>("tray-data-updated", (event) => {
       setSummary(event.payload);
+      setLocalOrder(null);
       setError(null);
       setInitialLoad(false);
     }).then((fn) => { unlistenUpdate = fn; });
@@ -450,6 +455,24 @@ export function TrayPopover() {
     } catch { /* ignore */ }
   };
 
+  // Drag-to-reorder: move the dragged provider tab before the drop target,
+  // persist the new order (the source of truth) to tray_providers.
+  const handleReorder = async (targetId: string) => {
+    const src = dragId;
+    setDragId(null);
+    if (!src || src === targetId) return;
+    const base = (localOrder ?? summary?.providers.map((p) => p.provider_id) ?? []).slice();
+    const from = base.indexOf(src);
+    const to = base.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    base.splice(from, 1);
+    base.splice(base.indexOf(targetId), 0, src);
+    setLocalOrder(base);
+    try {
+      await updateTraySettings({ providers: base });
+    } catch { /* ignore */ }
+  };
+
   // ── Navigation helpers ──
 
   const navigateAndHide = async (route: string) => {
@@ -535,9 +558,13 @@ export function TrayPopover() {
     (p) => p.provider_id === activeTab
   );
   const activeTabConfig = ALL_PROVIDER_TABS.find((t) => t.id === activeTab);
-  const visibleTabs = ALL_PROVIDER_TABS.filter((tab) =>
-    summary?.providers.some((p) => p.provider_id === tab.id)
-  );
+  // Render in the user's order (drag / settings), falling back to the summary's
+  // order. Only providers present in the summary are shown.
+  const orderedIds = (localOrder ?? summary?.providers.map((p) => p.provider_id) ?? [])
+    .filter((id) => summary?.providers.some((p) => p.provider_id === id));
+  const visibleTabs = orderedIds
+    .map((id) => ALL_PROVIDER_TABS.find((t) => t.id === id))
+    .filter((t): t is (typeof ALL_PROVIDER_TABS)[number] => Boolean(t));
 
   return (
     <div className="w-full h-screen bg-transparent overflow-hidden">
@@ -551,8 +578,8 @@ export function TrayPopover() {
           />
         )}
 
-        {/* Provider tabs */}
-        <div className="flex items-center gap-0.5 px-2 pt-2 pb-1">
+        {/* Provider tabs — horizontally scrollable, drag to reorder */}
+        <div className="flex items-center gap-0.5 px-2 pt-2 pb-1 overflow-x-auto flex-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {visibleTabs.map((tab) => {
             const isActive = activeTab === tab.id;
             const provider = summary?.providers.find(
@@ -562,7 +589,15 @@ export function TrayPopover() {
             const iconImg = getAdapterIconImg(tab.id);
 
             return (
-              <div key={tab.id} className="relative group">
+              <div
+                key={tab.id}
+                className={`relative group shrink-0 ${dragId === tab.id ? "opacity-50" : ""}`}
+                draggable
+                onDragStart={() => setDragId(tab.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); handleReorder(tab.id); }}
+                onDragEnd={() => setDragId(null)}
+              >
                 <button
                   onClick={() => handleTabChange(tab.id)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
@@ -580,12 +615,13 @@ export function TrayPopover() {
                     <img
                       src={iconImg}
                       alt=""
-                      className={`w-3.5 h-3.5 rounded ${!connected ? "opacity-40" : ""}`}
+                      draggable={false}
+                      className={`w-3.5 h-3.5 rounded shrink-0 ${!connected ? "opacity-40" : ""}`}
                     />
                   ) : null}
-                  <span>{tab.name}</span>
+                  <span className="whitespace-nowrap">{tab.name}</span>
                   {!connected && (
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#2a2b36]" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#2a2b36] shrink-0" />
                   )}
                 </button>
                 <button
