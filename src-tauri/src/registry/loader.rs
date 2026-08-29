@@ -852,7 +852,7 @@ fn load_agent_file(path: &PathBuf) -> Result<AgentDefinition, String> {
 /// Load an agent from a JSON metadata file + companion .md file (new community format)
 /// The .json provides metadata, the .md (same stem) provides the prompt content.
 fn load_agent_json_with_md(json_path: &PathBuf) -> Result<AgentDefinition, String> {
-    use crate::models::{AgentColor, AgentModel, MemoryScope, ToolAccess, Visibility};
+    use crate::models::{AgentColor, MemoryScope, ToolAccess, Visibility};
 
     let content = fs::read_to_string(json_path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
@@ -899,10 +899,9 @@ fn load_agent_json_with_md(json_path: &PathBuf) -> Result<AgentDefinition, Strin
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
-    let model_str = obj.get("model").and_then(|v| v.as_str()).unwrap_or("sonnet").to_lowercase();
-    let model = if model_str.contains("opus") { AgentModel::Opus }
-                else if model_str.contains("haiku") { AgentModel::Haiku }
-                else { AgentModel::Sonnet };
+    let model = crate::models::normalize_model(
+        obj.get("model").and_then(|v| v.as_str()).map(String::from),
+    );
 
     let color_str = obj.get("color").and_then(|v| v.as_str()).unwrap_or("blue").to_lowercase();
     let color = match color_str.as_str() {
@@ -957,7 +956,7 @@ fn load_agent_json_with_md(json_path: &PathBuf) -> Result<AgentDefinition, Strin
 }
 
 fn parse_community_agent_md(content: &str, path: &PathBuf) -> Result<AgentDefinition, String> {
-    use crate::models::{AgentColor, AgentModel, MemoryScope, ToolAccess, Visibility};
+    use crate::models::{AgentColor, MemoryScope, ToolAccess, Visibility};
 
     if content.trim().starts_with("---") {
         return crate::utils::markdown::parse_agent_md(content)
@@ -970,7 +969,7 @@ fn parse_community_agent_md(content: &str, path: &PathBuf) -> Result<AgentDefini
     let mut author = "community".to_string();
     let mut version = "1.0.0".to_string();
     let mut tags: Vec<String> = Vec::new();
-    let mut model = AgentModel::Sonnet;
+    let mut model: Option<String> = None;
     let mut color = AgentColor::Blue;
     let mut memory = MemoryScope::None;
     let mut description = String::new();
@@ -1010,10 +1009,8 @@ fn parse_community_agent_md(content: &str, path: &PathBuf) -> Result<AgentDefini
             tags = trimmed.replace("**Tags:**", "").trim()
                 .split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
         } else if trimmed.starts_with("**Model:**") {
-            let m = trimmed.replace("**Model:**", "").trim().to_lowercase();
-            model = if m.contains("opus") { AgentModel::Opus }
-                    else if m.contains("haiku") { AgentModel::Haiku }
-                    else { AgentModel::Sonnet };
+            let m = trimmed.replace("**Model:**", "").trim().to_string();
+            model = crate::models::normalize_model(Some(m));
         } else if trimmed.starts_with("**Color:**") {
             let c = trimmed.replace("**Color:**", "").trim().to_lowercase();
             color = match c.as_str() {

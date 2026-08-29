@@ -1778,6 +1778,8 @@ export interface ClaudePermissions {
   cleanup_period_days?: number;
   claude_md_excludes?: string[];
   available_models?: string[];
+  status_line_command?: string;
+  status_line_padding?: number;
 }
 
 export interface CursorPermissions {

@@ -27,6 +27,7 @@ export function AgentsPage() {
 
   const [deployAgent, setDeployAgent] = useState<AgentDefinition | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [importState, setImportState] = useState<{
     path: string;
     candidates: ImportableAgent[];
@@ -98,11 +99,13 @@ export function AgentsPage() {
   const handleSaveAgent = useCallback(
     async (agent: AgentDefinition) => {
       try {
+        setActionError(null);
         await saveAgentApi(agent);
         await loadAgents();
         closeEditor();
       } catch (error) {
         console.error("Failed to save agent:", error);
+        setActionError(error instanceof Error ? error.message : String(error));
       }
     },
     [loadAgents, closeEditor]
@@ -123,6 +126,12 @@ export function AgentsPage() {
 
   return (
     <div className="h-full relative">
+      {actionError && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 shadow-lg">
+          {actionError}
+        </div>
+      )}
+
       <AgentList
         onOpenDetail={handleOpenDetail}
         onDeploy={handleDeploy}

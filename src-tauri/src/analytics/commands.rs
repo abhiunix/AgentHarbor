@@ -14,7 +14,7 @@ use tauri_plugin_notification::NotificationExt;
 use crate::analytics::types::*;
 use crate::analytics::{
     claude, claude_desktop, codex, gemini, cursor, copilot,
-    openrouter, kimi, deepseek, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
+    openrouter, kimi, deepseek, deepseek_v2, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
     token_store,
 };
 use crate::commands::config::{load_settings, ALL_TRAY_PROVIDER_IDS};
@@ -910,6 +910,33 @@ fn select_tray_providers(configured: &[String]) -> Vec<&'static str> {
         .collect()
 }
 
+/// DeepSeek balance + a cheap fold-in of local `dsh` session stats (sessions,
+/// turns, tokens, active-now, streak) so the tray card has more than a
+/// balance figure. Local-file only, non-fatal — any issue just means the
+/// extras are absent, never fails the balance fetch.
+fn fetch_deepseek_tray_analytics() -> ProviderAnalytics {
+    let mut analytics = deepseek::fetch_deepseek_analytics();
+    if analytics.status.connected {
+        let overview = deepseek_v2::overview_for_tray();
+        analytics
+            .extra
+            .insert("total_sessions".into(), serde_json::json!(overview.total_sessions));
+        analytics
+            .extra
+            .insert("total_turns".into(), serde_json::json!(overview.total_turns));
+        analytics
+            .extra
+            .insert("total_tokens".into(), serde_json::json!(overview.total_tokens));
+        analytics
+            .extra
+            .insert("active_now".into(), serde_json::json!(overview.active_now));
+        analytics
+            .extra
+            .insert("current_streak".into(), serde_json::json!(overview.current_streak));
+    }
+    analytics
+}
+
 /// Build a TraySummary by fetching only the configured providers IN PARALLEL.
 /// Each provider runs in its own thread, so total time = max(provider_times).
 fn build_tray_summary() -> TraySummary {
@@ -933,7 +960,7 @@ fn build_tray_summary() -> TraySummary {
         .then(|| thread::spawn(kimi::fetch_kimi_analytics));
     let deepseek_h = enabled
         .contains(&"deepseek")
-        .then(|| thread::spawn(deepseek::fetch_deepseek_analytics));
+        .then(|| thread::spawn(fetch_deepseek_tray_analytics));
 
     let disconnected = |id: &str| ProviderAnalytics {
         provider_id: id.to_string(),
@@ -1142,7 +1169,7 @@ pub fn set_tray_active_provider(app: tauri::AppHandle, provider_id: String) -> R
             .lock()
             .map_err(|e| format!("Tray active provider lock error: {}", e))?;
 
-        if PRIMARY_PROVIDER_IDS.contains(&normalized.as_str()) {
+        if ALL_TRAY_PROVIDER_IDS.contains(&normalized.as_str()) {
             *guard = Some(normalized.clone());
         } else {
             *guard = None;

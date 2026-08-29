@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::composite_id::to_kebab_slug;
 use crate::models::{
-    AgentColor, AgentDefinition, AgentModel, CompositeId, MemoryScope, ToolAccess, Visibility,
+    normalize_model, AgentColor, AgentDefinition, CompositeId, MemoryScope, ToolAccess, Visibility,
 };
 
 #[derive(Debug)]
@@ -28,7 +28,8 @@ impl std::error::Error for MarkdownError {}
 struct AgentFrontmatter {
     name: String,
     description: String,
-    model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -37,24 +38,27 @@ struct AgentFrontmatter {
 
 pub fn generate_agent_md(agent: &AgentDefinition) -> String {
     let mut lines = Vec::new();
-    
+
     lines.push("---".to_string());
-    lines.push(format!("name: {}", agent.id.name));
+    lines.push(format!("name: {}", agent.id.artifact_name(&agent.name)));
     lines.push(format!("description: \"{}\"", escape_yaml_string(&agent.description)));
-    lines.push(format!("model: {}", model_to_string(&agent.model)));
-    
+
+    if let Some(model) = normalize_model(agent.model.clone()) {
+        lines.push(format!("model: {}", model));
+    }
+
     if agent.color != AgentColor::Blue {
         lines.push(format!("color: {}", color_to_string(&agent.color)));
     }
-    
+
     if agent.memory != MemoryScope::None {
         lines.push(format!("memory: {}", memory_to_string(&agent.memory)));
     }
-    
+
     lines.push("---".to_string());
     lines.push(String::new());
     lines.push(agent.prompt.clone());
-    
+
     lines.join("\n")
 }
 
@@ -103,7 +107,7 @@ pub fn parse_agent_md(content: &str) -> Result<AgentDefinition, MarkdownError> {
     let frontmatter: AgentFrontmatter = serde_yaml::from_str(frontmatter_str)
         .map_err(|e| MarkdownError::ParseError(e.to_string()))?;
     
-    let model = parse_model(&frontmatter.model)?;
+    let model = normalize_model(frontmatter.model.clone());
     let color = frontmatter
         .color
         .as_ref()
@@ -189,18 +193,6 @@ fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     Some((frontmatter_str, body))
 }
 
-/// Map an arbitrary model string to the three-value enum. Anything that isn't an exact
-/// haiku/sonnet/opus match (full model ids, inherit, fable, absent) defaults to sonnet
-/// and reports `defaulted = true`.
-fn map_import_model(raw: Option<&str>) -> (AgentModel, bool) {
-    match raw.map(|s| s.trim().to_lowercase()).as_deref() {
-        Some("haiku") => (AgentModel::Haiku, false),
-        Some("sonnet") => (AgentModel::Sonnet, false),
-        Some("opus") => (AgentModel::Opus, false),
-        _ => (AgentModel::Sonnet, true),
-    }
-}
-
 fn map_import_color(raw: Option<&str>) -> AgentColor {
     match raw.map(|s| s.trim().to_lowercase()).as_deref() {
         Some("red") => AgentColor::Red,
@@ -254,7 +246,7 @@ pub fn parse_agent_md_lenient(content: &str, _source_tool: &str) -> AgentDefinit
         .unwrap_or("imported-agent")
         .to_string();
 
-    let (model, _) = map_import_model(fm.model.as_deref());
+    let model = normalize_model(fm.model.clone());
     let description = fm
         .description
         .map(|d| d.trim().trim_matches('"').to_string())
@@ -278,18 +270,11 @@ pub fn parse_agent_md_lenient(content: &str, _source_tool: &str) -> AgentDefinit
     }
 }
 
-/// True when the file's frontmatter model wasn't an exact haiku/sonnet/opus match (or was
-/// absent) and [`parse_agent_md_lenient`] therefore defaulted it to sonnet.
-pub fn import_model_was_defaulted(content: &str) -> bool {
-    let (frontmatter_str, _) = split_frontmatter(content).unwrap_or(("", ""));
-    let fm: LenientFrontmatter = serde_yaml::from_str(frontmatter_str).unwrap_or_default();
-    map_import_model(fm.model.as_deref()).1
-}
-
 /// Extract an agent from a prose `AGENTS.md` (Codex) that has no frontmatter: the first
 /// heading becomes the name, the first paragraph the description, and the whole document
-/// the prompt (model always defaults to sonnet). Returns None for empty files and
-/// AgentHarbor manifest-stub files (which only contain the deployed-capabilities marker).
+/// the prompt (model is left unset — prose has no frontmatter to source one from). Returns
+/// None for empty files and AgentHarbor manifest-stub files (which only contain the
+/// deployed-capabilities marker).
 pub fn extract_prose_agent(content: &str, fallback_name: &str) -> Option<AgentDefinition> {
     let trimmed = content.trim();
     if trimmed.is_empty() {
@@ -339,7 +324,7 @@ pub fn extract_prose_agent(content: &str, fallback_name: &str) -> Option<AgentDe
         author: "imported".to_string(),
         visibility: Visibility::Private,
         tags: vec![],
-        model: AgentModel::Sonnet,
+        model: None,
         color: AgentColor::Blue,
         memory: MemoryScope::None,
         tools: vec![ToolAccess::All],
@@ -351,14 +336,6 @@ pub fn extract_prose_agent(content: &str, fallback_name: &str) -> Option<AgentDe
 
 fn escape_yaml_string(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn model_to_string(model: &AgentModel) -> &'static str {
-    match model {
-        AgentModel::Haiku => "haiku",
-        AgentModel::Sonnet => "sonnet",
-        AgentModel::Opus => "opus",
-    }
 }
 
 fn color_to_string(color: &AgentColor) -> &'static str {
@@ -379,15 +356,6 @@ fn memory_to_string(memory: &MemoryScope) -> &'static str {
         MemoryScope::Project => "project",
         MemoryScope::User => "user",
         MemoryScope::None => "none",
-    }
-}
-
-fn parse_model(s: &str) -> Result<AgentModel, MarkdownError> {
-    match s.to_lowercase().as_str() {
-        "haiku" => Ok(AgentModel::Haiku),
-        "sonnet" => Ok(AgentModel::Sonnet),
-        "opus" => Ok(AgentModel::Opus),
-        _ => Err(MarkdownError::ParseError(format!("Invalid model: {}", s))),
     }
 }
 
@@ -428,7 +396,7 @@ mod tests {
             author: "community".to_string(),
             visibility: Visibility::Public,
             tags: vec!["testing".to_string()],
-            model: AgentModel::Haiku,
+            model: Some("haiku".to_string()),
             color: AgentColor::Green,
             memory: MemoryScope::Project,
             tools: vec![ToolAccess::All],
@@ -450,6 +418,36 @@ mod tests {
         assert!(md.contains("color: green"));
         assert!(md.contains("memory: project"));
         assert!(md.contains("You are an elite API testing engineer."));
+    }
+
+    #[test]
+    fn test_generate_agent_md_private_name_uses_artifact_name() {
+        let mut agent = create_test_agent();
+        agent.id = CompositeId::new("alice", "abc123").unwrap();
+        agent.name = "My Cool Agent".to_string();
+
+        let md = generate_agent_md(&agent);
+        let expected = agent.id.artifact_name(&agent.name);
+        assert!(md.contains(&format!("name: {}", expected)));
+        assert!(!md.contains("name: abc123"));
+    }
+
+    #[test]
+    fn test_generate_agent_md_no_model_omits_line() {
+        let mut agent = create_test_agent();
+        agent.model = None;
+
+        let md = generate_agent_md(&agent);
+        assert!(!md.contains("model:"));
+    }
+
+    #[test]
+    fn test_generate_agent_md_blank_model_omits_line() {
+        let mut agent = create_test_agent();
+        agent.model = Some("   ".to_string());
+
+        let md = generate_agent_md(&agent);
+        assert!(!md.contains("model:"));
     }
 
     #[test]
@@ -488,7 +486,7 @@ You are an elite API testing engineer."#;
         let agent = result.unwrap();
         assert_eq!(agent.id.name, "api-test-runner");
         assert_eq!(agent.description, "Use this agent when new API endpoints need testing.");
-        assert_eq!(agent.model, AgentModel::Haiku);
+        assert_eq!(agent.model, Some("haiku".to_string()));
         assert_eq!(agent.color, AgentColor::Green);
         assert_eq!(agent.memory, MemoryScope::Project);
         assert_eq!(agent.prompt, "You are an elite API testing engineer.");
@@ -533,7 +531,7 @@ quality assurance.
         
         let agent = result.unwrap();
         assert_eq!(agent.id.name, "api-test-runner");
-        assert_eq!(agent.model, AgentModel::Haiku);
+        assert_eq!(agent.model, Some("haiku".to_string()));
         assert_eq!(agent.color, AgentColor::Green);
         assert_eq!(agent.memory, MemoryScope::Project);
         assert!(agent.prompt.contains("elite API testing engineer"));
@@ -604,7 +602,8 @@ model: invalid
 Prompt"#;
 
         let result = parse_agent_md(md);
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().model, Some("invalid".to_string()));
     }
 
     #[test]
@@ -630,18 +629,6 @@ Prompt"#;
         ] {
             assert_eq!(color_to_string(&color), expected);
             assert_eq!(parse_color(expected).unwrap(), color);
-        }
-    }
-
-    #[test]
-    fn test_all_models() {
-        for (model, expected) in [
-            (AgentModel::Haiku, "haiku"),
-            (AgentModel::Sonnet, "sonnet"),
-            (AgentModel::Opus, "opus"),
-        ] {
-            assert_eq!(model_to_string(&model), expected);
-            assert_eq!(parse_model(expected).unwrap(), model);
         }
     }
 
@@ -691,11 +678,10 @@ You are a meticulous code reviewer."#;
         assert_eq!(agent.id.author, "imported");
         assert_eq!(agent.id.name, "code-reviewer");
         assert_eq!(agent.description, "Reviews code for quality");
-        assert_eq!(agent.model, AgentModel::Opus);
+        assert_eq!(agent.model, Some("opus".to_string()));
         assert_eq!(agent.color, AgentColor::Purple);
         assert_eq!(agent.memory, MemoryScope::Project);
         assert_eq!(agent.prompt, "You are a meticulous code reviewer.");
-        assert!(!import_model_was_defaulted(md));
     }
 
     #[test]
@@ -713,13 +699,12 @@ Refactor safely."#;
         let agent = parse_agent_md_lenient(md, "cursor");
         assert_eq!(agent.name, "Background Refactorer");
         assert_eq!(agent.id.name, "background-refactorer");
-        assert_eq!(agent.model, AgentModel::Sonnet);
+        assert_eq!(agent.model, Some("sonnet".to_string()));
         assert_eq!(agent.prompt, "Refactor safely.");
-        assert!(!import_model_was_defaulted(md));
     }
 
     #[test]
-    fn test_lenient_cursor_agent_no_model_defaults() {
+    fn test_lenient_cursor_agent_no_model_is_none() {
         let md = r#"---
 name: no-model-agent
 description: "Has no model field"
@@ -729,12 +714,11 @@ readonly: true
 Do the thing."#;
 
         let agent = parse_agent_md_lenient(md, "cursor");
-        assert_eq!(agent.model, AgentModel::Sonnet);
-        assert!(import_model_was_defaulted(md));
+        assert_eq!(agent.model, None);
     }
 
     #[test]
-    fn test_lenient_gemini_full_model_id_defaults() {
+    fn test_lenient_gemini_full_model_id_passthrough() {
         let md = r#"---
 name: planner
 description: "Plans work"
@@ -748,8 +732,7 @@ You plan carefully."#;
 
         let agent = parse_agent_md_lenient(md, "gemini");
         assert_eq!(agent.id.name, "planner");
-        assert_eq!(agent.model, AgentModel::Sonnet);
-        assert!(import_model_was_defaulted(md));
+        assert_eq!(agent.model, Some("gemini-2.5-pro".to_string()));
         assert_eq!(agent.prompt, "You plan carefully.");
     }
 
@@ -770,7 +753,7 @@ Helps contributors navigate this repository and follow conventions.
             "Helps contributors navigate this repository and follow conventions."
         );
         assert!(agent.prompt.contains("## Guidelines"));
-        assert_eq!(agent.model, AgentModel::Sonnet);
+        assert_eq!(agent.model, None);
     }
 
     #[test]
@@ -792,13 +775,13 @@ Body."#;
         // No name in frontmatter -> the parser uses the "imported-agent" sentinel that the
         // command layer replaces with the file stem.
         assert_eq!(agent.id.name, "imported-agent");
-        assert_eq!(agent.model, AgentModel::Haiku);
+        assert_eq!(agent.model, Some("haiku".to_string()));
     }
 
     #[test]
     fn test_generate_agent_mdc_no_claude_fields() {
         let mut agent = create_test_agent();
-        agent.model = AgentModel::Opus;
+        agent.model = Some("opus".to_string());
         agent.color = AgentColor::Red;
         agent.memory = MemoryScope::User;
 

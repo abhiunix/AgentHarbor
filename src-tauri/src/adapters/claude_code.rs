@@ -1410,7 +1410,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AgentColor, AgentModel, EnvVariable, McpServer, Rule, Skill, SkillFile, ToolAccess, Visibility};
+    use crate::models::{AgentColor, EnvVariable, McpServer, Rule, Skill, SkillFile, ToolAccess, Visibility};
     use tempfile::TempDir;
 
     fn create_test_mcp() -> UniversalCapability {
@@ -1497,7 +1497,7 @@ mod tests {
             author: "test".to_string(),
             visibility: Visibility::Private,
             tags: vec![],
-            model: AgentModel::Sonnet,
+            model: Some("sonnet".to_string()),
             color: AgentColor::Blue,
             memory: MemoryScope::None,
             tools: vec![ToolAccess::All],

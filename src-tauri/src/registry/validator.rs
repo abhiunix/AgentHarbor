@@ -132,7 +132,7 @@ pub fn validate_agent(agent: &AgentDefinition) -> ValidationResult {
 mod tests {
     use super::*;
     use crate::models::{
-        AgentColor, AgentModel, Hook, McpServer, MemoryScope, Plugin, Rule, Skill, SkillFile,
+        AgentColor, Hook, McpServer, MemoryScope, Plugin, Rule, Skill, SkillFile,
         ToolAccess, Visibility,
     };
 
@@ -171,7 +171,7 @@ mod tests {
             author: "community".to_string(),
             visibility: Visibility::Public,
             tags: vec![],
-            model: AgentModel::Haiku,
+            model: Some("haiku".to_string()),
             color: AgentColor::Blue,
             memory: MemoryScope::Project,
             tools: vec![ToolAccess::All],

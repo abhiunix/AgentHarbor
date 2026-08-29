@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import type {
   AgentDefinition,
-  AgentModel,
   AgentColor,
   MemoryScope,
   ToolAccess,
@@ -22,11 +21,7 @@ interface AgentEditorProps {
   onClose: () => void;
 }
 
-const modelOptions: { value: AgentModel; label: string }[] = [
-  { value: "haiku", label: "Haiku" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "opus", label: "Opus" },
-];
+const modelSuggestions = ["haiku", "sonnet", "opus", "inherit"];
 
 const memoryOptions: { value: MemoryScope; label: string }[] = [
   { value: "none", label: "None" },
@@ -57,7 +52,7 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
 
   const [name, setName] = useState(agent?.name || "");
   const [description, setDescription] = useState(agent?.description || "");
-  const [model, setModel] = useState<AgentModel>(agent?.model || "sonnet");
+  const [model, setModel] = useState<string>(agent?.model ?? "");
   const [memory, setMemory] = useState<MemoryScope>(agent?.memory || "none");
   const [color, setColor] = useState<AgentColor>(agent?.color || "blue");
   const [tools, setTools] = useState<ToolAccess[]>(agent?.tools || ["all"]);
@@ -129,7 +124,7 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean),
-      model,
+      model: model.trim() || null,
       color,
       memory,
       tools,
@@ -215,19 +210,24 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-text-primary mb-2">
-                Model <span className="text-accent-red">*</span>
+                Model
               </label>
-              <select
+              <input
+                type="text"
+                list="agent-model-suggestions"
                 value={model}
-                onChange={(e) => setModel(e.target.value as AgentModel)}
-                className="w-full h-10 px-3 rounded-md bg-app-input border border-border text-text-primary focus:outline-none focus:border-accent-blue"
-              >
-                {modelOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="Adapter default"
+                className="w-full h-10 px-3 rounded-md bg-app-input border border-border text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-blue"
+              />
+              <datalist id="agent-model-suggestions">
+                {modelSuggestions.map((m) => (
+                  <option key={m} value={m} />
                 ))}
-              </select>
+              </datalist>
+              <p className="mt-1 text-xs text-text-muted">
+                Free text, passed through to the target tool. Leave blank to use the tool's default model.
+              </p>
             </div>
 
             <div>
@@ -245,6 +245,9 @@ export function AgentEditor({ agent, onSave, onDelete, onClose }: AgentEditorPro
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-text-muted">
+                Claude Code only — creates .claude/agent-memory/ on project deploy; ignored by other tools.
+              </p>
             </div>
           </div>
 

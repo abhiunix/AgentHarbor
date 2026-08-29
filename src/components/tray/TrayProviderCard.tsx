@@ -327,12 +327,43 @@ function getWindowStats(ex: Record<string, unknown>, prefix: string) {
   };
 }
 
+// Build a window-stats object for a provider that only reports totals (no
+// per-window input/output/cache split), e.g. Codex's all-time counters.
+function totalsOnlyStats(
+  sessions: number | undefined,
+  tokens: number | undefined,
+  cost: number | undefined
+): ReturnType<typeof getWindowStats> {
+  return {
+    sessions,
+    messages: undefined,
+    tokens,
+    cost,
+    inputTokens: undefined,
+    outputTokens: undefined,
+    cacheRead: undefined,
+    cacheWrite: undefined,
+    inputCost: undefined,
+    outputCost: undefined,
+    cacheReadCost: undefined,
+    cacheWriteCost: undefined,
+  };
+}
+
 function TokenWindowRow({ label, stats }: {
   label: string;
   stats: ReturnType<typeof getWindowStats>;
 }) {
   const hasData = (stats.tokens ?? 0) > 0 || (stats.sessions ?? 0) > 0;
   if (!hasData) return null;
+
+  // Providers without a per-window input/output/cache split (e.g. Codex) never
+  // populate these extra keys — hide the split grid rather than show zeros.
+  const hasSplit =
+    stats.inputTokens !== undefined ||
+    stats.outputTokens !== undefined ||
+    stats.cacheRead !== undefined ||
+    stats.cacheWrite !== undefined;
 
   return (
     <div className="bg-[#0e0f13] rounded px-2.5 py-2 mb-1.5 last:mb-0">
@@ -342,31 +373,33 @@ function TokenWindowRow({ label, stats }: {
           {formatCost(stats.cost ?? 0)}
         </span>
       </div>
-      <div className="grid grid-cols-4 gap-1 text-[9px] mb-1">
-        <div>
-          <div className="text-[#9394a1]">Input</div>
-          <div className="text-[#e8e9ed] font-mono">{formatCost(stats.inputCost ?? 0)}</div>
-          <div className="text-[#9394a1] font-mono">{formatTokenCount(stats.inputTokens ?? 0)}</div>
+      {hasSplit && (
+        <div className="grid grid-cols-4 gap-1 text-[9px] mb-1">
+          <div>
+            <div className="text-[#9394a1]">Input</div>
+            <div className="text-[#e8e9ed] font-mono">{formatCost(stats.inputCost ?? 0)}</div>
+            <div className="text-[#9394a1] font-mono">{formatTokenCount(stats.inputTokens ?? 0)}</div>
+          </div>
+          <div>
+            <div className="text-[#9394a1]">Output</div>
+            <div className="text-[#e8e9ed] font-mono">{formatCost(stats.outputCost ?? 0)}</div>
+            <div className="text-[#9394a1] font-mono">{formatTokenCount(stats.outputTokens ?? 0)}</div>
+          </div>
+          <div>
+            <div className="text-[#9394a1]">Cache R</div>
+            <div className="text-emerald-400 font-mono">{formatCost(stats.cacheReadCost ?? 0)}</div>
+            <div className="text-[#9394a1] font-mono">{formatTokenCount(stats.cacheRead ?? 0)}</div>
+          </div>
+          <div>
+            <div className="text-[#9394a1]">Cache W</div>
+            <div className="text-amber-400 font-mono">{formatCost(stats.cacheWriteCost ?? 0)}</div>
+            <div className="text-[#9394a1] font-mono">{formatTokenCount(stats.cacheWrite ?? 0)}</div>
+          </div>
         </div>
-        <div>
-          <div className="text-[#9394a1]">Output</div>
-          <div className="text-[#e8e9ed] font-mono">{formatCost(stats.outputCost ?? 0)}</div>
-          <div className="text-[#9394a1] font-mono">{formatTokenCount(stats.outputTokens ?? 0)}</div>
-        </div>
-        <div>
-          <div className="text-[#9394a1]">Cache R</div>
-          <div className="text-emerald-400 font-mono">{formatCost(stats.cacheReadCost ?? 0)}</div>
-          <div className="text-[#9394a1] font-mono">{formatTokenCount(stats.cacheRead ?? 0)}</div>
-        </div>
-        <div>
-          <div className="text-[#9394a1]">Cache W</div>
-          <div className="text-amber-400 font-mono">{formatCost(stats.cacheWriteCost ?? 0)}</div>
-          <div className="text-[#9394a1] font-mono">{formatTokenCount(stats.cacheWrite ?? 0)}</div>
-        </div>
-      </div>
+      )}
       <div className="flex gap-3 text-[9px] text-[#9394a1]">
         <span>{stats.sessions ?? 0} sessions</span>
-        <span>{stats.messages ?? 0} msgs</span>
+        {stats.messages !== undefined && <span>{stats.messages} msgs</span>}
         <span>{formatTokenCount(stats.tokens ?? 0)} total</span>
       </div>
     </div>
@@ -720,16 +753,13 @@ function CodexCard({ provider }: { provider: TrayProviderSummary }) {
   const projectCount = ex.sessions_by_project ? Object.keys(ex.sessions_by_project as Record<string, unknown>).length : 0;
   const modelCount = tokensByModel ? Object.keys(tokensByModel).length : 0;
 
-  const todayStats = {
-    sessions: ex.start_today_sessions as number | undefined,
-    tokens: ex.start_today_tokens as number | undefined,
-    cost: ex.start_today_cost as number | undefined,
-  };
-  const weekStats = {
-    sessions: ex.this_week_sessions as number | undefined,
-    tokens: ex.this_week_tokens as number | undefined,
-    cost: ex.this_week_cost as number | undefined,
-  };
+  const statsToday = getWindowStats(ex, "start_today");
+  const statsWeek = getWindowStats(ex, "this_week");
+  const statsAllTime = totalsOnlyStats(totalSessions, totalTokens, totalCost);
+  const hasAnyWindowData =
+    (statsToday.sessions ?? 0) > 0 ||
+    (statsWeek.sessions ?? 0) > 0 ||
+    (statsAllTime.sessions ?? 0) > 0;
 
   return (
     <div>
@@ -812,23 +842,12 @@ function CodexCard({ provider }: { provider: TrayProviderSummary }) {
         </div>
       )}
 
-      {/* Time windows: Today / This Week */}
-      {((todayStats.sessions ?? 0) > 0 || (weekStats.sessions ?? 0) > 0) && (
+      {/* Time windows: Today / This Week / All Time */}
+      {hasAnyWindowData && (
         <div className="mt-2 pt-2 border-t border-[#2a2b36]">
-          <div className="grid grid-cols-2 gap-1">
-            <div className="bg-[#0e0f13] rounded p-1.5">
-              <div className="text-[9px] text-[#9394a1] mb-0.5">Today</div>
-              <div className="text-[10px] text-[#e8e9ed]">{todayStats.sessions ?? 0} sessions</div>
-              {(todayStats.tokens ?? 0) > 0 && <div className="text-[9px] text-[#9394a1]">{formatTokenCount(todayStats.tokens!)} tokens</div>}
-              {(todayStats.cost ?? 0) > 0 && <div className="text-[9px] text-emerald-400 font-mono">{formatCost(todayStats.cost!)}</div>}
-            </div>
-            <div className="bg-[#0e0f13] rounded p-1.5">
-              <div className="text-[9px] text-[#9394a1] mb-0.5">This Week</div>
-              <div className="text-[10px] text-[#e8e9ed]">{weekStats.sessions ?? 0} sessions</div>
-              {(weekStats.tokens ?? 0) > 0 && <div className="text-[9px] text-[#9394a1]">{formatTokenCount(weekStats.tokens!)} tokens</div>}
-              {(weekStats.cost ?? 0) > 0 && <div className="text-[9px] text-emerald-400 font-mono">{formatCost(weekStats.cost!)}</div>}
-            </div>
-          </div>
+          <TokenWindowRow label="Today" stats={statsToday} />
+          <TokenWindowRow label="This Week" stats={statsWeek} />
+          <TokenWindowRow label="All Time" stats={statsAllTime} />
         </div>
       )}
     </div>
@@ -895,6 +914,99 @@ function GeminiCard({ provider }: { provider: TrayProviderSummary }) {
   );
 }
 
+// ── DeepSeek Card ────────────────────────────────────────────────────────────
+
+interface DeepSeekBalanceExtra {
+  currency: string;
+  total_balance: number;
+  granted_balance: number;
+  topped_up_balance: number;
+}
+
+function DeepSeekCard({ provider }: { provider: TrayProviderSummary }) {
+  const ex = provider.extra;
+  const balances = Object.entries(ex)
+    .filter(([key]) => key.startsWith("balance_"))
+    .map(([, v]) => v as DeepSeekBalanceExtra);
+
+  const totalSessions = ex.total_sessions as number | undefined;
+  const totalTurns = ex.total_turns as number | undefined;
+  const totalTokens = ex.total_tokens as number | undefined;
+  const activeNow = ex.active_now as number | undefined;
+  const currentStreak = ex.current_streak as number | undefined;
+  const hasUsageSnapshot = totalSessions != null || totalTurns != null || totalTokens != null;
+
+  return (
+    <div>
+      {/* Available balance — the thing that runs out and needs timely attention */}
+      {balances.length > 0 && (
+        <div>
+          <div className="text-[10px] text-[#9394a1] uppercase tracking-wider mb-1.5">
+            Available Balance
+          </div>
+          <div className="space-y-1.5">
+            {balances.map((b) => {
+              const total = b.total_balance ?? 0;
+              const colorClass =
+                b.currency === "USD" && total < 1
+                  ? "text-red-400"
+                  : b.currency === "USD" && total < 5
+                    ? "text-amber-400"
+                    : "text-emerald-400";
+              return (
+                <div key={b.currency} className="bg-[#0e0f13] rounded px-2.5 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-[#9394a1]">{b.currency}</span>
+                    <span className={`font-mono text-[13px] font-semibold ${colorClass}`}>
+                      {formatCurrency(total, b.currency)}
+                    </span>
+                  </div>
+                  <div className="flex gap-3 text-[9px] text-[#9394a1] mt-0.5">
+                    <span>{formatCurrency(b.granted_balance ?? 0, b.currency)} granted</span>
+                    <span>{formatCurrency(b.topped_up_balance ?? 0, b.currency)} topped up</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Local usage snapshot (dsh session data) */}
+      {hasUsageSnapshot && (
+        <div className={`${balances.length > 0 ? "mt-2 pt-2 border-t border-[#2a2b36]" : ""}`}>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] text-[#9394a1] uppercase tracking-wider">Usage</span>
+            {(activeNow ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Active now
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            <div className="bg-[#0e0f13] rounded p-1.5">
+              <div className="text-[8px] text-[#9394a1] uppercase">Sessions</div>
+              <div className="text-[11px] text-[#e8e9ed] font-mono">{(totalSessions ?? 0).toLocaleString()}</div>
+            </div>
+            <div className="bg-[#0e0f13] rounded p-1.5">
+              <div className="text-[8px] text-[#9394a1] uppercase">Turns</div>
+              <div className="text-[11px] text-[#e8e9ed] font-mono">{(totalTurns ?? 0).toLocaleString()}</div>
+            </div>
+            <div className="bg-[#0e0f13] rounded p-1.5">
+              <div className="text-[8px] text-[#9394a1] uppercase">Tokens</div>
+              <div className="text-[11px] text-[#e8e9ed] font-mono">{formatTokenCount(totalTokens ?? 0)}</div>
+            </div>
+          </div>
+          {(currentStreak ?? 0) > 0 && (
+            <div className="text-[9px] text-[#9394a1] mt-1">{currentStreak} day streak</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Export ───────────────────────────────────────────────────────────────
 
 export function TrayProviderCard({
@@ -920,6 +1032,8 @@ export function TrayProviderCard({
         return <CodexCard provider={provider} />;
       case "gemini":
         return <GeminiCard provider={provider} />;
+      case "deepseek":
+        return <DeepSeekCard provider={provider} />;
       default:
         // Generic: show rate limits and credits
         return (
@@ -929,7 +1043,7 @@ export function TrayProviderCard({
             ))}
             {provider.credit_usage && (
               <div className="mt-2 text-[11px] text-[#9394a1]">
-                Credits: {formatCurrency(provider.credit_usage.used, provider.credit_usage.currency)}
+                Balance: {formatCurrency(provider.credit_usage.used, provider.credit_usage.currency)}
               </div>
             )}
           </div>

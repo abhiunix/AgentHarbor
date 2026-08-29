@@ -1,8 +1,6 @@
 use crate::models::composite_id::to_kebab_slug;
-use crate::models::{AgentDefinition, CompositeId};
-use crate::utils::markdown::{
-    extract_prose_agent, import_model_was_defaulted, parse_agent_md_lenient,
-};
+use crate::models::{normalize_model, AgentDefinition, CompositeId};
+use crate::utils::markdown::{extract_prose_agent, parse_agent_md_lenient};
 use crate::utils::paths::{app_data_dir, atomic_write_str, normalize_line_endings};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -11,24 +9,85 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-fn get_custom_agents_dir() -> PathBuf {
-    crate::utils::paths::app_data_dir().join("agents")
+/// Directory custom (created or imported) agents are written to so `get_all_agents` (which
+/// reads the registry custom root) can see them.
+fn custom_agents_dir() -> PathBuf {
+    app_data_dir()
+        .join("registry")
+        .join("custom")
+        .join("agents")
+}
+
+/// One-time, idempotent move of agents written to the old (pre-fix) `app_data_dir()/agents`
+/// location into `custom_agents_dir()`, backfilling the `"type": "agent"` discriminator the
+/// loader requires when it's missing.
+fn migrate_legacy_agents_dir(target_dir: &Path) {
+    let legacy_dir = app_data_dir().join("agents");
+    if !legacy_dir.exists() || legacy_dir == target_dir {
+        return;
+    }
+
+    let entries = match fs::read_dir(&legacy_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(filename) = path.file_name() else {
+            continue;
+        };
+        let dest = target_dir.join(filename);
+        if dest.exists() {
+            continue;
+        }
+
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let mut value: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(obj) = value.as_object_mut() {
+            obj.entry("type".to_string())
+                .or_insert_with(|| serde_json::Value::String("agent".to_string()));
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&value) {
+            if fs::write(&dest, json).is_ok() {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
 }
 
 #[tauri::command]
-pub fn save_agent(agent: AgentDefinition) -> Result<AgentDefinition, String> {
-    let agents_dir = get_custom_agents_dir();
-    
+pub fn save_agent(mut agent: AgentDefinition) -> Result<AgentDefinition, String> {
+    agent.model = normalize_model(agent.model);
+
+    let agents_dir = custom_agents_dir();
+
     if !agents_dir.exists() {
         fs::create_dir_all(&agents_dir)
             .map_err(|e| format!("Failed to create agents directory: {}", e))?;
     }
 
+    migrate_legacy_agents_dir(&agents_dir);
+
     let filename = format!("{}.json", agent.id.name);
     let filepath = agents_dir.join(&filename);
     let temp_filepath = agents_dir.join(format!("{}.tmp", agent.id.name));
 
-    let json = serde_json::to_string_pretty(&agent)
+    let mut value = serde_json::to_value(&agent)
+        .map_err(|e| format!("Failed to serialize agent: {}", e))?;
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("type".to_string(), serde_json::Value::String("agent".to_string()));
+    }
+    let json = serde_json::to_string_pretty(&value)
         .map_err(|e| format!("Failed to serialize agent: {}", e))?;
 
     fs::write(&temp_filepath, &json)
@@ -42,8 +101,8 @@ pub fn save_agent(agent: AgentDefinition) -> Result<AgentDefinition, String> {
 
 #[tauri::command]
 pub fn delete_agent(id: String) -> Result<(), String> {
-    let agents_dir = get_custom_agents_dir();
-    
+    let agents_dir = custom_agents_dir();
+
     let parts: Vec<&str> = id.splitn(2, '/').collect();
     if parts.len() != 2 {
         return Err("Invalid agent ID format".to_string());
@@ -74,8 +133,6 @@ pub struct ImportableAgent {
     pub source_path: String,
     /// "new" | "duplicate-id" | "content-match"
     pub status: String,
-    /// True when the source model wasn't an exact haiku/sonnet/opus and we fell back to sonnet.
-    pub model_defaulted: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -90,18 +147,7 @@ struct Candidate {
     agent: AgentDefinition,
     source_tool: String,
     source_path: String,
-    model_defaulted: bool,
     prompt_hash: String,
-}
-
-/// Directory imported agents are written to so `get_all_agents` (which reads the registry
-/// custom root) can see them. NOTE: this is deliberately different from `save_agent`'s
-/// `app_data_dir()/agents`, whose output is invisible to the loader.
-fn imported_agents_dir() -> PathBuf {
-    app_data_dir()
-        .join("registry")
-        .join("custom")
-        .join("agents")
 }
 
 fn prompt_hash(prompt: &str) -> String {
@@ -190,10 +236,9 @@ fn scan_candidates(root: &str, include_codex: bool) -> Result<Vec<Candidate>, St
             continue;
         }
 
-        let (agent, source_tool, model_defaulted) = if is_codex_prose {
+        let (agent, source_tool) = if is_codex_prose {
             match extract_prose_agent(&content, stem) {
-                // Prose has no frontmatter, so the model is always defaulted.
-                Some(a) => (a, "codex".to_string(), true),
+                Some(a) => (a, "codex".to_string()),
                 None => continue,
             }
         } else {
@@ -207,8 +252,7 @@ fn scan_candidates(root: &str, include_codex: bool) -> Result<Vec<Candidate>, St
                     agent.id = id;
                 }
             }
-            let defaulted = import_model_was_defaulted(&content);
-            (agent, tool.to_string(), defaulted)
+            (agent, tool.to_string())
         };
 
         let canonical = path
@@ -230,7 +274,6 @@ fn scan_candidates(root: &str, include_codex: bool) -> Result<Vec<Candidate>, St
             agent,
             source_tool,
             source_path: canonical,
-            model_defaulted,
             prompt_hash: hash,
         });
     }
@@ -264,7 +307,6 @@ pub fn preview_import_agents(
                 source_tool: c.source_tool,
                 source_path: c.source_path,
                 status: status.to_string(),
-                model_defaulted: c.model_defaulted,
             }
         })
         .collect())
@@ -333,7 +375,7 @@ pub fn import_agents_from_dir(
 /// Persist an imported agent to the registry custom root as pretty JSON carrying the
 /// top-level `"type": "agent"` field the loader requires.
 fn persist_imported_agent(agent: &AgentDefinition) -> Result<(), String> {
-    let dir = imported_agents_dir();
+    let dir = custom_agents_dir();
     let filename = format!("{}.json", agent.id.name);
 
     let mut value =
@@ -350,7 +392,7 @@ fn persist_imported_agent(agent: &AgentDefinition) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AgentModel, AgentColor, MemoryScope, ToolAccess, CompositeId};
+    use crate::models::{AgentColor, MemoryScope, ToolAccess, CompositeId};
     use crate::models::Visibility;
 
     fn create_test_agent() -> AgentDefinition {
@@ -362,7 +404,7 @@ mod tests {
             author: "test".to_string(),
             visibility: Visibility::Private,
             tags: vec!["test".to_string()],
-            model: AgentModel::Sonnet,
+            model: Some("sonnet".to_string()),
             color: AgentColor::Blue,
             memory: MemoryScope::None,
             tools: vec![ToolAccess::All],
@@ -373,17 +415,36 @@ mod tests {
     }
 
     #[test]
-    fn test_get_custom_agents_dir() {
-        let dir = get_custom_agents_dir();
-        assert!(dir.to_string_lossy().contains("com.agentharbor.app"));
-        assert!(dir.to_string_lossy().ends_with("agents"));
+    fn test_custom_agents_dir_is_registry_custom() {
+        let dir = custom_agents_dir();
+        let s = dir.to_string_lossy().replace('\\', "/");
+        assert!(s.contains("com.agentharbor.app"));
+        assert!(s.ends_with("registry/custom/agents"));
     }
 
+    /// Regression test for the create-agent bug: `save_agent`'s serialization path (JSON
+    /// value + injected "type": "agent") must produce a file the registry loader accepts.
     #[test]
-    fn test_imported_agents_dir_is_registry_custom() {
-        let dir = imported_agents_dir();
-        let s = dir.to_string_lossy().replace('\\', "/");
-        assert!(s.ends_with("registry/custom/agents"));
+    fn test_saved_agent_loads_back_via_registry_loader() {
+        let temp = tempfile::tempdir().unwrap();
+        let custom_root = temp.path().to_path_buf();
+        let agents_dir = custom_root.join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+
+        let agent = create_test_agent();
+        let mut value = serde_json::to_value(&agent).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("type".to_string(), serde_json::Value::String("agent".to_string()));
+        let json = serde_json::to_string_pretty(&value).unwrap();
+        fs::write(agents_dir.join(format!("{}.json", agent.id.name)), json).unwrap();
+
+        let result = crate::registry::load_agents(&[custom_root]);
+        assert!(result.errors.is_empty());
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].id.to_string(), agent.id.to_string());
+        assert_eq!(result.items[0].name, agent.name);
     }
 
     #[test]

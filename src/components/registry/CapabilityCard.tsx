@@ -12,6 +12,8 @@ interface CapabilityCardProps {
   onEdit?: (capability: UniversalCapability) => void;
   onDelete?: (id: string) => void;
   onFork?: (capability: UniversalCapability) => void;
+  onUseCapability?: (capability: UniversalCapability) => void;
+  useCapabilityPending?: boolean;
   isNew?: boolean;
 }
 
@@ -84,6 +86,8 @@ export function CapabilityCard({
   onEdit,
   onDelete,
   onFork,
+  onUseCapability,
+  useCapabilityPending = false,
   isNew = false,
 }: CapabilityCardProps) {
   const isPrivate = capability.visibility === "private";
@@ -275,6 +279,22 @@ export function CapabilityCard({
             })}
           </div>
         </div>
+
+        {onUseCapability && (
+          <div className="mt-3 pt-3 border-t border-border">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (useCapabilityPending) return;
+                onUseCapability(capability);
+              }}
+              disabled={useCapabilityPending}
+              className={`w-full h-8 rounded-md text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:brightness-110 ${typeBgColors[capability.type]}`}
+            >
+              {useCapabilityPending ? "Working…" : `Use this ${getCapabilityTypeLabel(capability.type)}`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

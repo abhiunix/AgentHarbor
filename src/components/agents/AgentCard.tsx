@@ -1,5 +1,5 @@
-import type { AgentDefinition, AgentModel, MemoryScope, ToolAccess, CapabilityType } from "../../lib/types";
-import { getColorHex, getModelLabel, getCapabilityTypeLabel } from "../../lib/types";
+import type { AgentDefinition, MemoryScope, ToolAccess, CapabilityType } from "../../lib/types";
+import { getColorHex, getModelLabel, getModelBadgeClass, getCapabilityTypeLabel } from "../../lib/types";
 import { useRegistryStore } from "../../stores/registryStore";
 
 interface AgentCardProps {
@@ -9,12 +9,6 @@ interface AgentCardProps {
   onDelete?: (id: string, name?: string) => void;
   onClick: (agent: AgentDefinition) => void;
 }
-
-const modelBgColors: Record<AgentModel, string> = {
-  haiku: "bg-accent-cyan/20 text-accent-cyan",
-  sonnet: "bg-accent-purple/20 text-accent-purple",
-  opus: "bg-accent-orange/20 text-accent-orange",
-};
 
 const memoryLabels: Record<MemoryScope, string> = {
   project: "Project",
@@ -95,9 +89,11 @@ export function AgentCard({
         <p className="text-xs font-mono text-text-muted mb-3">{agent.id}</p>
 
         <div className="flex items-center gap-2 mb-3">
-          <span className={`text-[10px] font-semibold px-2 py-1 rounded ${modelBgColors[agent.model]}`}>
-            {getModelLabel(agent.model).toUpperCase()}
-          </span>
+          {getModelLabel(agent.model) && (
+            <span className={`text-[10px] font-semibold px-2 py-1 rounded ${getModelBadgeClass(agent.model)}`}>
+              {getModelLabel(agent.model)!.toUpperCase()}
+            </span>
+          )}
           {agent.memory !== "none" && (
             <span className="text-[10px] px-2 py-1 rounded bg-accent-yellow/20 text-accent-yellow flex items-center gap-1">
               📁 {memoryLabels[agent.memory]}

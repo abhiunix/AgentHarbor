@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import type { AgentModel, ImportableAgent, ImportStatus } from "../../lib/types";
-import { getModelLabel } from "../../lib/types";
+import type { ImportableAgent, ImportStatus } from "../../lib/types";
+import { getModelLabel, getModelBadgeClass } from "../../lib/types";
 import { importAgentsFromDir } from "../../lib/tauri";
 
 interface ImportAgentsModalProps {
@@ -9,12 +9,6 @@ interface ImportAgentsModalProps {
   onClose: () => void;
   onImported: (importedCount: number) => void;
 }
-
-const modelBgColors: Record<AgentModel, string> = {
-  haiku: "bg-accent-cyan/20 text-accent-cyan",
-  sonnet: "bg-accent-purple/20 text-accent-purple",
-  opus: "bg-accent-orange/20 text-accent-orange",
-};
 
 const statusStyles: Record<ImportStatus, string> = {
   new: "bg-accent-green/15 text-accent-green",
@@ -165,17 +159,11 @@ export function ImportAgentsModal({
                               <span className="text-sm text-text-primary font-medium truncate">
                                 {item.agent.name}
                               </span>
-                              <span
-                                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${modelBgColors[item.agent.model]}`}
-                              >
-                                {getModelLabel(item.agent.model).toUpperCase()}
-                              </span>
-                              {item.model_defaulted && (
+                              {getModelLabel(item.agent.model) && (
                                 <span
-                                  className="text-[10px] px-1.5 py-0.5 rounded bg-accent-orange/10 text-accent-orange"
-                                  title="The source model wasn't an exact match and was defaulted to Sonnet."
+                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${getModelBadgeClass(item.agent.model)}`}
                                 >
-                                  defaulted
+                                  {getModelLabel(item.agent.model)!.toUpperCase()}
                                 </span>
                               )}
                               <span

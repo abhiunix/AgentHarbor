@@ -267,6 +267,9 @@ export function PermissionsPage() {
   const [cleanupPeriodDays, setCleanupPeriodDays] = useState("");
   const [claudeMdExcludes, setClaudeMdExcludes] = useState<string[]>([]);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [statusLineEnabled, setStatusLineEnabled] = useState(false);
+  const [statusLineCommand, setStatusLineCommand] = useState("");
+  const [statusLinePadding, setStatusLinePadding] = useState<number | undefined>(undefined);
 
   const [projectSettingsAllow, setProjectSettingsAllow] = useState<string[]>([]);
   const [projectSettingsDeny, setProjectSettingsDeny] = useState<string[]>([]);
@@ -324,6 +327,9 @@ export function PermissionsPage() {
           : undefined,
       claude_md_excludes: claudeMdExcludes,
       available_models: availableModels,
+      status_line_command:
+        statusLineEnabled && statusLineCommand.trim() ? statusLineCommand.trim() : undefined,
+      status_line_padding: statusLineEnabled ? statusLinePadding : undefined,
     };
   }
 
@@ -368,6 +374,12 @@ export function PermissionsPage() {
       obj.claudeMdExcludes = payload.claude_md_excludes;
     if (payload.available_models && payload.available_models.length > 0)
       obj.availableModels = payload.available_models;
+    if (payload.status_line_command)
+      obj.statusLine = {
+        type: "command",
+        command: payload.status_line_command,
+        ...(payload.status_line_padding != null ? { padding: payload.status_line_padding } : {}),
+      };
     return JSON.stringify(obj, null, 2);
   }
 
@@ -476,6 +488,9 @@ export function PermissionsPage() {
       setCleanupPeriodDays(cp.cleanup_period_days != null ? String(cp.cleanup_period_days) : "");
       setClaudeMdExcludes([...(cp.claude_md_excludes ?? [])]);
       setAvailableModels([...(cp.available_models ?? [])]);
+      setStatusLineEnabled(!!cp.status_line_command);
+      if (cp.status_line_command) setStatusLineCommand(cp.status_line_command);
+      setStatusLinePadding(cp.status_line_padding);
 
       if (projectScope) {
         const proj = await getClaudeProjectPermissions(projectScope);
@@ -589,6 +604,12 @@ export function PermissionsPage() {
       cleanup_period_days: optNum(data.cleanupPeriodDays),
       claude_md_excludes: strArr(data.claudeMdExcludes),
       available_models: strArr(data.availableModels),
+      status_line_command: optStr(
+        (data.statusLine as Record<string, unknown> | undefined)?.command
+      ),
+      status_line_padding: optNum(
+        (data.statusLine as Record<string, unknown> | undefined)?.padding
+      ),
     };
     return { allow, deny, skipDangerousModePermissionPrompt: skipDangerous, payload };
   }
@@ -873,6 +894,34 @@ export function PermissionsPage() {
                     "claude-haiku-4-5-20251001",
                   ]}
                 />
+              </div>
+
+              <div className="border-t border-border pt-4 mt-2 mb-2">
+                <h4 className="text-sm font-medium text-text-secondary mb-2 inline-flex items-center gap-2">
+                  Status Line
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-blue-400 bg-blue-500/20 rounded px-1.5 py-0.5">
+                    New
+                  </span>
+                </h4>
+                <SwitchRow
+                  label="Custom status line"
+                  info="Show a custom status line in the Claude Code terminal, rendered by the command below."
+                  checked={statusLineEnabled}
+                  onChange={(v) => {
+                    setStatusLineEnabled(v);
+                    if (v && !statusLineCommand.trim())
+                      setStatusLineCommand("bash ~/.claude/statusline-command.sh");
+                  }}
+                />
+                {statusLineEnabled && (
+                  <TextRow
+                    label="Command"
+                    info="Shell command that prints the status line; receives session JSON on stdin. With the default command, AgentHarbor creates the script (model | git branch | session cost) if it doesn't exist yet."
+                    value={statusLineCommand}
+                    onChange={setStatusLineCommand}
+                    placeholder="e.g. bash ~/.claude/statusline-command.sh"
+                  />
+                )}
               </div>
 
               <div className="border-t border-border pt-4 mt-2 mb-2">

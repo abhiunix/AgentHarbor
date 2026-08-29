@@ -20,6 +20,8 @@ interface CapabilityListProps {
   onEdit?: (capability: UniversalCapability) => void;
   onDelete?: (id: string) => void;
   onFork?: (capability: UniversalCapability) => void;
+  onUseCapability?: (capability: UniversalCapability) => void;
+  useCapabilityPendingIds?: Set<string>;
   onDeploy: (ids: string[]) => void;
   onSaveAsPreset: (ids: string[]) => void;
   onNewCapability?: () => void;
@@ -199,6 +201,8 @@ export function CapabilityList({
   onEdit,
   onDelete,
   onFork,
+  onUseCapability,
+  useCapabilityPendingIds,
   onDeploy,
   onSaveAsPreset,
   onNewCapability,
@@ -598,6 +602,8 @@ export function CapabilityList({
                 onEdit={capability.visibility === "private" ? onEdit : undefined}
                 onDelete={capability.visibility === "private" ? onDelete : undefined}
                 onFork={(capability.visibility === "public" || capability.visibility === "discovered") ? onFork : undefined}
+                onUseCapability={onUseCapability}
+                useCapabilityPending={useCapabilityPendingIds?.has(capability.id) ?? false}
                 isNew={newItemIds.has(capability.id)}
               />
             ))}

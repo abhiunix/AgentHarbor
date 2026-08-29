@@ -1098,7 +1098,7 @@ impl AgentAdapter for CursorAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AgentColor, AgentModel, Hook, McpServer, MemoryScope, Rule, Skill, SkillFile, ToolAccess, Visibility};
+    use crate::models::{AgentColor, Hook, McpServer, MemoryScope, Rule, Skill, SkillFile, ToolAccess, Visibility};
     use tempfile::TempDir;
 
     fn create_test_skill() -> UniversalCapability {
@@ -1208,7 +1208,7 @@ mod tests {
             author: "test".to_string(),
             visibility: Visibility::Private,
             tags: vec![],
-            model: AgentModel::Sonnet,
+            model: Some("sonnet".to_string()),
             color: AgentColor::Blue,
             memory: MemoryScope::None,
             tools: vec![ToolAccess::All],
