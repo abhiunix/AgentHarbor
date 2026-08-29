@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
 import { getAdapterIconImg, getAdapterName } from "../../lib/adapterPlugins";
+import { updateTraySettings } from "../../lib/tauri";
 import {
   TrayProviderCard,
   type RateLimitWindow,
@@ -433,6 +434,22 @@ export function TrayPopover() {
     } catch { /* ignore */ }
   };
 
+  // Hide a provider from the tray. Persists to the same tray_providers setting
+  // the Tray Config screen uses; re-enable there. The backend refreshes the
+  // summary, which arrives via the "tray-data-updated" listener.
+  const handleDisableProvider = async (tabId: string) => {
+    const remaining = (summary?.providers ?? [])
+      .map((p) => p.provider_id)
+      .filter((id) => id !== tabId);
+    if (activeTab === tabId && remaining[0]) {
+      setActiveTab(remaining[0]);
+      try { localStorage.setItem(TAB_STORAGE_KEY, remaining[0]); } catch { /* ignore */ }
+    }
+    try {
+      await updateTraySettings({ providers: remaining });
+    } catch { /* ignore */ }
+  };
+
   // ── Navigation helpers ──
 
   const navigateAndHide = async (route: string) => {
@@ -545,32 +562,41 @@ export function TrayPopover() {
             const iconImg = getAdapterIconImg(tab.id);
 
             return (
-              <button
-                key={tab.id}
-                onClick={() => handleTabChange(tab.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  isActive
-                    ? "text-[#e8e9ed]"
-                    : "text-[#9394a1] hover:text-[#e8e9ed] hover:bg-[#1a1b23]"
-                }`}
-                style={
-                  isActive
-                    ? { backgroundColor: `${tab.accent}20`, color: tab.accent }
-                    : undefined
-                }
-              >
-                {iconImg ? (
-                  <img
-                    src={iconImg}
-                    alt=""
-                    className={`w-3.5 h-3.5 rounded ${!connected ? "opacity-40" : ""}`}
-                  />
-                ) : null}
-                <span>{tab.name}</span>
-                {!connected && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#2a2b36]" />
-                )}
-              </button>
+              <div key={tab.id} className="relative group">
+                <button
+                  onClick={() => handleTabChange(tab.id)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    isActive
+                      ? "text-[#e8e9ed]"
+                      : "text-[#9394a1] hover:text-[#e8e9ed] hover:bg-[#1a1b23]"
+                  }`}
+                  style={
+                    isActive
+                      ? { backgroundColor: `${tab.accent}20`, color: tab.accent }
+                      : undefined
+                  }
+                >
+                  {iconImg ? (
+                    <img
+                      src={iconImg}
+                      alt=""
+                      className={`w-3.5 h-3.5 rounded ${!connected ? "opacity-40" : ""}`}
+                    />
+                  ) : null}
+                  <span>{tab.name}</span>
+                  {!connected && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#2a2b36]" />
+                  )}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDisableProvider(tab.id); }}
+                  title={`Hide ${tab.name} from the tray (re-enable in Settings › Tray Config)`}
+                  aria-label={`Hide ${tab.name} from the tray`}
+                  className="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center w-4 h-4 rounded-full bg-[#2a2b36] text-[#c7c8d1] hover:bg-red-500/80 hover:text-white shadow ring-1 ring-[#12131a] leading-none"
+                >
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M1 1l6 6M7 1L1 7"/></svg>
+                </button>
+              </div>
             );
           })}
         </div>
