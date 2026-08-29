@@ -902,10 +902,11 @@ fn tray_provider_display_name(id: &str) -> &'static str {
 /// preserved regardless of the order ids appear in `configured`. Pure and
 /// network-free so it can be unit tested directly.
 fn select_tray_providers(configured: &[String]) -> Vec<&'static str> {
-    ALL_TRAY_PROVIDER_IDS
+    // Preserve the user's configured order (drag-to-reorder in the tray writes
+    // this array), keeping only ids that are valid tray providers.
+    configured
         .iter()
-        .copied()
-        .filter(|id| configured.iter().any(|c| c == id))
+        .filter_map(|c| ALL_TRAY_PROVIDER_IDS.iter().copied().find(|id| id == c))
         .collect()
 }
 
@@ -1220,10 +1221,10 @@ mod tray_provider_filter_tests {
     }
 
     #[test]
-    fn filters_to_configured_subset_in_canonical_order() {
-        // Configured out of order — result should still follow canonical order.
+    fn preserves_configured_order() {
+        // The user's drag order is honored (not re-sorted to canonical).
         let configured = ["kimi".to_string(), "cursor".to_string()];
-        assert_eq!(select_tray_providers(&configured), ["cursor", "kimi"]);
+        assert_eq!(select_tray_providers(&configured), ["kimi", "cursor"]);
     }
 
     #[test]
