@@ -270,6 +270,7 @@ export const ALL_TRAY_PROVIDER_IDS = [
   "gemini",
   "kimi",
   "deepseek",
+  "opencode",
 ] as const;
 
 export interface TraySettings {

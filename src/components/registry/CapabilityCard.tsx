@@ -41,6 +41,7 @@ const adapterLabels: Record<AdapterType, string> = {
   "claude-code": "CC",
   cursor: "Cu",
   windsurf: "Wi",
+  opencode: "Oc",
 };
 
 function ExpandableDescription({ text }: { text: string }) {

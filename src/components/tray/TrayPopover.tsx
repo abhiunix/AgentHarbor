@@ -71,6 +71,12 @@ const ALL_PROVIDER_TABS: ProviderTabConfig[] = [
     accent: "#4d6bfe",
     route: "/adapters/deepseek/analytics-v2",
   },
+  {
+    id: "opencode",
+    name: getAdapterName("opencode"),
+    accent: "#f5a623",
+    route: "/adapters/opencode/analytics",
+  },
 ];
 
 const TAB_STORAGE_KEY = "agentharbor-tray-active-tab";

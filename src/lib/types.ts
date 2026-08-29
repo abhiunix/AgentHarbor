@@ -181,7 +181,7 @@ export interface AgentImportResult {
   agents: AgentDefinition[];
 }
 
-export type AdapterType = "claude-code" | "cursor" | "windsurf";
+export type AdapterType = "claude-code" | "cursor" | "windsurf" | "opencode";
 
 export interface Project {
   id: string;

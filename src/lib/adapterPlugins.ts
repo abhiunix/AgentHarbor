@@ -200,6 +200,19 @@ export const adapterPlugins: AdapterPlugin[] = [
       { id: "control", label: "Permissions & Control", icon: "\uD83D\uDD12", route: "/adapters/kimi/control" },
     ],
   },
+  {
+    id: "opencode",
+    name: "OpenCode",
+    icon: "⌘",
+    // Temporary: no dedicated OpenCode logo yet, reuse the Codex icon (same
+    // pattern as Copilot above) until assets are added (Phase 8.5).
+    iconImg: codexIcon,
+    color: "#f5a623",
+    defaultExpanded: false,
+    features: [
+      { id: "analytics", label: "Analytics", icon: "📊", route: "/adapters/opencode/analytics" },
+    ],
+  },
   // ── Coming soon ──
   {
     id: "kiro",
@@ -245,8 +258,8 @@ function getDefaultEnabledAdapterIds(): string[] {
 // Adapters added after the enabled-list feature shipped. A user's stored list
 // predates them, so a one-time migration adds each default-on newcomer once
 // (without touching adapters the user explicitly disabled).
-const NEW_DEFAULT_ADAPTERS_MIGRATION_KEY = "agentharbor-adapters-migrated-v2";
-const NEW_DEFAULT_ADAPTERS = ["deepseek", "kimi"];
+const NEW_DEFAULT_ADAPTERS_MIGRATION_KEY = "agentharbor-adapters-migrated-v3";
+const NEW_DEFAULT_ADAPTERS = ["deepseek", "kimi", "opencode"];
 
 /** Get the set of enabled adapter IDs from localStorage. Falls back to plugin defaults. */
 export function getEnabledAdapterIds(): string[] {

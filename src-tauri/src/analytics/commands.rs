@@ -15,7 +15,7 @@ use crate::analytics::types::*;
 use crate::analytics::{
     claude, claude_desktop, codex, gemini, cursor, copilot,
     openrouter, kimi, deepseek, deepseek_v2, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
-    token_store,
+    opencode, token_store,
 };
 use crate::commands::config::{load_settings, ALL_TRAY_PROVIDER_IDS};
 use crate::utils::paths::app_data_dir;
@@ -372,6 +372,7 @@ pub fn get_all_provider_status() -> Vec<ProviderStatus> {
         kiro::check_connection(),
         jetbrains::check_connection(),
         vertex_ai::check_connection(),
+        opencode::check_connection(),
     ]
 }
 
@@ -397,6 +398,7 @@ pub fn get_provider_analytics(provider_id: String) -> Result<ProviderAnalytics, 
         "kiro" => Ok(kiro::fetch_kiro_analytics()),
         "jetbrains" => Ok(jetbrains::fetch_jetbrains_analytics()),
         "vertex-ai" => Ok(vertex_ai::fetch_vertex_ai_analytics()),
+        "opencode" => Ok(opencode::fetch_opencode_analytics()),
         _ => Err(format!("Unknown provider: {}", provider_id)),
     }
 }
@@ -893,6 +895,7 @@ fn tray_provider_display_name(id: &str) -> &'static str {
         "gemini" => "Gemini CLI",
         "kimi" => "Kimi",
         "deepseek" => "DeepSeek",
+        "opencode" => "OpenCode",
         _ => "Unknown",
     }
 }
@@ -961,6 +964,9 @@ fn build_tray_summary() -> TraySummary {
     let deepseek_h = enabled
         .contains(&"deepseek")
         .then(|| thread::spawn(fetch_deepseek_tray_analytics));
+    let opencode_h = enabled
+        .contains(&"opencode")
+        .then(|| thread::spawn(opencode::fetch_opencode_analytics));
 
     let disconnected = |id: &str| ProviderAnalytics {
         provider_id: id.to_string(),
@@ -1001,6 +1007,9 @@ fn build_tray_summary() -> TraySummary {
     }
     if let Some(h) = deepseek_h {
         analytics_list.push(h.join().unwrap_or_else(|_| disconnected("deepseek")));
+    }
+    if let Some(h) = opencode_h {
+        analytics_list.push(h.join().unwrap_or_else(|_| disconnected("opencode")));
     }
 
     let mut providers: Vec<TrayProviderSummary> = analytics_list
@@ -1232,7 +1241,7 @@ mod tray_provider_filter_tests {
     use super::select_tray_providers;
 
     #[test]
-    fn all_six_when_all_configured() {
+    fn all_seven_when_all_configured() {
         let configured = [
             "claude-code".to_string(),
             "cursor".to_string(),
@@ -1240,10 +1249,11 @@ mod tray_provider_filter_tests {
             "gemini".to_string(),
             "kimi".to_string(),
             "deepseek".to_string(),
+            "opencode".to_string(),
         ];
         assert_eq!(
             select_tray_providers(&configured),
-            ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek"]
+            ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek", "opencode"]
         );
     }
 

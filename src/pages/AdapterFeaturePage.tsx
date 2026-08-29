@@ -130,6 +130,11 @@ const DeepSeekControlPage = lazy(() =>
   import("./DeepSeekControlPage").then((m) => ({ default: m.DeepSeekControlPage }))
 );
 
+// OpenCode-specific
+const OpencodeAnalyticsPage = lazy(() =>
+  import("./OpencodeAnalyticsPage").then((m) => ({ default: m.OpencodeAnalyticsPage }))
+);
+
 // ── Adapter+Feature → Component mapping ──────────────────────────────────────
 
 type LazyPage = React.LazyExoticComponent<React.ComponentType<unknown>>;
@@ -197,6 +202,9 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
     plans: KimiPlansPage as LazyPage,
     instructions: KimiInstructionsPage as LazyPage,
     control: KimiControlPage as LazyPage,
+  },
+  opencode: {
+    analytics: OpencodeAnalyticsPage as LazyPage,
   },
 };
 
