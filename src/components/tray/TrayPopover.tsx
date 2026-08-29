@@ -294,14 +294,20 @@ export function TrayPopover() {
   }, []);
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
   const updateScrollAffordance = useCallback(() => {
     const el = tabScrollRef.current;
     if (!el) return;
     setCanScrollRight(el.scrollWidth - el.clientWidth - el.scrollLeft > 2);
+    setCanScrollLeft(el.scrollLeft > 2);
   }, []);
   const scrollTabsRight = useCallback(() => {
     const el = tabScrollRef.current;
     if (el) el.scrollBy({ left: Math.max(120, el.clientWidth * 0.7), behavior: "smooth" });
+  }, []);
+  const scrollTabsLeft = useCallback(() => {
+    const el = tabScrollRef.current;
+    if (el) el.scrollBy({ left: -Math.max(120, el.clientWidth * 0.7), behavior: "smooth" });
   }, []);
   useEffect(() => {
     updateScrollAffordance();
@@ -698,6 +704,19 @@ export function TrayPopover() {
             </button>
           )}
         </div>
+        {/* Scroll-left affordance — appears once scrolled right */}
+        {canScrollLeft && (
+          <button
+            onClick={scrollTabsLeft}
+            title="Scroll left"
+            aria-label="Scroll tabs left"
+            className="absolute left-0 top-0 bottom-0 flex items-center justify-start pr-6 pl-1.5 bg-gradient-to-r from-[#0e0f13] via-[#0e0f13] to-transparent"
+          >
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-[#1a1b23] text-[#c7c8d1] hover:text-white ring-1 ring-[#2a2b36]">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 1.5L3 5l3.5 3.5"/></svg>
+            </span>
+          </button>
+        )}
         {/* Scroll-right affordance — appears when tabs overflow to the right */}
         {canScrollRight && (
           <button
