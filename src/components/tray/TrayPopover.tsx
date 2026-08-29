@@ -480,6 +480,7 @@ export function TrayPopover() {
   // ── Tab change handler ──
 
   const handleTabChange = (tabId: string) => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
     setShowSettingsMenu(false);
     setActiveTab(tabId);
     try {
@@ -503,22 +504,55 @@ export function TrayPopover() {
     } catch { /* ignore */ }
   };
 
-  // Drag-to-reorder: move the dragged provider tab before the drop target,
-  // persist the new order (the source of truth) to tray_providers.
-  const handleReorder = async (targetId: string) => {
-    const src = dragId;
-    setDragId(null);
-    if (!src || src === targetId) return;
-    const base = (localOrder ?? summary?.providers.map((p) => p.provider_id) ?? []).slice();
-    const from = base.indexOf(src);
-    const to = base.indexOf(targetId);
-    if (from < 0 || to < 0) return;
-    base.splice(from, 1);
-    base.splice(base.indexOf(targetId), 0, src);
-    setLocalOrder(base);
-    try {
-      await updateTraySettings({ providers: base });
-    } catch { /* ignore */ }
+  // Drag-to-reorder via pointer events (HTML5 drag-and-drop is unreliable in
+  // the macOS WKWebView). Persist the new order (the source of truth) on drop.
+  const localOrderRef = useRef<string[] | null>(null);
+  useEffect(() => { localOrderRef.current = localOrder; }, [localOrder]);
+  const suppressClickRef = useRef(false);
+
+  const startTabDrag = (e: React.PointerEvent, id: string) => {
+    if (locked || e.button !== 0) return;
+    const startX = e.clientX;
+    let started = false;
+
+    const moveTo = (overId: string) => {
+      if (overId === id) return;
+      setLocalOrder((prev) => {
+        const base = (prev ?? summary?.providers.map((p) => p.provider_id) ?? []).slice();
+        const from = base.indexOf(id);
+        const to = base.indexOf(overId);
+        if (from < 0 || to < 0) return prev;
+        base.splice(from, 1);
+        base.splice(base.indexOf(overId), 0, id);
+        return base;
+      });
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!started) {
+        if (Math.abs(ev.clientX - startX) < 4) return;
+        started = true;
+        setDragId(id);
+      }
+      const overEl = document
+        .elementFromPoint(ev.clientX, ev.clientY)
+        ?.closest("[data-tab-id]") as HTMLElement | null;
+      const overId = overEl?.getAttribute("data-tab-id");
+      if (overId) moveTo(overId);
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (!started) return; // treat as a click → tab switch handles it
+      suppressClickRef.current = true; // a drag happened; swallow the click
+      setDragId(null);
+      const finalOrder = localOrderRef.current;
+      if (finalOrder) updateTraySettings({ providers: finalOrder }).catch(() => {});
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   };
 
   // ── Navigation helpers ──
@@ -646,12 +680,9 @@ export function TrayPopover() {
             return (
               <div
                 key={tab.id}
-                className={`relative group shrink-0 ${dragId === tab.id ? "opacity-50" : ""}`}
-                draggable={!locked}
-                onDragStart={() => !locked && setDragId(tab.id)}
-                onDragOver={(e) => { if (!locked) e.preventDefault(); }}
-                onDrop={(e) => { if (!locked) { e.preventDefault(); handleReorder(tab.id); } }}
-                onDragEnd={() => setDragId(null)}
+                data-tab-id={tab.id}
+                className={`relative group shrink-0 select-none ${dragId === tab.id ? "opacity-50" : ""}`}
+                onPointerDown={(e) => startTabDrag(e, tab.id)}
               >
                 <button
                   onClick={() => handleTabChange(tab.id)}
