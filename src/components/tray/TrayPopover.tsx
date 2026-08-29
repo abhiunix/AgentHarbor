@@ -599,6 +599,15 @@ export function TrayPopover() {
               </div>
             );
           })}
+          {/* Add provider → opens Tray Config */}
+          <button
+            onClick={handleOpenSettings}
+            title="Add a provider to the tray (Settings › Tray Config)"
+            aria-label="Add a provider to the tray"
+            className="flex items-center justify-center w-6 h-6 ml-0.5 rounded-md text-[#6f7080] hover:text-[#e8e9ed] hover:bg-[#1a1b23] transition-colors shrink-0"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
+          </button>
         </div>
 
         {/* Provider card — scrollable */}
