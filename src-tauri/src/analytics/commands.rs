@@ -656,6 +656,19 @@ fn compute_provider_display_metric(provider: &TrayProviderSummary) -> Option<Dis
         return None;
     }
 
+    // Kimi / DeepSeek menu bar: balance providers with no rate-limit windows —
+    // show the available dollar balance instead of borrowing a percentage
+    // from another provider.
+    if provider.provider_id == "kimi" || provider.provider_id == "deepseek" {
+        if let Some(credit) = provider.credit_usage.as_ref() {
+            return Some(DisplayMetric::Spend {
+                amount: credit.remaining,
+                currency: credit.currency.clone(),
+            });
+        }
+        return None;
+    }
+
     // Cursor menu bar: show user's total spend (included + bonus + on-demand),
     // same formula as the tray popover. Must run before pick_primary_provider_rate
     // so dollars win over session/week percentage windows.

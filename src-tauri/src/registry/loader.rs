@@ -948,6 +948,7 @@ fn load_agent_json_with_md(json_path: &PathBuf) -> Result<AgentDefinition, Strin
         .unwrap_or_default();
 
     Ok(AgentDefinition {
+        artifact: None,
         id, name, description, version, author,
         visibility: Visibility::Public, tags, model, color, memory,
         tools: vec![ToolAccess::All], required_capabilities,
@@ -1055,6 +1056,7 @@ fn parse_community_agent_md(content: &str, path: &PathBuf) -> Result<AgentDefini
     let id = id_str.parse().map_err(|_| format!("Invalid composite ID: {}", id_str))?;
 
     Ok(AgentDefinition {
+        artifact: None,
         id, name, description, version, author,
         visibility: Visibility::Public, tags, model, color, memory,
         tools: vec![ToolAccess::All], required_capabilities: vec![],

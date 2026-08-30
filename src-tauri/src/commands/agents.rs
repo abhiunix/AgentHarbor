@@ -397,6 +397,7 @@ mod tests {
 
     fn create_test_agent() -> AgentDefinition {
         AgentDefinition {
+            artifact: None,
             id: CompositeId::new("test", "my-agent").unwrap(),
             name: "My Agent".to_string(),
             description: "Test agent".to_string(),

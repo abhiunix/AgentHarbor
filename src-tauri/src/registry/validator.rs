@@ -164,6 +164,7 @@ mod tests {
 
     fn create_valid_agent() -> AgentDefinition {
         AgentDefinition {
+            artifact: None,
             id: "community/test-agent".parse().unwrap(),
             name: "Test Agent".to_string(),
             description: "Test description".to_string(),

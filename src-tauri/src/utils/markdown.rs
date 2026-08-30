@@ -131,6 +131,7 @@ pub fn parse_agent_md(content: &str) -> Result<AgentDefinition, MarkdownError> {
     })?;
     
     Ok(AgentDefinition {
+        artifact: None,
         id,
         name: frontmatter.name.replace('-', " ").split_whitespace()
             .map(|word| {
@@ -253,6 +254,7 @@ pub fn parse_agent_md_lenient(content: &str, _source_tool: &str) -> AgentDefinit
         .unwrap_or_default();
 
     AgentDefinition {
+        artifact: None,
         id: import_id(&display_name, "imported-agent"),
         name: display_name,
         description,
@@ -317,6 +319,7 @@ pub fn extract_prose_agent(content: &str, fallback_name: &str) -> Option<AgentDe
     }
 
     Some(AgentDefinition {
+        artifact: None,
         id: import_id(&name, fallback_name),
         name,
         description,
@@ -389,6 +392,7 @@ mod tests {
 
     fn create_test_agent() -> AgentDefinition {
         AgentDefinition {
+            artifact: None,
             id: "community/api-test-runner".parse().unwrap(),
             name: "API Test Runner".to_string(),
             description: "Use this agent when new API endpoints need testing.".to_string(),

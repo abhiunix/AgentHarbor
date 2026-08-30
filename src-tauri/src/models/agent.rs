@@ -65,6 +65,10 @@ pub struct AgentDefinition {
     pub prompt: String,
     #[serde(default)]
     pub examples: Vec<AgentExample>,
+    /// Derived deploy filename stem (`artifact_name`), populated for the
+    /// frontend by `get_all_agents`; never persisted to disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<String>,
 }
 
 #[cfg(test)]
@@ -215,6 +219,7 @@ mod tests {
     #[test]
     fn test_agent_definition_roundtrip() {
         let agent = AgentDefinition {
+            artifact: None,
             id: "community/test-agent".parse().unwrap(),
             name: "Test Agent".to_string(),
             description: "A test agent".to_string(),

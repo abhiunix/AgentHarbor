@@ -154,6 +154,7 @@ export interface AgentDefinition {
   required_capabilities: CompositeId[];
   prompt: string;
   examples: AgentExample[];
+  artifact?: string | null;
 }
 
 export interface Preset {

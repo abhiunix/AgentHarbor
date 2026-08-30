@@ -245,7 +245,7 @@ function PreviewTab({ agent }: { agent: AgentDefinition }) {
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-text-muted">
           <code className="px-1.5 py-0.5 bg-app-bg rounded font-mono text-accent-blue">
-            agents/{agent.id.split("/")[1]}.md
+            agents/{agent.artifact ?? agent.id.split("/")[1]}.md
           </code>
         </p>
         <button
