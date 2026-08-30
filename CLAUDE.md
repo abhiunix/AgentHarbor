@@ -67,3 +67,66 @@ Outbound network calls are restricted to each provider's official API endpoints 
 
 - `.github/workflows/ci.yml` — push/PR to `main`: `npx tsc --noEmit`, `cargo clippy` (warning-as-error, but `continue-on-error: true`), `cargo test`, `cargo build` with `SKIP_VERSION_BUMP=1`. Runs on macOS only.
 - `.github/workflows/release.yml` — tag `v*`: full signed + notarized macOS build, publishes DMG + updater `.tar.gz` + `.sig` + `latest.json` to the GitHub Release. Requires the eight signing secrets listed in `docs/build-and-release.md`.
+
+## Rules
+
+Follow all rules in this section. Deployed via AgentHarbor.
+
+<!-- AgentHarbor:rules:start -->
+<!-- AgentHarbor:rule:c34734df-6eb4-4856-8ba0-7cf49c2d3824/bf7cd4d6a8d534fd -->
+1. **Never Use  —**
+
+Never use  `—` in any .md files or webpage, or any sentence. Instead if needed use alternate special characters may be like ; or something else
+
+<!-- AgentHarbor:rule:7e98dc1f-24fc-4d96-8d18-6a2f308971d5/a6c693b77e484052 -->
+2. **GiveTaskStatus&TestsToPerform**
+
+Whenever you finish a task, provide a one-line summary of the completed tasks ✅ along with the relevant test cases the user should verify and observe.
+
+<!-- AgentHarbor:rule:7e98dc1f-24fc-4d96-8d18-6a2f308971d5/e932239515c75b6f -->
+3. **quick-answer-tldr**
+
+When I ask you a question, then you have to first give me answer in TLDR format in easy explanation way. 
+Then if needed you can give answers in full fledge explanation.
+
+<!-- AgentHarbor:rule:7e98dc1f-24fc-4d96-8d18-6a2f308971d5/aa31a625544edba5 -->
+4. **Explaination clarity**
+
+Please consider that I am an SDE-1 developer and an SDE-1 network engineer, so I may not fully understand highly technical wording. So explain plainly + always add a glossary for plans, questions in chat or anywhere you think is necessary.
+
+I am not familiar with jargons like ES Helper or eBPF. Please explain these concepts in a simple, beginner-friendly way. So the sentences should be in explanatory way and then in bracket it should come like (this process is called xyz) or (this is the work of ES helper in macos) etc
+
+For any jargon or technical terms, please include a quick definition at the end of the document or chat.
+
+<!-- AgentHarbor:rule:c34734df-6eb4-4856-8ba0-7cf49c2d3824/acb838f039b67051 -->
+5. **validate-questions**
+
+- If I ask a questions, or suggest some features then you must have to evaluate my request first then you have to shortly answer about the decisions impact, weather its a good decision or bad, if better approach is available then suggest that too with why.
+
+<!-- AgentHarbor:rule:7e98dc1f-24fc-4d96-8d18-6a2f308971d5/a42f9c8169b09ea4 -->
+6. **Ask-questions-before-plan**
+
+When you are in doubt and you need more information from me, just ask me key questions right away before planning/implementing/answering.
+
+<!-- AgentHarbor:rule:7e98dc1f-24fc-4d96-8d18-6a2f308971d5/4361888d0c1f0e38 -->
+7. **maintain todo.md**
+
+When we are working on something and you found out that there are some tasks like bug fixes then keep that in todo.md file so once we identify a problem we can keep in backlogs so we can recall by and work on that bug later if not now.
+Keep references you/an agent knows whats the bug. dont write what to fix.
+<!-- AgentHarbor:rules:end -->
+
+<!-- AgentHarbor: Deployed Capabilities -->
+- **Skill: macos-app-signing-c5d9fd60** (via Claude Code)
+- **Skill: remotion-best-practices** (via Claude Code)
+- **Skill: remotion-captions** (via Claude Code)
+- **Skill: remotion-create** (via Claude Code)
+- **Skill: remotion-docs** (via Claude Code)
+- **Skill: remotion-interactivity** (via Claude Code)
+- **Skill: remotion-maps** (via Claude Code)
+- **Skill: remotion-markup** (via Claude Code)
+- **Skill: remotion-multimedia** (via Claude Code)
+- **Skill: remotion-render** (via Claude Code)
+- **Skill: remotion-saas** (via Claude Code)
+- **Skill: remotion-upgrade** (via Claude Code)
+- **Hook: PostToolUse** (via Claude Code)
+<!-- /AgentHarbor -->

@@ -40,14 +40,20 @@ lazy_static::lazy_static! {
     static ref LAST_ACCOUNT_CACHE: Mutex<Option<AccountSnapshot>> = Mutex::new(None);
 }
 
-const CLAUDE_CACHE_TTL_SECS: u64 = 60;
+// 300s (was 60s) so it no longer lines up with TRAY_REFRESH_INTERVAL_SECS (60s,
+// analytics/commands.rs) — that alignment guaranteed a cache miss (and a full
+// ~/.claude/projects rescan via enrich_with_today_stats) on every single tray
+// cycle. The tray now serves slightly-stale Claude data between misses; other
+// providers still refresh every 60s.
+const CLAUDE_CACHE_TTL_SECS: u64 = 300;
 const CLAUDE_CACHE_TTL_SHORT_SECS: u64 = 60; // when approaching / reached limits
 /// Never serve Claude API-backed analytics older than this — limits how long
 /// we show a "healthy" snapshot after OAuth tokens are rotated or expired.
-const CLAUDE_CACHE_MAX_STALE_SECS: u64 = 90;
+const CLAUDE_CACHE_MAX_STALE_SECS: u64 = 300;
 const ACCOUNT_FALLBACK_TTL_SECS: u64 = 3600; // hold last-good account up to 1h
 
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 
 // ── Credential types ────────────────────────────────────────────────────────
@@ -1720,15 +1726,17 @@ fn enrich_with_today_stats(extra: &mut HashMap<String, serde_json::Value>) {
             .map(|t| t >= week_sys)
             .unwrap_or(false);
 
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
+        let file = match fs::File::open(path) {
+            Ok(f) => f,
             Err(_) => continue,
         };
+        let reader = std::io::BufReader::new(file);
 
         let file_id = path.to_string_lossy().to_string();
         // Per-file dedup: skip duplicate streaming chunks by (message.id, requestId)
         let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for line in content.lines() {
+        for line in io::BufRead::lines(reader).map_while(Result::ok) {
+            let line = line.as_str();
             let ts_ref = {
                 let needle1 = "\"timestamp\":\"";
                 let needle2 = "\"timestamp\": \"";
