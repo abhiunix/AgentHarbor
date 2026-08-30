@@ -341,6 +341,43 @@ fn resolve_token() -> Result<(String, String, Option<GeminiOAuthCreds>), String>
     Err("No Gemini access token found".into())
 }
 
+/// Auth type the Gemini CLI itself is configured with — v2 schema
+/// `security.auth.selectedType`, falling back to legacy `selectedAuthType`.
+fn gemini_auth_type() -> Option<String> {
+    let path = dirs::home_dir()?.join(".gemini").join("settings.json");
+    let content = fs::read_to_string(path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json.pointer("/security/auth/selectedType")
+        .or_else(|| json.get("selectedAuthType"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Whether an API key is discoverable (manual token store, env var, or
+/// ~/.gemini/.env). The key itself is never returned or logged — the CLI
+/// makes the calls; we only need to know auth is set up.
+fn api_key_detected() -> bool {
+    if let Ok(Some(k)) = token_store::get_provider_token("gemini", "api-key") {
+        if !k.trim().is_empty() {
+            return true;
+        }
+    }
+    if std::env::var("GEMINI_API_KEY").map(|v| !v.trim().is_empty()).unwrap_or(false) {
+        return true;
+    }
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(content) = fs::read_to_string(home.join(".gemini").join(".env")) {
+            return content.lines().any(|l| {
+                let l = l.trim_start();
+                l.strip_prefix("GEMINI_API_KEY=")
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false)
+            });
+        }
+    }
+    false
+}
+
 // ── Local session & telemetry data ──────────────────────────────────────────
 
 /// Enrich extra with local session stats from ~/.gemini/tmp/*/logs.json
@@ -848,12 +885,72 @@ struct TierAgg {
     limit: Option<f64>,
 }
 
+/// Extras from the auto-recorded chats JSONL sessions (Gemini CLI 0.46.0+).
+fn insert_chats_extras(extra: &mut HashMap<String, serde_json::Value>) {
+    let chats = scan_chats_cached();
+    extra.insert("gemini_chats_sessions".into(), serde_json::json!(chats.total_sessions));
+    extra.insert("start_today_sessions".into(), serde_json::json!(chats.today_sessions));
+    extra.insert("start_today_tokens".into(), serde_json::json!(chats.today_tokens));
+    extra.insert("start_today_messages".into(), serde_json::json!(chats.today_messages));
+    extra.insert("this_week_sessions".into(), serde_json::json!(chats.week_sessions));
+    extra.insert("this_week_tokens".into(), serde_json::json!(chats.week_tokens));
+    extra.insert("this_week_messages".into(), serde_json::json!(chats.week_messages));
+    extra.insert("gemini_token_totals".into(), serde_json::json!({
+        "input": chats.token_totals.input,
+        "output": chats.token_totals.output,
+        "cached": chats.token_totals.cached,
+        "thoughts": chats.token_totals.thoughts,
+        "tool": chats.token_totals.tool,
+    }));
+    if !chats.models_used.is_empty() {
+        let models_json: serde_json::Value = chats.models_used.iter()
+            .map(|(k, v)| (k.clone(), serde_json::json!(v)))
+            .collect::<serde_json::Map<String, serde_json::Value>>()
+            .into();
+        extra.insert("gemini_models_used".into(), models_json);
+    }
+}
+
+/// Local-only analytics for API-key auth: the CLI's cloudcode endpoints are
+/// OAuth-only, so plan/quota calls are skipped and everything comes from
+/// local session data.
+fn api_key_analytics(now: &str) -> ProviderAnalytics {
+    let mut extra = HashMap::new();
+    extra.insert("auth_type".into(), serde_json::Value::String("gemini-api-key".into()));
+    extra.insert("api_key_detected".into(), serde_json::Value::Bool(api_key_detected()));
+    enrich_local_stats(&mut extra);
+    insert_chats_extras(&mut extra);
+    ProviderAnalytics {
+        provider_id: "gemini".into(),
+        provider_name: "Gemini CLI".into(),
+        status: ProviderStatus {
+            provider_id: "gemini".into(),
+            provider_name: "Gemini CLI".into(),
+            connected: true,
+            connection_method: "api-key".into(),
+            account_email: read_fallback_email(),
+            plan_name: Some("API key".into()),
+            org_name: None,
+            error: None,
+        },
+        rate_limits: vec![],
+        credit_usage: None,
+        token_counts: None,
+        limit_state: None,
+        extra,
+        fetched_at: now.to_string(),
+    }
+}
+
 fn fetch_gemini_analytics_uncached() -> ProviderAnalytics {
     let now = Utc::now().to_rfc3339();
 
     let (token, method, creds) = match resolve_token() {
         Ok(t) => t,
         Err(e) => {
+            if gemini_auth_type().as_deref() == Some("gemini-api-key") {
+                return api_key_analytics(&now);
+            }
             return ProviderAnalytics {
                 provider_id: "gemini".into(),
                 provider_name: "Gemini CLI".into(),
@@ -1011,31 +1108,9 @@ fn fetch_gemini_analytics_uncached() -> ProviderAnalytics {
     let email = extract_email(creds.as_ref());
 
     // Enrich with local session stats (legacy logs.json + opt-in telemetry file)
+    // and the auto-recorded chats JSONL sessions (Gemini CLI 0.46.0+)
     enrich_local_stats(&mut extra);
-
-    // Enrich with the auto-recorded chats JSONL sessions (Gemini CLI 0.46.0+)
-    let chats = scan_chats_cached();
-    extra.insert("gemini_chats_sessions".into(), serde_json::json!(chats.total_sessions));
-    extra.insert("start_today_sessions".into(), serde_json::json!(chats.today_sessions));
-    extra.insert("start_today_tokens".into(), serde_json::json!(chats.today_tokens));
-    extra.insert("start_today_messages".into(), serde_json::json!(chats.today_messages));
-    extra.insert("this_week_sessions".into(), serde_json::json!(chats.week_sessions));
-    extra.insert("this_week_tokens".into(), serde_json::json!(chats.week_tokens));
-    extra.insert("this_week_messages".into(), serde_json::json!(chats.week_messages));
-    extra.insert("gemini_token_totals".into(), serde_json::json!({
-        "input": chats.token_totals.input,
-        "output": chats.token_totals.output,
-        "cached": chats.token_totals.cached,
-        "thoughts": chats.token_totals.thoughts,
-        "tool": chats.token_totals.tool,
-    }));
-    if !chats.models_used.is_empty() {
-        let models_json: serde_json::Value = chats.models_used.iter()
-            .map(|(k, v)| (k.clone(), serde_json::json!(v)))
-            .collect::<serde_json::Map<String, serde_json::Value>>()
-            .into();
-        extra.insert("gemini_models_used".into(), models_json);
-    }
+    insert_chats_extras(&mut extra);
 
     ProviderAnalytics {
         provider_id: "gemini".into(),
@@ -1087,12 +1162,23 @@ pub fn check_connection() -> ProviderStatus {
             connected: true, connection_method: method,
             account_email: extract_email(creds.as_ref()), plan_name: None, org_name: None, error: None,
         },
-        Err(e) => ProviderStatus {
-            provider_id: "gemini".into(),
-            provider_name: "Gemini CLI".into(),
-            connected: false, connection_method: "none".into(),
-            account_email: None, plan_name: None, org_name: None, error: Some(e),
-        },
+        Err(e) => {
+            if gemini_auth_type().as_deref() == Some("gemini-api-key") {
+                return ProviderStatus {
+                    provider_id: "gemini".into(),
+                    provider_name: "Gemini CLI".into(),
+                    connected: true, connection_method: "api-key".into(),
+                    account_email: read_fallback_email(),
+                    plan_name: Some("API key".into()), org_name: None, error: None,
+                };
+            }
+            ProviderStatus {
+                provider_id: "gemini".into(),
+                provider_name: "Gemini CLI".into(),
+                connected: false, connection_method: "none".into(),
+                account_email: None, plan_name: None, org_name: None, error: Some(e),
+            }
+        }
     }
 }
 

@@ -42,6 +42,50 @@ fn resolve_kimi_token() -> Result<(String, String), String> {
     Err("No Kimi auth token configured".into())
 }
 
+/// Fallback when no manual token exists: detect the same local auth the Kimi
+/// analytics page uses — a Moonshot API key in ~/.kimi/config.toml, or plain
+/// local session data. Returns None only when neither is present.
+fn local_auth_analytics(now: &str) -> Option<ProviderAnalytics> {
+    let (mode, api) = crate::analytics::kimi_v2::detect_kimi_auth_mode();
+    let mut extra = HashMap::new();
+    let (method, credit_usage) = if mode == "api" {
+        let (key, base) = api?;
+        let credit = crate::analytics::kimi_v2::fetch_moonshot_balance(&key, &base).map(|b| {
+            extra.insert("voucher_balance".into(), serde_json::json!(b.voucher));
+            extra.insert("cash_balance".into(), serde_json::json!(b.cash));
+            CreditUsage {
+                provider_id: "kimi".into(),
+                used: b.available,
+                limit: None,
+                remaining: b.available,
+                currency: b.currency,
+                billing_cycle_end: None,
+                plan_name: Some("Available balance".into()),
+            }
+        });
+        ("moonshot-api-key".to_string(), credit)
+    } else if crate::analytics::kimi_v2::kimi_root().map(|p| p.exists()).unwrap_or(false) {
+        ("local-file".to_string(), None)
+    } else {
+        return None;
+    };
+    Some(ProviderAnalytics {
+        provider_id: "kimi".into(),
+        provider_name: "Kimi".into(),
+        status: ProviderStatus {
+            provider_id: "kimi".into(),
+            provider_name: "Kimi".into(),
+            connected: true,
+            connection_method: method,
+            account_email: None, plan_name: None, org_name: None,
+            error: None,
+        },
+        rate_limits: vec![], credit_usage, token_counts: None,
+        limit_state: None,
+        extra, fetched_at: now.to_string(),
+    })
+}
+
 fn resolve_k2_token() -> Result<(String, String), String> {
     if let Ok(Some(key)) = token_store::get_provider_token("kimi-k2", "api-key") {
         return Ok((key, "api-key".into()));
@@ -57,6 +101,9 @@ pub fn fetch_kimi_analytics() -> ProviderAnalytics {
     let (token, method) = match resolve_kimi_token() {
         Ok(t) => t,
         Err(e) => {
+            if let Some(analytics) = local_auth_analytics(&now) {
+                return analytics;
+            }
             return ProviderAnalytics {
                 provider_id: "kimi".into(),
                 provider_name: "Kimi".into(),
@@ -259,6 +306,22 @@ pub fn check_connection() -> ProviderStatus {
             provider_id: "kimi".into(),
             provider_name: "Kimi".into(),
             connected: true, connection_method: method,
+            account_email: None, plan_name: None, org_name: None, error: None,
+        };
+    }
+    let (mode, api) = crate::analytics::kimi_v2::detect_kimi_auth_mode();
+    let local_method = if mode == "api" && api.is_some() {
+        Some("moonshot-api-key")
+    } else if crate::analytics::kimi_v2::kimi_root().map(|p| p.exists()).unwrap_or(false) {
+        Some("local-file")
+    } else {
+        None
+    };
+    if let Some(method) = local_method {
+        return ProviderStatus {
+            provider_id: "kimi".into(),
+            provider_name: "Kimi".into(),
+            connected: true, connection_method: method.into(),
             account_email: None, plan_name: None, org_name: None, error: None,
         };
     }

@@ -14,7 +14,7 @@ use tauri_plugin_notification::NotificationExt;
 use crate::analytics::types::*;
 use crate::analytics::{
     claude, claude_desktop, codex, gemini, cursor, copilot,
-    openrouter, kimi, deepseek, deepseek_v2, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
+    openrouter, kimi, kimi_v2, deepseek, deepseek_v2, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
     opencode, token_store,
 };
 use crate::commands::config::{load_settings, ALL_TRAY_PROVIDER_IDS};
@@ -940,6 +940,31 @@ fn fetch_deepseek_tray_analytics() -> ProviderAnalytics {
     analytics
 }
 
+/// Kimi analytics + a cheap fold-in of local session stats mirroring the
+/// deepseek tray wrapper. Local-file only, non-fatal.
+fn fetch_kimi_tray_analytics() -> ProviderAnalytics {
+    let mut analytics = kimi::fetch_kimi_analytics();
+    if analytics.status.connected {
+        let overview = kimi_v2::overview_for_tray();
+        analytics
+            .extra
+            .insert("total_sessions".into(), serde_json::json!(overview.total_sessions));
+        analytics
+            .extra
+            .insert("total_messages".into(), serde_json::json!(overview.total_messages));
+        analytics
+            .extra
+            .insert("total_turns".into(), serde_json::json!(overview.total_turns));
+        analytics
+            .extra
+            .insert("active_now".into(), serde_json::json!(overview.active_now));
+        analytics
+            .extra
+            .insert("current_streak".into(), serde_json::json!(overview.current_streak));
+    }
+    analytics
+}
+
 /// Build a TraySummary by fetching only the configured providers IN PARALLEL.
 /// Each provider runs in its own thread, so total time = max(provider_times).
 fn build_tray_summary() -> TraySummary {
@@ -960,7 +985,7 @@ fn build_tray_summary() -> TraySummary {
         .then(|| thread::spawn(gemini::fetch_gemini_analytics));
     let kimi_h = enabled
         .contains(&"kimi")
-        .then(|| thread::spawn(kimi::fetch_kimi_analytics));
+        .then(|| thread::spawn(fetch_kimi_tray_analytics));
     let deepseek_h = enabled
         .contains(&"deepseek")
         .then(|| thread::spawn(fetch_deepseek_tray_analytics));
