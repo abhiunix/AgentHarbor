@@ -71,6 +71,12 @@ const ALL_PROVIDER_TABS: ProviderTabConfig[] = [
     accent: "#4d6bfe",
     route: "/adapters/deepseek/analytics-v2",
   },
+  {
+    id: "opencode",
+    name: getAdapterName("opencode"),
+    accent: "#f5a623",
+    route: "/adapters/opencode/analytics",
+  },
 ];
 
 const TAB_STORAGE_KEY = "agentharbor-tray-active-tab";
@@ -344,6 +350,13 @@ export function TrayPopover() {
 
   // ── Read cached data (instant, sub-ms) ──
 
+  // Auto-switch to the first connected provider only on the very first load —
+  // after that, an explicitly selected (even disconnected) tab must stick, so
+  // it renders DisconnectedCard instead of snapping back to claude-code.
+  const initialAutoSwitchDone = useRef(false);
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
   const loadCachedSummary = useCallback(async () => {
     try {
       const data = await invoke<TraySummary>("get_tray_summary");
@@ -352,24 +365,26 @@ export function TrayPopover() {
       setError(null);
       setInitialLoad(false);
 
-      // Default to first connected provider if current tab is disconnected
-      const currentProvider = data.providers.find(
-        (p) => p.provider_id === activeTab
-      );
-      if (!currentProvider?.connected) {
-        const firstConnected = data.providers.find((p) => p.connected);
-        if (firstConnected) {
-          setActiveTab(firstConnected.provider_id);
-          try {
-            localStorage.setItem(TAB_STORAGE_KEY, firstConnected.provider_id);
-          } catch { /* ignore */ }
+      if (!initialAutoSwitchDone.current) {
+        initialAutoSwitchDone.current = true;
+        const currentProvider = data.providers.find(
+          (p) => p.provider_id === activeTabRef.current
+        );
+        if (!currentProvider?.connected) {
+          const firstConnected = data.providers.find((p) => p.connected);
+          if (firstConnected) {
+            setActiveTab(firstConnected.provider_id);
+            try {
+              localStorage.setItem(TAB_STORAGE_KEY, firstConnected.provider_id);
+            } catch { /* ignore */ }
+          }
         }
       }
     } catch (e) {
       setError(String(e));
       setInitialLoad(false);
     }
-  }, [activeTab]);
+  }, []);
 
   // ── Fire-and-forget background refresh ──
 

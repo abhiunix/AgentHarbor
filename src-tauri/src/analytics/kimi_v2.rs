@@ -458,14 +458,14 @@ fn resolve_auth_mode(
     ("subscription".to_string(), None)
 }
 
-fn detect_kimi_auth_mode() -> (String, Option<(String, String)>) {
+pub(crate) fn detect_kimi_auth_mode() -> (String, Option<(String, String)>) {
     let (default_model, models, providers) = read_full_config();
     resolve_auth_mode(default_model.as_deref(), &models, &providers)
 }
 
 /// `GET {base_url}/users/me/balance` with the given key — never logs or
 /// returns the key; any failure (network, parse, missing key) yields `None`.
-fn fetch_moonshot_balance(api_key: &str, base_url: &str) -> Option<KimiMoonshotBalance> {
+pub(crate) fn fetch_moonshot_balance(api_key: &str, base_url: &str) -> Option<KimiMoonshotBalance> {
     let url = format!("{}/users/me/balance", base_url.trim_end_matches('/'));
     let body = crate::analytics::http::authed_get::<serde_json::Value>(&url, api_key, None).ok()?;
     let data = body.get("data")?;
@@ -1159,6 +1159,24 @@ fn read_prompt_history() -> Vec<KimiPromptEntry> {
     // Newest first (files are append-order, oldest first).
     out.reverse();
     out
+}
+
+/// Cheap sync accessor for the tray: serves the cached "all" overview when
+/// fresh, otherwise rebuilds from local files. Never makes usage API calls.
+pub fn overview_for_tray() -> KimiV2Overview {
+    const RANGE: &str = "all";
+    if let Ok(cache) = CACHE.lock() {
+        if let Some(entry) = cache.overview.get(RANGE) {
+            if entry.is_valid(cache.ttl_seconds) {
+                return entry.data.clone();
+            }
+        }
+    }
+    let built = build_overview(RANGE);
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.overview.insert(RANGE.to_string(), CacheEntry::new(built.clone()));
+    }
+    built
 }
 
 // ── Tauri Commands ───────────────────────────────────────────────────────────

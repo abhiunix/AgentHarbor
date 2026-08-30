@@ -4,8 +4,6 @@ export type Visibility = "public" | "private" | "discovered";
 
 export type CapabilityType = "mcp" | "rule" | "skill" | "hook" | "plugin" | "custom";
 
-export type AgentModel = "haiku" | "sonnet" | "opus";
-
 export type AgentColor = "red" | "blue" | "green" | "yellow" | "purple" | "orange" | "pink" | "cyan";
 
 export type MemoryScope = "project" | "user" | "none";
@@ -149,13 +147,14 @@ export interface AgentDefinition {
   author: string;
   visibility: Visibility;
   tags: string[];
-  model: AgentModel;
+  model?: string | null;
   color: AgentColor;
   memory: MemoryScope;
   tools: ToolAccess[];
   required_capabilities: CompositeId[];
   prompt: string;
   examples: AgentExample[];
+  artifact?: string | null;
 }
 
 export interface Preset {
@@ -174,7 +173,6 @@ export interface ImportableAgent {
   source_tool: string;
   source_path: string;
   status: ImportStatus;
-  model_defaulted: boolean;
 }
 
 export interface AgentImportResult {
@@ -184,7 +182,7 @@ export interface AgentImportResult {
   agents: AgentDefinition[];
 }
 
-export type AdapterType = "claude-code" | "cursor" | "windsurf";
+export type AdapterType = "claude-code" | "cursor" | "windsurf" | "opencode";
 
 export interface Project {
   id: string;
@@ -235,13 +233,26 @@ export function getCapabilityTypeLabel(type: CapabilityType): string {
   return labels[type];
 }
 
-export function getModelLabel(model: AgentModel): string {
-  const labels: Record<AgentModel, string> = {
-    haiku: "Haiku",
-    sonnet: "Sonnet",
-    opus: "Opus",
+const KNOWN_MODEL_LABELS: Record<string, string> = {
+  haiku: "Haiku",
+  sonnet: "Sonnet",
+  opus: "Opus",
+};
+
+export function getModelLabel(model?: string | null): string | null {
+  if (!model || !model.trim()) return null;
+  const trimmed = model.trim();
+  return KNOWN_MODEL_LABELS[trimmed.toLowerCase()] ?? trimmed;
+}
+
+export function getModelBadgeClass(model?: string | null): string {
+  const known = model?.trim().toLowerCase();
+  const classes: Record<string, string> = {
+    haiku: "bg-accent-cyan/20 text-accent-cyan",
+    sonnet: "bg-accent-purple/20 text-accent-purple",
+    opus: "bg-accent-orange/20 text-accent-orange",
   };
-  return labels[model];
+  return (known && classes[known]) || "bg-text-muted/20 text-text-muted";
 }
 
 export function getColorHex(color: AgentColor): string {

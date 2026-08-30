@@ -138,8 +138,8 @@ impl Default for ClaudeCodeSettings {
 }
 
 /// Provider ids that can be surfaced in the tray popover, in canonical display order.
-pub const ALL_TRAY_PROVIDER_IDS: [&str; 6] =
-    ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek"];
+pub const ALL_TRAY_PROVIDER_IDS: [&str; 7] =
+    ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek", "opencode"];
 
 fn default_tray_providers() -> Vec<String> {
     ALL_TRAY_PROVIDER_IDS.iter().map(|s| s.to_string()).collect()
@@ -348,9 +348,10 @@ mod tests {
     #[test]
     fn test_default_tray_settings() {
         let settings = AppSettings::default();
-        assert_eq!(settings.tray.providers.len(), 6);
+        assert_eq!(settings.tray.providers.len(), 7);
         assert!(settings.tray.providers.contains(&"kimi".to_string()));
         assert!(settings.tray.providers.contains(&"deepseek".to_string()));
+        assert!(settings.tray.providers.contains(&"opencode".to_string()));
     }
 
     #[test]
@@ -362,7 +363,7 @@ mod tests {
             "secrets": {"count":0}
         }"#;
         let settings: AppSettings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.tray.providers.len(), 6);
+        assert_eq!(settings.tray.providers.len(), 7);
     }
 
     #[test]

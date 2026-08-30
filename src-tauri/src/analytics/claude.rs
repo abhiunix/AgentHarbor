@@ -40,14 +40,20 @@ lazy_static::lazy_static! {
     static ref LAST_ACCOUNT_CACHE: Mutex<Option<AccountSnapshot>> = Mutex::new(None);
 }
 
-const CLAUDE_CACHE_TTL_SECS: u64 = 60;
+// 300s (was 60s) so it no longer lines up with TRAY_REFRESH_INTERVAL_SECS (60s,
+// analytics/commands.rs) — that alignment guaranteed a cache miss (and a full
+// ~/.claude/projects rescan via enrich_with_today_stats) on every single tray
+// cycle. The tray now serves slightly-stale Claude data between misses; other
+// providers still refresh every 60s.
+const CLAUDE_CACHE_TTL_SECS: u64 = 300;
 const CLAUDE_CACHE_TTL_SHORT_SECS: u64 = 60; // when approaching / reached limits
 /// Never serve Claude API-backed analytics older than this — limits how long
 /// we show a "healthy" snapshot after OAuth tokens are rotated or expired.
-const CLAUDE_CACHE_MAX_STALE_SECS: u64 = 90;
+const CLAUDE_CACHE_MAX_STALE_SECS: u64 = 300;
 const ACCOUNT_FALLBACK_TTL_SECS: u64 = 3600; // hold last-good account up to 1h
 
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 
 // ── Credential types ────────────────────────────────────────────────────────
@@ -266,6 +272,66 @@ fn read_keychain_credentials() -> Result<(String, Option<String>), String> {
     Err("No Claude Code credentials found in keychain".into())
 }
 
+lazy_static::lazy_static! {
+    /// Last time the silent keychain fallback ran, so a denied or missing
+    /// entry never causes repeated attempts from the 60s tray refresh loop.
+    static ref KEYCHAIN_FALLBACK_LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+}
+
+const KEYCHAIN_FALLBACK_COOLDOWN_SECS: u64 = 300;
+
+fn keychain_fallback_due() -> bool {
+    let mut guard = match KEYCHAIN_FALLBACK_LAST.lock() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    let due = guard
+        .map(|t| t.elapsed().as_secs() >= KEYCHAIN_FALLBACK_COOLDOWN_SECS)
+        .unwrap_or(true);
+    if due {
+        *guard = Some(std::time::Instant::now());
+    }
+    due
+}
+
+/// Last-resort silent fallback: read Claude Code's own keychain entry via
+/// `/usr/bin/security` (the same call `csw` and the CLI ecosystem use).
+/// Going through the `security` binary inherits any keychain access grant the
+/// user has already given it, so in practice this succeeds without a prompt on
+/// machines where the terminal was allowed once; a denial or missing entry
+/// returns None and the normal reconnect banner takes over. Claude Code keeps
+/// this token fresh itself, so it can outlive AgentHarbor's stored copy.
+/// Returns None when the keychain token is identical to `current` (it would
+/// just 401 again).
+#[cfg(target_os = "macos")]
+fn keychain_live_token_fallback(current: &str) -> Option<String> {
+    if !keychain_fallback_due() {
+        return None;
+    }
+    let out = std::process::Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let secret = String::from_utf8(out.stdout).ok()?;
+    let (token, refresh) = extract_tokens_from_keychain_json(secret.trim())?;
+    if token == current {
+        return None;
+    }
+    let _ = token_store::store_provider_token("claude-code", "access-token", &token);
+    if let Some(ref rt) = refresh {
+        let _ = token_store::store_provider_token("claude-code", "refresh-token", rt);
+    }
+    Some(token)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_live_token_fallback(_current: &str) -> Option<String> {
+    None
+}
+
 /// Extract access token + optional refresh token from keychain JSON.
 /// Returns (access_token, Option<refresh_token>).
 fn extract_tokens_from_keychain_json(secret: &str) -> Option<(String, Option<String>)> {
@@ -449,6 +515,12 @@ fn resolve_access_token_silent() -> Result<(String, String), String> {
     // 3. Try refreshing with stored refresh token
     if let Some(token) = try_refresh_access_token() {
         return Ok((token, "refreshed".into()));
+    }
+
+    // 4. Last resort before surfacing "reconnect": Claude Code's own live
+    //    keychain entry (macOS only, cooldown-guarded).
+    if let Some(token) = keychain_live_token_fallback("") {
+        return Ok((token, "keychain-live".into()));
     }
 
     Err("No Claude credentials found silently. Use Sign In or Import from Keychain.".into())
@@ -1277,7 +1349,12 @@ fn fetch_claude_analytics_uncached() -> ProviderAnalytics {
     let usage_empty = usage.is_none() || usage.as_ref().and_then(|u| u.five_hour.as_ref()).is_none();
     let profile_empty = profile.is_none() || profile.as_ref().and_then(|p| p.account.as_ref()).is_none();
     if usage_empty || profile_empty {
-        if let Some(new_token) = try_refresh_access_token() {
+        // Refresh with the stored refresh token; when that fails (rotated or
+        // revoked), fall back to Claude Code's own live keychain token before
+        // letting the 401 surface as a reconnect banner.
+        let recovered = try_refresh_access_token()
+            .or_else(|| keychain_live_token_fallback(&active_token));
+        if let Some(new_token) = recovered {
             active_token = new_token;
             let fresh_headers = http::headers(&[("anthropic-beta", "oauth-2025-04-20")]);
             // Clear any previous 429/401 captures — a successful retry on
@@ -1720,15 +1797,17 @@ fn enrich_with_today_stats(extra: &mut HashMap<String, serde_json::Value>) {
             .map(|t| t >= week_sys)
             .unwrap_or(false);
 
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
+        let file = match fs::File::open(path) {
+            Ok(f) => f,
             Err(_) => continue,
         };
+        let reader = std::io::BufReader::new(file);
 
         let file_id = path.to_string_lossy().to_string();
         // Per-file dedup: skip duplicate streaming chunks by (message.id, requestId)
         let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for line in content.lines() {
+        for line in io::BufRead::lines(reader).map_while(Result::ok) {
+            let line = line.as_str();
             let ts_ref = {
                 let needle1 = "\"timestamp\":\"";
                 let needle2 = "\"timestamp\": \"";

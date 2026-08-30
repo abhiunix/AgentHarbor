@@ -10,6 +10,7 @@ pub mod claude_desktop;
 pub mod cost_engine;
 pub mod codex;
 pub mod gemini;
+pub mod opencode;
 
 pub mod cursor;
 pub mod cursor_v2;

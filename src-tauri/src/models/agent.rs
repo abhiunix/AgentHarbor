@@ -3,12 +3,10 @@ use serde::{Deserialize, Serialize};
 use super::capability::Visibility;
 use super::composite_id::CompositeId;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentModel {
-    Haiku,
-    Sonnet,
-    Opus,
+/// Normalize a free-text model field: empty/whitespace-only becomes `None` so the deployed
+/// tool falls back to its own default instead of writing an empty `model:` line.
+pub fn normalize_model(model: Option<String>) -> Option<String> {
+    model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty())
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -58,7 +56,8 @@ pub struct AgentDefinition {
     pub author: String,
     pub visibility: Visibility,
     pub tags: Vec<String>,
-    pub model: AgentModel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub color: AgentColor,
     pub memory: MemoryScope,
     pub tools: Vec<ToolAccess>,
@@ -66,6 +65,10 @@ pub struct AgentDefinition {
     pub prompt: String,
     #[serde(default)]
     pub examples: Vec<AgentExample>,
+    /// Derived deploy filename stem (`artifact_name`), populated for the
+    /// frontend by `get_all_agents`; never persisted to disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<String>,
 }
 
 #[cfg(test)]
@@ -73,21 +76,14 @@ mod tests {
     use super::*;
     
     #[test]
-    fn test_agent_model_serialization() {
-        assert_eq!(
-            serde_json::to_string(&AgentModel::Haiku).unwrap(),
-            "\"haiku\""
-        );
-        assert_eq!(
-            serde_json::to_string(&AgentModel::Sonnet).unwrap(),
-            "\"sonnet\""
-        );
-        assert_eq!(
-            serde_json::to_string(&AgentModel::Opus).unwrap(),
-            "\"opus\""
-        );
+    fn test_normalize_model() {
+        assert_eq!(normalize_model(Some("sonnet".to_string())), Some("sonnet".to_string()));
+        assert_eq!(normalize_model(Some("  opus  ".to_string())), Some("opus".to_string()));
+        assert_eq!(normalize_model(Some("".to_string())), None);
+        assert_eq!(normalize_model(Some("   ".to_string())), None);
+        assert_eq!(normalize_model(None), None);
     }
-    
+
     #[test]
     fn test_agent_color_serialization() {
         assert_eq!(
@@ -206,7 +202,7 @@ mod tests {
         
         assert_eq!(agent.id.to_string(), "community/api-test-runner");
         assert_eq!(agent.name, "API Test Runner");
-        assert_eq!(agent.model, AgentModel::Haiku);
+        assert_eq!(agent.model, Some("haiku".to_string()));
         assert_eq!(agent.color, AgentColor::Green);
         assert_eq!(agent.memory, MemoryScope::Project);
         assert_eq!(agent.tools.len(), 1);
@@ -223,6 +219,7 @@ mod tests {
     #[test]
     fn test_agent_definition_roundtrip() {
         let agent = AgentDefinition {
+            artifact: None,
             id: "community/test-agent".parse().unwrap(),
             name: "Test Agent".to_string(),
             description: "A test agent".to_string(),
@@ -230,7 +227,7 @@ mod tests {
             author: "community".to_string(),
             visibility: Visibility::Public,
             tags: vec!["test".to_string()],
-            model: AgentModel::Sonnet,
+            model: Some("sonnet".to_string()),
             color: AgentColor::Blue,
             memory: MemoryScope::User,
             tools: vec![ToolAccess::ReadOnly, ToolAccess::Mcp],
@@ -241,10 +238,10 @@ mod tests {
                 agent: "Test response".to_string(),
             }],
         };
-        
+
         let serialized = serde_json::to_string(&agent).unwrap();
         let deserialized: AgentDefinition = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(agent.id.to_string(), deserialized.id.to_string());
         assert_eq!(agent.name, deserialized.name);
         assert_eq!(agent.model, deserialized.model);
@@ -252,7 +249,30 @@ mod tests {
         assert_eq!(agent.memory, deserialized.memory);
         assert_eq!(agent.tools, deserialized.tools);
     }
-    
+
+    #[test]
+    fn test_agent_definition_model_absent_deserializes_none() {
+        let json = r#"{
+            "id": "community/no-model-agent",
+            "name": "No Model Agent",
+            "description": "Has no model field",
+            "version": "1.0.0",
+            "author": "community",
+            "visibility": "public",
+            "tags": [],
+            "color": "blue",
+            "memory": "none",
+            "tools": ["all"],
+            "required_capabilities": [],
+            "prompt": "Prompt.",
+            "examples": []
+        }"#;
+
+        let agent: AgentDefinition = serde_json::from_str(json).unwrap();
+        assert_eq!(agent.model, None);
+        assert!(!serde_json::to_string(&agent).unwrap().contains("\"model\""));
+    }
+
     #[test]
     fn test_agent_example_serialization() {
         let example = AgentExample {

@@ -310,6 +310,27 @@ export function GeminiAnalyticsPage() {
   const toolSuccess = (extra.gemini_tool_success as number) ?? 0;
   const modelBreakdown = (extra.gemini_model_breakdown as Record<string, number>) ?? null;
 
+  // Auto-recorded chats-JSONL session stats (Gemini CLI 0.46.0+)
+  const chatsSessions = (extra.gemini_chats_sessions as number) ?? 0;
+  const startTodaySessions = (extra.start_today_sessions as number) ?? 0;
+  const startTodayTokens = (extra.start_today_tokens as number) ?? 0;
+  const thisWeekSessions = (extra.this_week_sessions as number) ?? 0;
+  const thisWeekTokens = (extra.this_week_tokens as number) ?? 0;
+  const chatsTokenTotals = (extra.gemini_token_totals as {
+    input: number; output: number; cached: number; thoughts: number; tool: number;
+  } | undefined) ?? null;
+  const chatsModelsUsed = (extra.gemini_models_used as Record<string, number>) ?? null;
+  const chatsTotalTokens = chatsTokenTotals
+    ? chatsTokenTotals.input + chatsTokenTotals.output + chatsTokenTotals.cached + chatsTokenTotals.thoughts
+    : 0;
+
+  // Plan sunset (individual-tier OAuth no longer supported by loadCodeAssist)
+  const planSunset = (extra.plan_sunset as boolean) ?? false;
+  const planSunsetMessage = (extra.plan_sunset_message as string) ?? null;
+
+  // Quota API unavailable (403 SUBSCRIPTION_REQUIRED — free/individual tier)
+  const quotaUnavailableReason = (extra.quota_unavailable_reason as string) ?? null;
+
   // Connection method display
   const connectionLabel =
     status.connection_method === "oauth-auto"
@@ -395,7 +416,7 @@ export function GeminiAnalyticsPage() {
         </div>
 
         {/* Rate Limits */}
-        {rate_limits.length > 0 && (
+        {rate_limits.length > 0 ? (
           <Section title="Rate Limits">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {rate_limits.map((rl) => {
@@ -416,7 +437,13 @@ export function GeminiAnalyticsPage() {
               })}
             </div>
           </Section>
-        )}
+        ) : quotaUnavailableReason === "subscription_required" ? (
+          <Section title="Rate Limits">
+            <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4 text-xs text-text-muted">
+              Quota API requires Gemini Code Assist Standard/Enterprise — not available on the free/individual tier.
+            </div>
+          </Section>
+        ) : null}
 
         {/* Account & Plan */}
         <Section title="Account & Plan">
@@ -442,6 +469,14 @@ export function GeminiAnalyticsPage() {
               sub={connectionLabel}
             />
           </div>
+          {planSunset && (
+            <div className="mt-3 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3">
+              <p className="text-xs text-amber-300">
+                {planSunsetMessage ??
+                  "The individual Gemini Code Assist tier is being sunset for CLI clients. Migrate to Antigravity or a paid Code Assist tier to keep full access."}
+              </p>
+            </div>
+          )}
           {(projectId || upgradeUri) && (
             <div className="mt-3 flex items-center gap-4">
               {projectId && (
@@ -515,28 +550,77 @@ export function GeminiAnalyticsPage() {
           </Section>
         )}
 
-        {/* Tips for getting more stats */}
-        <Section title="Get Detailed Stats">
-          <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
-            <p className="text-xs text-text-secondary mb-3">
-              Gemini CLI computes token and performance stats in-memory during each session.
-              To capture this data for analytics, enable telemetry output:
-            </p>
-            <div className="bg-[#13141a] rounded-md p-3 mb-3 font-mono text-[11px] text-green-400">
-              gemini --telemetry --telemetry-outfile ~/.gemini/telemetry.jsonl
+        {/* Token Usage — from auto-recorded chats JSONL sessions (Gemini CLI 0.46.0+) */}
+        {chatsSessions > 0 && (
+          <Section title="Token Usage (from sessions)">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard label="Sessions" value={chatsSessions.toLocaleString()} sub="All time" />
+              <StatCard
+                label="Today"
+                value={startTodaySessions.toLocaleString()}
+                sub={`${formatNum(startTodayTokens)} tokens`}
+              />
+              <StatCard
+                label="This Week"
+                value={thisWeekSessions.toLocaleString()}
+                sub={`${formatNum(thisWeekTokens)} tokens`}
+              />
+              <StatCard label="Total Tokens" value={formatNum(chatsTotalTokens)} />
             </div>
-            <p className="text-[10px] text-text-muted mb-2">
-              This writes OpenTelemetry events (API requests, token counts, latency, tool calls) to a local file.
-              AgentHarbor will automatically parse it and show detailed model stats above.
+            {chatsTokenTotals && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3">
+                <StatCard label="Input (Prompt)" value={formatNum(chatsTokenTotals.input)} />
+                <StatCard label="Output" value={formatNum(chatsTokenTotals.output)} />
+                <StatCard
+                  label="Cached"
+                  value={formatNum(chatsTokenTotals.cached)}
+                  sub={chatsTokenTotals.input > 0 ? `${((chatsTokenTotals.cached / chatsTokenTotals.input) * 100).toFixed(1)}% cache hit` : undefined}
+                />
+                <StatCard label="Thoughts" value={formatNum(chatsTokenTotals.thoughts)} />
+              </div>
+            )}
+            {chatsModelsUsed && Object.keys(chatsModelsUsed).length > 0 && (
+              <div className="mt-3 bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
+                <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2">Model Usage</p>
+                {Object.entries(chatsModelsUsed).sort((a, b) => b[1] - a[1]).map(([model, count]) => (
+                  <div key={model} className="flex items-center justify-between text-xs py-1">
+                    <span className="text-text-primary font-mono">{model}</span>
+                    <span className="text-text-muted">{count} messages</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[10px] text-text-muted mt-2">
+              Sourced from ~/.gemini/tmp/*/chats — Gemini CLI retains these session logs for the last 30 days.
             </p>
-            <p className="text-[10px] text-text-muted">
-              <span className="text-text-secondary font-medium">Tip:</span> Add an alias to your shell config for persistent tracking:
-            </p>
-            <div className="bg-[#13141a] rounded-md p-2 mt-1 font-mono text-[10px] text-text-muted">
-              alias gemini='gemini --telemetry --telemetry-outfile ~/.gemini/telemetry.jsonl'
+          </Section>
+        )}
+
+        {/* Tips for getting more stats — only when neither chats data nor telemetry is available */}
+        {!hasTelemetry && chatsSessions === 0 && (
+          <Section title="Get Detailed Stats">
+            <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
+              <p className="text-xs text-text-secondary mb-3">
+                Newer Gemini CLI versions (0.46.0+) auto-record session token and model stats — nothing to
+                configure, they just haven&apos;t shown up here yet. If you&apos;re on an older CLI version,
+                enable telemetry output manually instead:
+              </p>
+              <div className="bg-[#13141a] rounded-md p-3 mb-3 font-mono text-[11px] text-green-400">
+                gemini --telemetry --telemetry-outfile ~/.gemini/telemetry.jsonl
+              </div>
+              <p className="text-[10px] text-text-muted mb-2">
+                This writes OpenTelemetry events (API requests, token counts, latency, tool calls) to a local file.
+                AgentHarbor will automatically parse it and show detailed model stats above.
+              </p>
+              <p className="text-[10px] text-text-muted">
+                <span className="text-text-secondary font-medium">Tip:</span> Add an alias to your shell config for persistent tracking:
+              </p>
+              <div className="bg-[#13141a] rounded-md p-2 mt-1 font-mono text-[10px] text-text-muted">
+                alias gemini='gemini --telemetry --telemetry-outfile ~/.gemini/telemetry.jsonl'
+              </div>
             </div>
-          </div>
-        </Section>
+          </Section>
+        )}
 
         {/* Credits — if available */}
         {analytics.credit_usage && (
@@ -573,6 +657,11 @@ export function GeminiAnalyticsPage() {
             "gemini_avg_latency_ms", "gemini_input_tokens", "gemini_output_tokens",
             "gemini_cached_tokens", "gemini_thought_tokens", "gemini_tool_calls",
             "gemini_tool_success", "gemini_model_breakdown",
+            "gemini_chats_sessions", "gemini_token_totals", "gemini_models_used",
+            "start_today_sessions", "start_today_tokens", "start_today_messages",
+            "this_week_sessions", "this_week_tokens", "this_week_messages",
+            "plan_sunset", "plan_sunset_message", "codeassist_error",
+            "quota_unavailable_reason", "quota_absolute",
           ]);
           const remainingExtra = Object.entries(extra).filter(([key]) => !displayedKeys.has(key));
           if (remainingExtra.length === 0) return null;

@@ -109,8 +109,7 @@ fn has_thinking(json: &serde_json::Value) -> bool {
     false
 }
 
-fn extract_record(line: &str, project_path: Option<String>) -> Option<ProjectUsageRecord> {
-    let json: serde_json::Value = serde_json::from_str(line).ok()?;
+fn extract_record(json: &serde_json::Value, project_path: Option<&str>) -> Option<ProjectUsageRecord> {
     let uuid = json.get("uuid").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let timestamp = json.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if uuid.is_empty() || timestamp.is_empty() {
@@ -144,8 +143,8 @@ fn extract_record(line: &str, project_path: Option<String>) -> Option<ProjectUsa
     let session_id = json.get("sessionId").and_then(|v| v.as_str()).map(String::from);
     let git_branch = json.get("gitBranch").and_then(|v| v.as_str()).map(String::from);
     let claude_version = json.get("version").and_then(|v| v.as_str()).map(String::from);
-    let tools = extract_tools(&json);
-    let thinking = has_thinking(&json);
+    let tools = extract_tools(json);
+    let thinking = has_thinking(json);
 
     // For records with usage data, require non-zero tokens
     if let Some(ref u) = usage {
@@ -168,7 +167,7 @@ fn extract_record(line: &str, project_path: Option<String>) -> Option<ProjectUsa
         timestamp,
         model,
         usage,
-        project_path,
+        project_path: project_path.map(String::from),
         session_id,
         git_branch,
         tools_used: tools,
@@ -413,7 +412,7 @@ fn read_jsonl_file(
     // for a single assistant message (streaming), each with cumulative token counts.
     // We keep only the first occurrence per (message.id, requestId) pair.
     // Matches CodexBar's deduplication logic.
-    let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_keys: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     let mut seeded = project_path.is_some();
     for line in reader.lines() {
         let line = line.map_err(|e| e.to_string())?;
@@ -421,33 +420,34 @@ fn read_jsonl_file(
         if line.is_empty() {
             continue;
         }
-        // Check for dedup key before full extraction
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-            // Every line is parsed anyway — seed the path memo at no extra parse cost
-            // for dirs whose bounded probe came up empty.
-            if !seeded {
-                if let (Some(dir), Some(cwd)) =
-                    (path.parent(), json.get("cwd").and_then(|v| v.as_str()))
-                {
-                    seed_project_dir_path(dir, cwd);
-                    seeded = true;
-                }
+        // Parse once — reused for the dedup check, the cwd seed probe, and record extraction.
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        // Every line is parsed anyway — seed the path memo at no extra parse cost
+        // for dirs whose bounded probe came up empty.
+        if !seeded {
+            if let (Some(dir), Some(cwd)) =
+                (path.parent(), json.get("cwd").and_then(|v| v.as_str()))
+            {
+                seed_project_dir_path(dir, cwd);
+                seeded = true;
             }
-            let message_id = json
-                .get("message")
-                .and_then(|m| m.get("id"))
-                .and_then(|v| v.as_str());
-            let request_id = json.get("requestId").and_then(|v| v.as_str());
-            if let (Some(mid), Some(rid)) = (message_id, request_id) {
-                let key = format!("{}:{}", mid, rid);
-                if seen_keys.contains(&key) {
-                    continue; // Skip duplicate streaming chunk
-                }
-                seen_keys.insert(key);
-            }
-            // If either ID is missing (older logs), treat each line as distinct
         }
-        if let Some(record) = extract_record(line, project_path.clone()) {
+        let message_id = json
+            .get("message")
+            .and_then(|m| m.get("id"))
+            .and_then(|v| v.as_str());
+        let request_id = json.get("requestId").and_then(|v| v.as_str());
+        if let (Some(mid), Some(rid)) = (message_id, request_id) {
+            let key = (mid.to_string(), rid.to_string());
+            if seen_keys.contains(&key) {
+                continue; // Skip duplicate streaming chunk
+            }
+            seen_keys.insert(key);
+        }
+        // If either ID is missing (older logs), treat each line as distinct
+        if let Some(record) = extract_record(&json, project_path.as_deref()) {
             records.push(record);
         }
     }
@@ -523,6 +523,88 @@ mod tests {
             resolve_project_dir_path(&dir).as_deref(),
             Some(real.to_string_lossy().as_ref())
         );
+    }
+
+    #[test]
+    fn extract_record_parses_top_level_usage_and_project_path() {
+        let json = serde_json::json!({
+            "uuid": "u1",
+            "timestamp": "2026-08-01T00:00:00Z",
+            "type": "assistant",
+            "model": "claude-test",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+            },
+        });
+        let record = extract_record(&json, Some("/tmp/project")).expect("should parse");
+        assert_eq!(record.uuid, "u1");
+        assert_eq!(record.model.as_deref(), Some("claude-test"));
+        assert_eq!(record.project_path.as_deref(), Some("/tmp/project"));
+        assert_eq!(record.usage.as_ref().unwrap().input_tokens, Some(10));
+        assert_eq!(record.usage.as_ref().unwrap().output_tokens, Some(5));
+    }
+
+    #[test]
+    fn extract_record_skips_zero_usage_non_user_messages() {
+        let json = serde_json::json!({
+            "uuid": "u2",
+            "timestamp": "2026-08-01T00:00:00Z",
+            "type": "assistant",
+            "usage": { "input_tokens": 0, "output_tokens": 0 },
+        });
+        assert!(extract_record(&json, None).is_none());
+    }
+
+    #[test]
+    fn read_jsonl_file_dedups_streaming_chunks_by_message_and_request_id() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("session.jsonl");
+        let line = |input_tokens: u64| {
+            serde_json::json!({
+                "uuid": format!("u-{input_tokens}"),
+                "timestamp": "2026-08-01T00:00:00Z",
+                "type": "assistant",
+                "message": { "id": "msg_1", "model": "claude-test" },
+                "requestId": "req_1",
+                "usage": { "input_tokens": input_tokens, "output_tokens": 1 },
+            })
+            .to_string()
+        };
+        // Two streaming chunks sharing (message.id, requestId) — cumulative
+        // counts in the second chunk, but only the first should survive.
+        let contents = format!("{}\n{}\n", line(5), line(50));
+        fs::write(&path, contents).unwrap();
+
+        let mut records = Vec::new();
+        read_jsonl_file(&path, None, &mut records).unwrap();
+
+        assert_eq!(records.len(), 1, "duplicate streaming chunk must be deduped");
+        assert_eq!(records[0].usage.as_ref().unwrap().input_tokens, Some(5));
+    }
+
+    #[test]
+    fn read_jsonl_file_keeps_distinct_message_ids() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("session.jsonl");
+        let line = |uuid: &str, mid: &str| {
+            serde_json::json!({
+                "uuid": uuid,
+                "timestamp": "2026-08-01T00:00:00Z",
+                "type": "assistant",
+                "message": { "id": mid, "model": "claude-test" },
+                "requestId": "req_1",
+                "usage": { "input_tokens": 5, "output_tokens": 1 },
+            })
+            .to_string()
+        };
+        let contents = format!("{}\n{}\n", line("u1", "msg_1"), line("u2", "msg_2"));
+        fs::write(&path, contents).unwrap();
+
+        let mut records = Vec::new();
+        read_jsonl_file(&path, None, &mut records).unwrap();
+
+        assert_eq!(records.len(), 2, "distinct message ids must not be deduped");
     }
 
     #[test]

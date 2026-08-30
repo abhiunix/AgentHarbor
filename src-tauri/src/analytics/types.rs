@@ -341,5 +341,13 @@ pub fn all_provider_info() -> Vec<ProviderInfo> {
             has_local_data: true,
             has_api: false,
         },
+        ProviderInfo {
+            id: "opencode".into(),
+            name: "OpenCode".into(),
+            auth_type: "local-file".into(),
+            description: "Session stats, token usage, real cost (from local SQLite)".into(),
+            has_local_data: true,
+            has_api: false,
+        },
     ]
 }

@@ -48,7 +48,10 @@ fn get_custom_registry_path() -> PathBuf {
 }
 
 fn get_custom_agents_path() -> PathBuf {
-    crate::utils::paths::app_data_dir().join("agents")
+    crate::utils::paths::app_data_dir()
+        .join("registry")
+        .join("custom")
+        .join("agents")
 }
 
 fn get_presets_path() -> PathBuf {

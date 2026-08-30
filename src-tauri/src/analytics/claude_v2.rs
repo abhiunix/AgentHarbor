@@ -11,7 +11,7 @@ use crate::commands::usage;
 use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // ── V2 Types ────────────────────────────────────────────────────────────────
@@ -324,14 +324,91 @@ fn try_overlay_tray_totals(
     extra_json_u64(extra.get(&format!("{}_messages", pfx)))
 }
 
-/// Same JSONL file set as the menu bar scan: skip files not touched since local Monday (tray mtime rule).
-fn load_project_usage_for_time_range(time_range: &str) -> Vec<usage::ProjectUsageRecord> {
-    let floor = if time_range == "today" {
-        Some(claude::projects_jsonl_tray_mtime_floor())
-    } else {
-        None
-    };
-    usage::read_project_usage_files_with_mtime_floor(floor).unwrap_or_default()
+// ── Shared full-corpus cache ─────────────────────────────────────────────────
+// The overview/timeseries/message-log builders all used to independently
+// re-scan the entire ~/.claude/projects corpus (each range filter is applied
+// *after* loading — see `filter_records_by_time`). On an 825MB / 165k-line
+// corpus that was 4+ full scans per page load. Load the full corpus
+// (`read_project_usage_files_with_mtime_floor(None)`) once behind a
+// short-TTL, single-flight cache and let every builder share it; range
+// filtering still happens post-load exactly as before.
+
+struct CorpusCacheEntry<T> {
+    records: Arc<T>,
+    fetched_at: Instant,
+    cred_fp: u64,
+}
+
+const CORPUS_CACHE_TTL_SECS: u64 = 120;
+/// Window used only to collapse concurrent callers (e.g. the 3 commands one
+/// `loadData()` call fires in `Promise.all`, all with the same `force_refresh`)
+/// into a single scan even when that call explicitly requested a fresh read.
+const CORPUS_FLIGHT_COLLAPSE_SECS: u64 = 3;
+
+/// Generic single-flight, TTL'd cache for a full corpus load. Kept generic
+/// over `T` (rather than hard-coded to `Vec<ProjectUsageRecord>` behind a
+/// global static) so tests can spin up an isolated instance and drive it with
+/// a fake loader instead of touching the real `~/.claude/projects` tree.
+struct CorpusCache<T> {
+    state: Mutex<Option<CorpusCacheEntry<T>>>,
+    /// Single-flight guard so concurrent misses trigger one load, not N.
+    flight: Mutex<()>,
+}
+
+impl<T> CorpusCache<T> {
+    fn new() -> Self {
+        Self { state: Mutex::new(None), flight: Mutex::new(()) }
+    }
+
+    fn hit(&self, cred_fp: u64, ttl_secs: u64) -> Option<Arc<T>> {
+        let guard = self.state.lock().ok()?;
+        let entry = guard.as_ref()?;
+        if entry.cred_fp == cred_fp && entry.fetched_at.elapsed() < Duration::from_secs(ttl_secs) {
+            Some(entry.records.clone())
+        } else {
+            None
+        }
+    }
+
+    /// `force_refresh` bypasses the normal TTL but still collapses concurrent
+    /// force-refresh callers (same batch) into one load via the flight window.
+    fn get(&self, force_refresh: bool, cred_fp: u64, loader: impl FnOnce() -> T) -> Arc<T> {
+        if !force_refresh {
+            if let Some(hit) = self.hit(cred_fp, CORPUS_CACHE_TTL_SECS) {
+                return hit;
+            }
+        }
+
+        // Whoever gets here first loads; everyone else waits, then reuses
+        // what they just produced instead of loading again.
+        let _flight = self.flight.lock();
+        let recheck_ttl = if force_refresh { CORPUS_FLIGHT_COLLAPSE_SECS } else { CORPUS_CACHE_TTL_SECS };
+        if let Some(hit) = self.hit(cred_fp, recheck_ttl) {
+            return hit;
+        }
+
+        let records = Arc::new(loader());
+        if let Ok(mut guard) = self.state.lock() {
+            *guard = Some(CorpusCacheEntry {
+                records: records.clone(),
+                fetched_at: Instant::now(),
+                cred_fp,
+            });
+        }
+        records
+    }
+}
+
+lazy_static::lazy_static! {
+    static ref CORPUS_CACHE: CorpusCache<Vec<usage::ProjectUsageRecord>> = CorpusCache::new();
+}
+
+/// Full ~/.claude/projects corpus, shared across overview/timeseries/message-log.
+fn full_corpus(force_refresh: bool) -> Arc<Vec<usage::ProjectUsageRecord>> {
+    let cred_fp = claude::current_credential_fingerprint();
+    CORPUS_CACHE.get(force_refresh, cred_fp, || {
+        usage::read_project_usage_files_with_mtime_floor(None).unwrap_or_default()
+    })
 }
 
 fn short_model(model: &str) -> String {
@@ -436,31 +513,9 @@ fn derive_session_stats_from_records(
     })
 }
 
-lazy_static::lazy_static! {
-    // The "today" range loads only recently-touched JSONLs (mtime floor), which
-    // would corrupt streak/active-day math — so it derives from its own cached
-    // full-corpus scan instead.
-    static ref ACTIVITY_STATS: Mutex<Option<CacheEntry<session_stats::SessionStats>>> =
-        Mutex::new(None);
-}
-
-fn full_corpus_activity_stats(
-    cache: Option<&session_stats::SessionStats>,
-) -> Option<session_stats::SessionStats> {
-    if let Some(ref entry) = *ACTIVITY_STATS.lock().unwrap() {
-        if entry.fetched_at.elapsed() < Duration::from_secs(300) {
-            return Some(entry.data.clone());
-        }
-    }
-    let records = usage::read_project_usage_files_with_mtime_floor(None).unwrap_or_default();
-    let derived = derive_session_stats_from_records(&records, cache)?;
-    *ACTIVITY_STATS.lock().unwrap() = Some(CacheEntry::new(derived.clone()));
-    Some(derived)
-}
-
 // ── Build Overview ──────────────────────────────────────────────────────────
 
-fn build_overview(time_range: &str) -> ClaudeV2Overview {
+fn build_overview(time_range: &str, force_refresh: bool) -> ClaudeV2Overview {
     // 1. OAuth data
     let analytics = claude::fetch_claude_analytics();
     let connected = analytics.status.connected;
@@ -472,19 +527,18 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
     let plan = analytics.status.plan_name.clone();
     let org_name = analytics.status.org_name.clone();
 
-    // 2. JSONL records
-    let all_records = load_project_usage_for_time_range(time_range);
+    // 2. JSONL records — shared corpus (always the full, unfiltered scan; the
+    // mtime floor once applied only to "today" is now irrelevant since every
+    // range shares the same full-corpus load and filters post-load below).
+    let all_records = full_corpus(force_refresh);
     let records = filter_records_by_time(&all_records, time_range);
 
     // 3. Session/activity stats — derived from the JSONLs (stats-cache.json is
     // no longer updated by Claude Code; it only supplies model_usage / cost).
-    // The "today" range loads a floored subset, so it uses its own full scan.
+    // `all_records` is always the full corpus now, so every range (including
+    // "today") can derive streak/active-day stats from it directly.
     let cache_stats = session_stats::get_claude_session_stats().ok();
-    let stats = if time_range == "today" {
-        full_corpus_activity_stats(cache_stats.as_ref())
-    } else {
-        derive_session_stats_from_records(&all_records, cache_stats.as_ref())
-    }
+    let stats = derive_session_stats_from_records(&all_records, cache_stats.as_ref())
     .or(cache_stats)
     .unwrap_or_else(|| session_stats::SessionStats {
         total_sessions: 0,
@@ -856,8 +910,8 @@ fn build_overview(time_range: &str) -> ClaudeV2Overview {
     }
 }
 
-fn build_token_timeseries(time_range: &str, project_filter: Option<&str>) -> Vec<TokenTimePoint> {
-    let all_records = load_project_usage_for_time_range(time_range);
+fn build_token_timeseries(time_range: &str, project_filter: Option<&str>, force_refresh: bool) -> Vec<TokenTimePoint> {
+    let all_records = full_corpus(force_refresh);
     let time_filtered = filter_records_by_time(&all_records, time_range);
     let records: Vec<_> = if let Some(pf) = project_filter {
         time_filtered.into_iter().filter(|r| r.project_path.as_deref().map(|p| p.contains(pf)).unwrap_or(false)).collect()
@@ -901,8 +955,8 @@ fn build_token_timeseries(time_range: &str, project_filter: Option<&str>) -> Vec
     points
 }
 
-fn build_model_timeseries(time_range: &str) -> Vec<ModelTimePoint> {
-    let all_records = load_project_usage_for_time_range(time_range);
+fn build_model_timeseries(time_range: &str, force_refresh: bool) -> Vec<ModelTimePoint> {
+    let all_records = full_corpus(force_refresh);
     let records = filter_records_by_time(&all_records, time_range);
 
     let mut daily: HashMap<String, HashMap<String, u64>> = HashMap::new();
@@ -924,15 +978,17 @@ fn build_model_timeseries(time_range: &str) -> Vec<ModelTimePoint> {
 }
 
 fn build_message_log(page: u32, page_size: u32, project_filter: Option<&str>) -> MessageLogPage {
-    let all_records = usage::read_project_usage_files().unwrap_or_default();
-    let all_records: Vec<_> = if let Some(pf) = project_filter {
-        all_records.into_iter().filter(|r| r.project_path.as_deref().map(|p| p.contains(pf)).unwrap_or(false)).collect()
+    // Shared corpus cache — "Load more" (higher `page`) no longer triggers a
+    // fresh 825MB rescan, it just re-slices the same cached Vec.
+    let all_records = full_corpus(false);
+    let filtered: Vec<&usage::ProjectUsageRecord> = if let Some(pf) = project_filter {
+        all_records.iter().filter(|r| r.project_path.as_deref().map(|p| p.contains(pf)).unwrap_or(false)).collect()
     } else {
-        all_records
+        all_records.iter().collect()
     };
 
     // Only assistant messages with usage
-    let mut entries: Vec<MessageLogEntry> = all_records.iter()
+    let mut entries: Vec<MessageLogEntry> = filtered.iter()
         .filter(|r| r.usage.is_some())
         .map(|r| {
             let u = r.usage.as_ref().unwrap();
@@ -999,7 +1055,7 @@ pub async fn get_claude_v2_overview(time_range: String, force_refresh: bool) -> 
 
     // Heavy path: run on background thread so UI stays responsive
     let range = time_range.clone();
-    let overview = tokio::task::spawn_blocking(move || build_overview(&range))
+    let overview = tokio::task::spawn_blocking(move || build_overview(&range, force_refresh))
         .await
         .map_err(|e| format!("Task error: {}", e))?;
 
@@ -1031,7 +1087,7 @@ pub async fn get_claude_v2_token_timeseries(
 
     let range = time_range.clone();
     let filter = project_filter.clone();
-    let data = tokio::task::spawn_blocking(move || build_token_timeseries(&range, filter.as_deref()))
+    let data = tokio::task::spawn_blocking(move || build_token_timeseries(&range, filter.as_deref(), force_refresh))
         .await
         .map_err(|e| format!("Task error: {}", e))?;
 
@@ -1059,7 +1115,7 @@ pub async fn get_claude_v2_model_timeseries(
     }
 
     let range = time_range.clone();
-    let data = tokio::task::spawn_blocking(move || build_model_timeseries(&range))
+    let data = tokio::task::spawn_blocking(move || build_model_timeseries(&range, force_refresh))
         .await
         .map_err(|e| format!("Task error: {}", e))?;
 
@@ -1114,8 +1170,7 @@ pub async fn get_claude_v2_prompt_history(
 
 #[tauri::command]
 pub async fn export_claude_v2_csv(time_range: String, _project_filter: Option<String>) -> Result<String, String> {
-    let tr = time_range.clone();
-    let all_records = tokio::task::spawn_blocking(move || load_project_usage_for_time_range(&tr))
+    let all_records = tokio::task::spawn_blocking(|| full_corpus(false))
         .await
         .map_err(|e| format!("Task error: {}", e))?;
     let records = filter_records_by_time(&all_records, &time_range);
@@ -1198,5 +1253,116 @@ mod activity_stats_tests {
     #[test]
     fn empty_records_fall_back_to_none() {
         assert!(derive_session_stats_from_records(&[], None).is_none());
+    }
+}
+
+#[cfg(test)]
+mod corpus_cache_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Barrier;
+
+    /// A fresh `CorpusCache` per test — never touches the process-global
+    /// `CORPUS_CACHE` (which is keyed on the real machine's credential
+    /// fingerprint and would make tests interfere with each other).
+    fn new_cache() -> CorpusCache<u32> {
+        CorpusCache::new()
+    }
+
+    #[test]
+    fn caches_hit_within_ttl_without_reloading() {
+        let cache = new_cache();
+        let calls = AtomicUsize::new(0);
+        let load = || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            1
+        };
+
+        let first = cache.get(false, 1, load);
+        let second = cache.get(false, 1, load);
+
+        assert_eq!(*first, 1);
+        assert_eq!(*second, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "second call should be served from cache");
+    }
+
+    #[test]
+    fn credential_change_invalidates_the_cache() {
+        let cache = new_cache();
+        let calls = AtomicUsize::new(0);
+        let load = || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            calls.load(Ordering::SeqCst) as u32
+        };
+
+        let first = cache.get(false, 1, load);
+        // Different cred_fp == account switch — must not reuse the old entry.
+        let second = cache.get(false, 2, load);
+
+        assert_eq!(*first, 1);
+        assert_eq!(*second, 2);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn concurrent_misses_collapse_into_a_single_load() {
+        // Simulates the 3 commands one loadData() call fires in Promise.all,
+        // all missing the cache at once — they must collapse into one load.
+        let cache = Arc::new(new_cache());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let n = 8;
+        let barrier = Arc::new(Barrier::new(n));
+
+        let handles: Vec<_> = (0..n)
+            .map(|_| {
+                let cache = cache.clone();
+                let calls = calls.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    *cache.get(false, 1, || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(20));
+                        42
+                    })
+                })
+            })
+            .collect();
+
+        let results: Vec<u32> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        assert!(results.iter().all(|&r| r == 42));
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "concurrent misses must single-flight into one load");
+    }
+
+    #[test]
+    fn concurrent_force_refresh_calls_also_collapse() {
+        // Same batch, but every command in it passed force_refresh=true (the
+        // explicit "refresh" button) — still only one real scan.
+        let cache = Arc::new(new_cache());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let n = 5;
+        let barrier = Arc::new(Barrier::new(n));
+
+        let handles: Vec<_> = (0..n)
+            .map(|_| {
+                let cache = cache.clone();
+                let calls = calls.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    *cache.get(true, 1, || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(20));
+                        7
+                    })
+                })
+            })
+            .collect();
+
+        for h in handles {
+            assert_eq!(h.join().unwrap(), 7);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

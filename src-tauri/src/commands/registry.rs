@@ -40,16 +40,19 @@ pub fn get_all_capabilities() -> Vec<UniversalCapability> {
 #[tauri::command]
 pub fn get_all_agents() -> Vec<AgentDefinition> {
     let dirs = get_all_registry_paths();
-    
-    let result = load_agents(&dirs);
-    
+
+    let mut result = load_agents(&dirs);
+
     for error in &result.errors {
         eprintln!(
             "Warning: Failed to load agent from {:?}: {}",
             error.path, error.message
         );
     }
-    
+
+    for agent in &mut result.items {
+        agent.artifact = Some(agent.id.artifact_name(&agent.name));
+    }
     result.items
 }
 

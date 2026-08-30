@@ -7,6 +7,7 @@ pub mod copilot;
 pub mod antigravity;
 pub mod vscode;
 pub mod codex;
+pub mod opencode;
 
 pub use traits::{
     AdapterCapabilities, AgentAdapter, AgentConfig, ChangeType, ConfigDiffEntry,
@@ -20,6 +21,7 @@ pub use copilot::CopilotAdapter;
 pub use antigravity::AntigravityAdapter;
 pub use vscode::VsCodeAdapter;
 pub use codex::CodexAdapter;
+pub use opencode::OpencodeAdapter;
 
 use std::sync::Arc;
 
@@ -39,6 +41,7 @@ impl AdapterRegistry {
                 Arc::new(AntigravityAdapter::new()),
                 Arc::new(VsCodeAdapter::new()),
                 Arc::new(CodexAdapter::new()),
+                Arc::new(OpencodeAdapter::new()),
             ],
         }
     }

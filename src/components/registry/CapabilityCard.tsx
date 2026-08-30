@@ -12,6 +12,8 @@ interface CapabilityCardProps {
   onEdit?: (capability: UniversalCapability) => void;
   onDelete?: (id: string) => void;
   onFork?: (capability: UniversalCapability) => void;
+  onUseCapability?: (capability: UniversalCapability) => void;
+  useCapabilityPending?: boolean;
   isNew?: boolean;
 }
 
@@ -39,6 +41,7 @@ const adapterLabels: Record<AdapterType, string> = {
   "claude-code": "CC",
   cursor: "Cu",
   windsurf: "Wi",
+  opencode: "Oc",
 };
 
 function ExpandableDescription({ text }: { text: string }) {
@@ -84,6 +87,8 @@ export function CapabilityCard({
   onEdit,
   onDelete,
   onFork,
+  onUseCapability,
+  useCapabilityPending = false,
   isNew = false,
 }: CapabilityCardProps) {
   const isPrivate = capability.visibility === "private";
@@ -112,7 +117,20 @@ export function CapabilityCard({
       }`}
       style={{ borderTopColor: typeColors[capability.type], borderTopWidth: "2px" }}
     >
-      <div className="absolute top-3 right-3 z-10">
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+        {onUseCapability && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (useCapabilityPending) return;
+              onUseCapability(capability);
+            }}
+            disabled={useCapabilityPending}
+            className={`h-6 px-2 rounded text-[10px] font-medium whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:brightness-110 ${typeBgColors[capability.type]}`}
+          >
+            {useCapabilityPending ? "Working…" : `Use this ${getCapabilityTypeLabel(capability.type)}`}
+          </button>
+        )}
         <input
           type="checkbox"
           checked={selected}
@@ -124,7 +142,7 @@ export function CapabilityCard({
       </div>
 
       {(isPrivate || canFork) && (
-        <div className="absolute top-3 right-10 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+        <div className="absolute top-3 right-36 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
           {canFork && (
             <button
               onClick={(e) => {
@@ -165,7 +183,7 @@ export function CapabilityCard({
       )}
 
       <div className="p-4">
-        <div className="flex items-center gap-2 mb-2 pr-8">
+        <div className="flex items-center gap-2 mb-2 pr-32">
           <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${typeBgColors[capability.type]}`}>
             {getCapabilityTypeLabel(capability.type)}
           </span>
@@ -275,6 +293,7 @@ export function CapabilityCard({
             })}
           </div>
         </div>
+
       </div>
     </div>
   );

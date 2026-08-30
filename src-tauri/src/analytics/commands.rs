@@ -14,8 +14,8 @@ use tauri_plugin_notification::NotificationExt;
 use crate::analytics::types::*;
 use crate::analytics::{
     claude, claude_desktop, codex, gemini, cursor, copilot,
-    openrouter, kimi, deepseek, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
-    token_store,
+    openrouter, kimi, kimi_v2, deepseek, deepseek_v2, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
+    opencode, token_store,
 };
 use crate::commands::config::{load_settings, ALL_TRAY_PROVIDER_IDS};
 use crate::utils::paths::app_data_dir;
@@ -44,11 +44,16 @@ const CLAUDE_CODE_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/c
 const CURSOR_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/cursor.png");
 const CODEX_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/codex.png");
 const GEMINI_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/gemini.png");
+const KIMI_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/kimi.png");
+const DEEPSEEK_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/deepseek.png");
 const CLAUDE_CODE_TRAY_ICON_ACTIVE_PNG: &[u8] =
     include_bytes!("../../icons/providers/claude-code-active.png");
 const CURSOR_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/cursor-active.png");
 const CODEX_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/codex-active.png");
 const GEMINI_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/gemini-active.png");
+const KIMI_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/kimi-active.png");
+const DEEPSEEK_TRAY_ICON_ACTIVE_PNG: &[u8] =
+    include_bytes!("../../icons/providers/deepseek-active.png");
 
 // ── Limit-state notification helpers ────────────────────────────────────────
 
@@ -372,6 +377,7 @@ pub fn get_all_provider_status() -> Vec<ProviderStatus> {
         kiro::check_connection(),
         jetbrains::check_connection(),
         vertex_ai::check_connection(),
+        opencode::check_connection(),
     ]
 }
 
@@ -397,6 +403,7 @@ pub fn get_provider_analytics(provider_id: String) -> Result<ProviderAnalytics, 
         "kiro" => Ok(kiro::fetch_kiro_analytics()),
         "jetbrains" => Ok(jetbrains::fetch_jetbrains_analytics()),
         "vertex-ai" => Ok(vertex_ai::fetch_vertex_ai_analytics()),
+        "opencode" => Ok(opencode::fetch_opencode_analytics()),
         _ => Err(format!("Unknown provider: {}", provider_id)),
     }
 }
@@ -649,6 +656,19 @@ fn compute_provider_display_metric(provider: &TrayProviderSummary) -> Option<Dis
         return None;
     }
 
+    // Kimi / DeepSeek menu bar: balance providers with no rate-limit windows —
+    // show the available dollar balance instead of borrowing a percentage
+    // from another provider.
+    if provider.provider_id == "kimi" || provider.provider_id == "deepseek" {
+        if let Some(credit) = provider.credit_usage.as_ref() {
+            return Some(DisplayMetric::Spend {
+                amount: credit.remaining,
+                currency: credit.currency.clone(),
+            });
+        }
+        return None;
+    }
+
     // Cursor menu bar: show user's total spend (included + bonus + on-demand),
     // same formula as the tray popover. Must run before pick_primary_provider_rate
     // so dollars win over session/week percentage windows.
@@ -772,6 +792,8 @@ fn icon_bytes_for_provider(provider_id: &str, danger: bool) -> &'static [u8] {
             "cursor" => CURSOR_TRAY_ICON_ACTIVE_PNG,
             "codex" => CODEX_TRAY_ICON_ACTIVE_PNG,
             "gemini" => GEMINI_TRAY_ICON_ACTIVE_PNG,
+            "kimi" => KIMI_TRAY_ICON_ACTIVE_PNG,
+            "deepseek" => DEEPSEEK_TRAY_ICON_ACTIVE_PNG,
             _ => &[],
         };
     }
@@ -780,6 +802,8 @@ fn icon_bytes_for_provider(provider_id: &str, danger: bool) -> &'static [u8] {
         "cursor" => CURSOR_TRAY_ICON_PNG,
         "codex" => CODEX_TRAY_ICON_PNG,
         "gemini" => GEMINI_TRAY_ICON_PNG,
+        "kimi" => KIMI_TRAY_ICON_PNG,
+        "deepseek" => DEEPSEEK_TRAY_ICON_PNG,
         _ => &[],
     }
 }
@@ -893,6 +917,7 @@ fn tray_provider_display_name(id: &str) -> &'static str {
         "gemini" => "Gemini CLI",
         "kimi" => "Kimi",
         "deepseek" => "DeepSeek",
+        "opencode" => "OpenCode",
         _ => "Unknown",
     }
 }
@@ -908,6 +933,58 @@ fn select_tray_providers(configured: &[String]) -> Vec<&'static str> {
         .iter()
         .filter_map(|c| ALL_TRAY_PROVIDER_IDS.iter().copied().find(|id| id == c))
         .collect()
+}
+
+/// DeepSeek balance + a cheap fold-in of local `dsh` session stats (sessions,
+/// turns, tokens, active-now, streak) so the tray card has more than a
+/// balance figure. Local-file only, non-fatal — any issue just means the
+/// extras are absent, never fails the balance fetch.
+fn fetch_deepseek_tray_analytics() -> ProviderAnalytics {
+    let mut analytics = deepseek::fetch_deepseek_analytics();
+    if analytics.status.connected {
+        let overview = deepseek_v2::overview_for_tray();
+        analytics
+            .extra
+            .insert("total_sessions".into(), serde_json::json!(overview.total_sessions));
+        analytics
+            .extra
+            .insert("total_turns".into(), serde_json::json!(overview.total_turns));
+        analytics
+            .extra
+            .insert("total_tokens".into(), serde_json::json!(overview.total_tokens));
+        analytics
+            .extra
+            .insert("active_now".into(), serde_json::json!(overview.active_now));
+        analytics
+            .extra
+            .insert("current_streak".into(), serde_json::json!(overview.current_streak));
+    }
+    analytics
+}
+
+/// Kimi analytics + a cheap fold-in of local session stats mirroring the
+/// deepseek tray wrapper. Local-file only, non-fatal.
+fn fetch_kimi_tray_analytics() -> ProviderAnalytics {
+    let mut analytics = kimi::fetch_kimi_analytics();
+    if analytics.status.connected {
+        let overview = kimi_v2::overview_for_tray();
+        analytics
+            .extra
+            .insert("total_sessions".into(), serde_json::json!(overview.total_sessions));
+        analytics
+            .extra
+            .insert("total_messages".into(), serde_json::json!(overview.total_messages));
+        analytics
+            .extra
+            .insert("total_turns".into(), serde_json::json!(overview.total_turns));
+        analytics
+            .extra
+            .insert("active_now".into(), serde_json::json!(overview.active_now));
+        analytics
+            .extra
+            .insert("current_streak".into(), serde_json::json!(overview.current_streak));
+    }
+    analytics
 }
 
 /// Build a TraySummary by fetching only the configured providers IN PARALLEL.
@@ -930,10 +1007,13 @@ fn build_tray_summary() -> TraySummary {
         .then(|| thread::spawn(gemini::fetch_gemini_analytics));
     let kimi_h = enabled
         .contains(&"kimi")
-        .then(|| thread::spawn(kimi::fetch_kimi_analytics));
+        .then(|| thread::spawn(fetch_kimi_tray_analytics));
     let deepseek_h = enabled
         .contains(&"deepseek")
-        .then(|| thread::spawn(deepseek::fetch_deepseek_analytics));
+        .then(|| thread::spawn(fetch_deepseek_tray_analytics));
+    let opencode_h = enabled
+        .contains(&"opencode")
+        .then(|| thread::spawn(opencode::fetch_opencode_analytics));
 
     let disconnected = |id: &str| ProviderAnalytics {
         provider_id: id.to_string(),
@@ -975,6 +1055,9 @@ fn build_tray_summary() -> TraySummary {
     if let Some(h) = deepseek_h {
         analytics_list.push(h.join().unwrap_or_else(|_| disconnected("deepseek")));
     }
+    if let Some(h) = opencode_h {
+        analytics_list.push(h.join().unwrap_or_else(|_| disconnected("opencode")));
+    }
 
     let mut providers: Vec<TrayProviderSummary> = analytics_list
         .into_iter()
@@ -993,6 +1076,15 @@ fn build_tray_summary() -> TraySummary {
             limit_state: p.limit_state,
         })
         .collect();
+
+    // The join blocks above run in canonical order; re-sort into the user's
+    // configured order so drag-to-reorder survives the next refresh.
+    providers.sort_by_key(|p| {
+        enabled
+            .iter()
+            .position(|id| *id == p.provider_id)
+            .unwrap_or(usize::MAX)
+    });
 
     // Live running-agent count — computed per summary build (cheap PID probes),
     // not taken from the cached analytics snapshot.
@@ -1142,7 +1234,7 @@ pub fn set_tray_active_provider(app: tauri::AppHandle, provider_id: String) -> R
             .lock()
             .map_err(|e| format!("Tray active provider lock error: {}", e))?;
 
-        if PRIMARY_PROVIDER_IDS.contains(&normalized.as_str()) {
+        if ALL_TRAY_PROVIDER_IDS.contains(&normalized.as_str()) {
             *guard = Some(normalized.clone());
         } else {
             *guard = None;
@@ -1205,7 +1297,7 @@ mod tray_provider_filter_tests {
     use super::select_tray_providers;
 
     #[test]
-    fn all_six_when_all_configured() {
+    fn all_seven_when_all_configured() {
         let configured = [
             "claude-code".to_string(),
             "cursor".to_string(),
@@ -1213,10 +1305,11 @@ mod tray_provider_filter_tests {
             "gemini".to_string(),
             "kimi".to_string(),
             "deepseek".to_string(),
+            "opencode".to_string(),
         ];
         assert_eq!(
             select_tray_providers(&configured),
-            ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek"]
+            ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek", "opencode"]
         );
     }
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AgentDefinition, CapabilityType } from "../../lib/types";
-import { getColorHex, getModelLabel, getCapabilityTypeLabel } from "../../lib/types";
+import { getColorHex, getModelLabel, getModelBadgeClass, getCapabilityTypeLabel } from "../../lib/types";
 import { useRegistryStore } from "../../stores/registryStore";
 
 interface AgentDetailProps {
@@ -103,11 +103,7 @@ function OverviewTab({ agent }: { agent: AgentDefinition }) {
     .filter(Boolean);
 
   const memoryLabels = { project: "Project", user: "User", none: "None" };
-  const modelBgColors = {
-    haiku: "bg-accent-cyan/20 text-accent-cyan",
-    sonnet: "bg-accent-purple/20 text-accent-purple",
-    opus: "bg-accent-orange/20 text-accent-orange",
-  };
+  const modelLabel = getModelLabel(agent.model);
 
   return (
     <div className="p-6 space-y-6">
@@ -118,9 +114,13 @@ function OverviewTab({ agent }: { agent: AgentDefinition }) {
 
       <div className="grid grid-cols-2 gap-4">
         <ConfigCard label="Model">
-          <span className={`text-xs font-semibold px-2 py-1 rounded ${modelBgColors[agent.model]}`}>
-            {getModelLabel(agent.model).toUpperCase()}
-          </span>
+          {modelLabel ? (
+            <span className={`text-xs font-semibold px-2 py-1 rounded ${getModelBadgeClass(agent.model)}`}>
+              {modelLabel.toUpperCase()}
+            </span>
+          ) : (
+            <span className="text-sm text-text-muted italic">Adapter default</span>
+          )}
         </ConfigCard>
 
         <ConfigCard label="Color">
@@ -219,7 +219,9 @@ function PreviewTab({ agent }: { agent: AgentDefinition }) {
     lines.push("---");
     lines.push(`name: ${agent.name}`);
     lines.push(`description: "${agent.description}"`);
-    lines.push(`model: ${agent.model}`);
+    if (agent.model && agent.model.trim()) {
+      lines.push(`model: ${agent.model.trim()}`);
+    }
     if (agent.color !== "blue") {
       lines.push(`color: ${agent.color}`);
     }
@@ -243,7 +245,7 @@ function PreviewTab({ agent }: { agent: AgentDefinition }) {
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-text-muted">
           <code className="px-1.5 py-0.5 bg-app-bg rounded font-mono text-accent-blue">
-            agents/{agent.id.split("/")[1]}.md
+            agents/{agent.artifact ?? agent.id.split("/")[1]}.md
           </code>
         </p>
         <button

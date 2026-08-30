@@ -21,10 +21,10 @@ pub use capability::{
     Visibility,
 };
 pub use agent::{
+    normalize_model,
     AgentColor,
     AgentDefinition,
     AgentExample,
-    AgentModel,
     MemoryScope,
     ToolAccess,
 };

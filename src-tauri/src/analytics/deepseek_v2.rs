@@ -895,6 +895,25 @@ fn fetch_deepseek_balance_cached(force_refresh: bool) -> BalanceBundle {
     data
 }
 
+/// Cheap sync accessor for the tray background thread: local-file overview
+/// only (no balance HTTP call — `deepseek.rs` already covers that), reusing
+/// the same 300s cache as `get_deepseek_v2_overview`.
+pub fn overview_for_tray() -> DeepSeekV2Overview {
+    const RANGE: &str = "all";
+    if let Ok(cache) = CACHE.lock() {
+        if let Some(entry) = cache.overview.get(RANGE) {
+            if entry.is_valid(cache.ttl_seconds) {
+                return entry.data.clone();
+            }
+        }
+    }
+    let built = build_overview(RANGE);
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.overview.insert(RANGE.to_string(), CacheEntry::new(built.clone()));
+    }
+    built
+}
+
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]

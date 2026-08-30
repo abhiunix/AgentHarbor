@@ -1011,17 +1011,18 @@ function ClaudeAnalyticsV2Inner() {
     }
   }, []);
 
-  // Load data when auth state changes — force refresh to get fresh data with new credentials
+  // Load data when auth state changes — cached data is fine here (fast path);
+  // credential changes are covered by the cache's cred fingerprint check.
   useEffect(() => {
     if (authState === "connected" || authState === "local-only") {
-      loadData(timeRange, true);
+      loadData(timeRange, false);
     }
   }, [authState]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 5 minutes
+  // Auto-refresh every 5 minutes — reuse cache when still fresh instead of forcing a full rescan.
   useEffect(() => {
     if (authState !== "connected" && authState !== "local-only") return;
-    const i = setInterval(() => loadData(timeRange, true), 5 * 60 * 1000);
+    const i = setInterval(() => loadData(timeRange, false), 5 * 60 * 1000);
     return () => clearInterval(i);
   }, [loadData, timeRange, authState]);
 
@@ -1090,7 +1091,7 @@ function ClaudeAnalyticsV2Inner() {
           <p className="font-medium mb-1">Failed to load analytics</p>
           <p className="text-red-400/70">{error}</p>
           <div className="flex gap-2 mt-3">
-            <button onClick={() => loadData(timeRange, true)} className="px-3 py-1.5 bg-red-500/20 rounded text-red-300 hover:bg-red-500/30">Retry</button>
+            <button onClick={() => loadData(timeRange, false)} className="px-3 py-1.5 bg-red-500/20 rounded text-red-300 hover:bg-red-500/30">Retry</button>
             <button onClick={() => setAuthState("not-connected")} className="px-3 py-1.5 bg-[#2a2b36] rounded text-text-muted hover:text-text-primary">Reconnect</button>
           </div>
         </div>

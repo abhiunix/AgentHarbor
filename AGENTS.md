@@ -1,0 +1,15 @@
+<!-- AgentHarbor: Deployed Capabilities -->
+- **Skill: macos-app-signing-c5d9fd60** (via Claude Code)
+- **Skill: remotion-best-practices** (via Claude Code)
+- **Skill: remotion-captions** (via Claude Code)
+- **Skill: remotion-create** (via Claude Code)
+- **Skill: remotion-docs** (via Claude Code)
+- **Skill: remotion-interactivity** (via Claude Code)
+- **Skill: remotion-maps** (via Claude Code)
+- **Skill: remotion-markup** (via Claude Code)
+- **Skill: remotion-multimedia** (via Claude Code)
+- **Skill: remotion-render** (via Claude Code)
+- **Skill: remotion-saas** (via Claude Code)
+- **Skill: remotion-upgrade** (via Claude Code)
+- **Hook: PostToolUse** (via Claude Code)
+<!-- /AgentHarbor -->
