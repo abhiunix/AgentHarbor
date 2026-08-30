@@ -413,7 +413,7 @@ export function DeepSeekAnalyticsV2Page() {
     : -1;
 
   return (
-    <div className="p-6 max-w-[1200px] mx-auto">
+    <div className="p-6">
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-6">
         <div>

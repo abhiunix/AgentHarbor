@@ -862,6 +862,12 @@ function GeminiCard({ provider }: { provider: TrayProviderSummary }) {
   const totalSessions = ex.gemini_total_sessions as number | undefined;
   const totalMessages = ex.gemini_total_messages as number | undefined;
   const upgradeUri = ex.upgrade_uri as string | undefined;
+  const tokenTotals = ex.gemini_token_totals as
+    | { input?: number; output?: number; cached?: number; thoughts?: number }
+    | undefined;
+  const weekSessions = ex.this_week_sessions as number | undefined;
+  const weekMessages = ex.this_week_messages as number | undefined;
+  const weekTokens = ex.this_week_tokens as number | undefined;
 
   return (
     <div>
@@ -910,7 +916,127 @@ function GeminiCard({ provider }: { provider: TrayProviderSummary }) {
         </div>
       )}
 
+      {/* Token totals from auto-recorded sessions */}
+      {tokenTotals && (
+        <div className="mt-2 pt-2 border-t border-[#2a2b36]">
+          <div className="text-[10px] text-[#9394a1] uppercase tracking-wider mb-1.5">Tokens</div>
+          <div className="grid grid-cols-4 gap-1">
+            {([
+              ["Input", tokenTotals.input],
+              ["Output", tokenTotals.output],
+              ["Cached", tokenTotals.cached],
+              ["Thoughts", tokenTotals.thoughts],
+            ] as const).map(([label, v]) => (
+              <div key={label} className="bg-[#0e0f13] rounded p-1.5">
+                <div className="text-[8px] text-[#9394a1] uppercase">{label}</div>
+                <div className="text-[11px] text-[#e8e9ed] font-mono">{formatTokenCount(v ?? 0)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <TodayStats extra={provider.extra} providerId={provider.provider_id} />
+
+      {/* This week (auto-recorded chats) */}
+      {((weekSessions ?? 0) > 0 || (weekTokens ?? 0) > 0) && (
+        <div className="mt-2 pt-2 border-t border-[#2a2b36]">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-[#9394a1]">This Week</span>
+            <span className="text-[#e8e9ed]">
+              {[
+                weekSessions ? `${weekSessions} session${weekSessions !== 1 ? "s" : ""}` : null,
+                weekMessages ? `${weekMessages} msg${weekMessages !== 1 ? "s" : ""}` : null,
+                weekTokens ? `${formatTokenCount(weekTokens)} tokens` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Kimi Card ────────────────────────────────────────────────────────────────
+
+function KimiCard({ provider }: { provider: TrayProviderSummary }) {
+  const ex = provider.extra;
+  const cu = provider.credit_usage;
+  const voucher = ex.voucher_balance as number | undefined;
+  const cash = ex.cash_balance as number | undefined;
+  const totalSessions = ex.total_sessions as number | undefined;
+  const totalMessages = ex.total_messages as number | undefined;
+  const totalTurns = ex.total_turns as number | undefined;
+  const activeNow = ex.active_now as number | undefined;
+  const currentStreak = ex.current_streak as number | undefined;
+  const hasUsageSnapshot = totalSessions != null || totalMessages != null || totalTurns != null;
+
+  const available = cu?.remaining ?? 0;
+  const balanceColor =
+    cu?.currency === "USD" && available < 1
+      ? "text-red-400"
+      : cu?.currency === "USD" && available < 5
+        ? "text-amber-400"
+        : "text-emerald-400";
+
+  return (
+    <div>
+      {/* Moonshot balance — the thing that runs out and needs timely attention */}
+      {cu && (
+        <div>
+          <div className="text-[10px] text-[#9394a1] uppercase tracking-wider mb-1.5">
+            Available Balance
+          </div>
+          <div className="bg-[#0e0f13] rounded px-2.5 py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-[#9394a1]">{cu.currency}</span>
+              <span className={`font-mono text-[13px] font-semibold ${balanceColor}`}>
+                {formatCurrency(available, cu.currency)}
+              </span>
+            </div>
+            {(voucher != null || cash != null) && (
+              <div className="flex gap-3 text-[9px] text-[#9394a1] mt-0.5">
+                <span>{formatCurrency(voucher ?? 0, cu.currency)} voucher</span>
+                <span>{formatCurrency(cash ?? 0, cu.currency)} cash</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Local usage snapshot (kimi session data) */}
+      {hasUsageSnapshot && (
+        <div className={`${cu ? "mt-2 pt-2 border-t border-[#2a2b36]" : ""}`}>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] text-[#9394a1] uppercase tracking-wider">Usage</span>
+            {(activeNow ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Active now
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            <div className="bg-[#0e0f13] rounded p-1.5">
+              <div className="text-[8px] text-[#9394a1] uppercase">Sessions</div>
+              <div className="text-[11px] text-[#e8e9ed] font-mono">{(totalSessions ?? 0).toLocaleString()}</div>
+            </div>
+            <div className="bg-[#0e0f13] rounded p-1.5">
+              <div className="text-[8px] text-[#9394a1] uppercase">Messages</div>
+              <div className="text-[11px] text-[#e8e9ed] font-mono">{(totalMessages ?? 0).toLocaleString()}</div>
+            </div>
+            <div className="bg-[#0e0f13] rounded p-1.5">
+              <div className="text-[8px] text-[#9394a1] uppercase">Turns</div>
+              <div className="text-[11px] text-[#e8e9ed] font-mono">{(totalTurns ?? 0).toLocaleString()}</div>
+            </div>
+          </div>
+          {(currentStreak ?? 0) > 0 && (
+            <div className="text-[9px] text-[#9394a1] mt-1">{currentStreak} day streak</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1033,6 +1159,8 @@ export function TrayProviderCard({
         return <CodexCard provider={provider} />;
       case "gemini":
         return <GeminiCard provider={provider} />;
+      case "kimi":
+        return <KimiCard provider={provider} />;
       case "deepseek":
         return <DeepSeekCard provider={provider} />;
       default:

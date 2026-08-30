@@ -44,11 +44,16 @@ const CLAUDE_CODE_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/c
 const CURSOR_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/cursor.png");
 const CODEX_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/codex.png");
 const GEMINI_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/gemini.png");
+const KIMI_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/kimi.png");
+const DEEPSEEK_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/deepseek.png");
 const CLAUDE_CODE_TRAY_ICON_ACTIVE_PNG: &[u8] =
     include_bytes!("../../icons/providers/claude-code-active.png");
 const CURSOR_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/cursor-active.png");
 const CODEX_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/codex-active.png");
 const GEMINI_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/gemini-active.png");
+const KIMI_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/kimi-active.png");
+const DEEPSEEK_TRAY_ICON_ACTIVE_PNG: &[u8] =
+    include_bytes!("../../icons/providers/deepseek-active.png");
 
 // ── Limit-state notification helpers ────────────────────────────────────────
 
@@ -774,6 +779,8 @@ fn icon_bytes_for_provider(provider_id: &str, danger: bool) -> &'static [u8] {
             "cursor" => CURSOR_TRAY_ICON_ACTIVE_PNG,
             "codex" => CODEX_TRAY_ICON_ACTIVE_PNG,
             "gemini" => GEMINI_TRAY_ICON_ACTIVE_PNG,
+            "kimi" => KIMI_TRAY_ICON_ACTIVE_PNG,
+            "deepseek" => DEEPSEEK_TRAY_ICON_ACTIVE_PNG,
             _ => &[],
         };
     }
@@ -782,6 +789,8 @@ fn icon_bytes_for_provider(provider_id: &str, danger: bool) -> &'static [u8] {
         "cursor" => CURSOR_TRAY_ICON_PNG,
         "codex" => CODEX_TRAY_ICON_PNG,
         "gemini" => GEMINI_TRAY_ICON_PNG,
+        "kimi" => KIMI_TRAY_ICON_PNG,
+        "deepseek" => DEEPSEEK_TRAY_ICON_PNG,
         _ => &[],
     }
 }
@@ -1054,6 +1063,15 @@ fn build_tray_summary() -> TraySummary {
             limit_state: p.limit_state,
         })
         .collect();
+
+    // The join blocks above run in canonical order; re-sort into the user's
+    // configured order so drag-to-reorder survives the next refresh.
+    providers.sort_by_key(|p| {
+        enabled
+            .iter()
+            .position(|id| *id == p.provider_id)
+            .unwrap_or(usize::MAX)
+    });
 
     // Live running-agent count — computed per summary build (cheap PID probes),
     // not taken from the cached analytics snapshot.
