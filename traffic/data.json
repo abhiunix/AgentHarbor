@@ -163,6 +163,14 @@
     "2026-08-27": {
       "count": 0,
       "uniques": 0
+    },
+    "2026-08-28": {
+      "count": 5,
+      "uniques": 4
+    },
+    "2026-08-29": {
+      "count": 3,
+      "uniques": 2
     }
   },
   "clones": {
@@ -329,6 +337,14 @@
     "2026-08-27": {
       "count": 9,
       "uniques": 5
+    },
+    "2026-08-28": {
+      "count": 6,
+      "uniques": 4
+    },
+    "2026-08-29": {
+      "count": 41,
+      "uniques": 15
     }
   },
   "referrers": {
@@ -996,6 +1012,13 @@
         "referrer": "com.reddit.frontpage",
         "count": 1,
         "uniques": 1
+      }
+    ],
+    "2026-08-30": [
+      {
+        "referrer": "github.com",
+        "count": 13,
+        "uniques": 6
       }
     ]
   },
@@ -2455,6 +2478,58 @@
         "count": 2,
         "uniques": 1
       }
+    ],
+    "2026-08-30": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 44,
+        "uniques": 15
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulse",
+        "count": 5,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/graphs/traffic",
+        "count": 4,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/stargazers",
+        "count": 3,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.1.4",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/screenshot-cost-analysis.webp",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/forks",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulls",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -2597,17 +2672,22 @@
       "stars": 11,
       "forks": 1,
       "issues": 8
+    },
+    "2026-08-30": {
+      "stars": 11,
+      "forks": 1,
+      "issues": 8
     }
   },
   "window": {
-    "asOf": "2026-08-29",
+    "asOf": "2026-08-30",
     "views": {
-      "count": 92,
+      "count": 66,
       "uniques": 15
     },
     "clones": {
-      "count": 287,
-      "uniques": 83
+      "count": 304,
+      "uniques": 87
     }
   }
 }

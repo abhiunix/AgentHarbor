@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-08-29.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-08-30.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 427 | 126 |
-| Clones | 828 | 389 |
+| Views | 435 | 132 |
+| Clones | 875 | 408 |
 
 Stars 11 | Forks 1 | Open issues 8
 
@@ -28,20 +28,19 @@ Stars 11 | Forks 1 | Open issues 8
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| github.com | 11 | 5 |
-| com.reddit.frontpage | 1 | 1 |
+| github.com | 13 | 6 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 53 | 15 |
-| /pulse | 6 | 2 |
-| /releases/tag/v1.1.4 | 5 | 4 |
-| /graphs/traffic | 5 | 1 |
+| / | 44 | 15 |
+| /pulse | 5 | 2 |
+| /graphs/traffic | 4 | 1 |
 | /stargazers | 3 | 1 |
 | /issues | 2 | 2 |
-| /blob/main/.github/FUNDING.yml | 2 | 1 |
-| /blob/main/docs/assets/screenshot-cost-analysis.webp | 2 | 1 |
-| /edit/main/.github/FUNDING.yml | 2 | 1 |
-| /tree/main/.github | 2 | 1 |
+| /releases/tag/v1.1.4 | 2 | 2 |
+| /blob/main/docs/assets/screenshot-cost-analysis.webp | 1 | 1 |
+| /forks | 1 | 1 |
+| /pulls | 1 | 1 |
+| /releases | 1 | 1 |
