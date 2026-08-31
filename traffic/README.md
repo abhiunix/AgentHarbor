@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-08-30.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-08-31.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 435 | 132 |
-| Clones | 875 | 408 |
+| Views | 439 | 136 |
+| Clones | 885 | 414 |
 
 Stars 11 | Forks 1 | Open issues 8
 
@@ -34,12 +34,12 @@ Stars 11 | Forks 1 | Open issues 8
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 44 | 15 |
+| / | 45 | 16 |
 | /pulse | 5 | 2 |
 | /graphs/traffic | 4 | 1 |
-| /stargazers | 3 | 1 |
 | /issues | 2 | 2 |
 | /releases/tag/v1.1.4 | 2 | 2 |
+| /stargazers | 2 | 1 |
 | /blob/main/docs/assets/screenshot-cost-analysis.webp | 1 | 1 |
 | /forks | 1 | 1 |
 | /pulls | 1 | 1 |
