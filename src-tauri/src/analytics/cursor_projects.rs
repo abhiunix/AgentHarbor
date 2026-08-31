@@ -83,6 +83,11 @@ pub struct CursorComposerSummary {
     pub is_subagent: bool,
     pub is_archived: bool,
     pub resolution_source: String,
+    /// First `*.jsonl` transcript file for this composer under
+    /// `~/.cursor/projects/<slug>/agent-transcripts/<composerId>/`, if any.
+    /// `None` when the composer directory is missing or empty — the session
+    /// lives only in Cursor's DB and was never written to disk.
+    pub transcript_path: Option<String>,
     pub last_updated_at: Option<String>,
     pub created_at: Option<String>,
 }
@@ -1058,6 +1063,27 @@ fn read_mcp_roster(slug: &str) -> Vec<CursorMcpEntry> {
     out
 }
 
+/// First `*.jsonl` file directly under
+/// `~/.cursor/projects/<slug>/agent-transcripts/<composer_id>/`, if any. The
+/// composer directory can exist but be empty (or not exist at all) when the
+/// session lives only in Cursor's DB and was never written to disk.
+fn find_transcript_path(slug: &str, composer_id: &str) -> Option<String> {
+    let root = cursor_projects_root()?;
+    find_transcript_path_under(&root, slug, composer_id)
+}
+
+fn find_transcript_path_under(projects_root: &Path, slug: &str, composer_id: &str) -> Option<String> {
+    let dir = projects_root.join(slug).join("agent-transcripts").join(composer_id);
+    let entries = std::fs::read_dir(&dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            return Some(path.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
 fn read_plan_summary(fs_path: &str) -> Option<CursorPlanSummary> {
     let content = std::fs::read_to_string(fs_path).ok()?;
     let fm = crate::commands::plans::parse_cursor_frontmatter(&content)?;
@@ -1128,6 +1154,24 @@ fn resolve_target<'a>(
     } else {
         resolved.get(id)
     }
+}
+
+/// `(composerId, projectPath, lastUpdatedAtMs, name)` for every composer that
+/// resolves to a project in the cached corpus (subagents included, via their
+/// parent's resolution — same rule `build_detail` uses). Reads the TTL-cached
+/// corpus only, never forces a refresh, so it's cheap to call from the
+/// Transcripts page's scan. Used to surface DB-known Cursor sessions that
+/// never got a `.jsonl` file written to disk.
+pub(crate) fn list_resolved_sessions() -> Vec<(String, String, Option<i64>, Option<String>)> {
+    let corpus = PROJECTS_CORPUS_CACHE.get(false, build_corpus);
+    corpus
+        .headers
+        .iter()
+        .filter_map(|(id, h)| {
+            let (path, _source) = resolve_target(id, h, &corpus.resolved)?;
+            Some((id.clone(), path.clone(), h.last_updated_at, h.name.clone()))
+        })
+        .collect()
 }
 
 fn build_overview(force_refresh: bool) -> CursorProjectsOverview {
@@ -1241,6 +1285,7 @@ fn build_overview(force_refresh: bool) -> CursorProjectsOverview {
 fn build_detail(project_path: &str) -> CursorProjectDetail {
     let corpus = PROJECTS_CORPUS_CACHE.get(false, build_corpus);
     let conn = open_state_db().ok();
+    let slug = path_to_slug(project_path);
 
     let mut sessions: Vec<CursorComposerSummary> = Vec::new();
     let mut model_mix: HashMap<String, u64> = HashMap::new();
@@ -1275,6 +1320,7 @@ fn build_detail(project_path: &str) -> CursorProjectDetail {
             is_subagent: h.is_subagent,
             is_archived: h.is_archived,
             resolution_source: source.clone(),
+            transcript_path: find_transcript_path(&slug, id),
             last_updated_at: h.last_updated_at.and_then(unix_ms_to_rfc3339),
             created_at: h.created_at.and_then(unix_ms_to_rfc3339),
         });
@@ -1313,7 +1359,6 @@ fn build_detail(project_path: &str) -> CursorProjectDetail {
         .map(|(hash, _)| read_generations(hash))
         .unwrap_or_default();
 
-    let slug = path_to_slug(project_path);
     let mcps = read_mcp_roster(&slug);
 
     let plans: Vec<CursorPlanSummary> = corpus
@@ -1555,6 +1600,40 @@ mod tests {
         assert!(!is_indexable_slug("empty-window"));
         assert!(!is_indexable_slug("1778313793976"));
         assert!(is_indexable_slug("Users-dev-my-cool-project"));
+    }
+
+    // ── Per-session transcript path (empty vs. missing vs. present) ───────
+
+    #[test]
+    fn find_transcript_path_returns_none_for_empty_composer_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let slug = "Users-dev-my-cool-project";
+        // Composer dir exists but is empty — session lives only in the DB.
+        std::fs::create_dir_all(tmp.path().join(slug).join("agent-transcripts").join("composer-empty")).unwrap();
+
+        assert_eq!(find_transcript_path_under(tmp.path(), slug, "composer-empty"), None);
+    }
+
+    #[test]
+    fn find_transcript_path_returns_none_for_missing_composer_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let slug = "Users-dev-my-cool-project";
+        std::fs::create_dir_all(tmp.path().join(slug).join("agent-transcripts")).unwrap();
+
+        assert_eq!(find_transcript_path_under(tmp.path(), slug, "composer-never-seen"), None);
+    }
+
+    #[test]
+    fn find_transcript_path_finds_jsonl_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let slug = "Users-dev-my-cool-project";
+        let dir = tmp.path().join(slug).join("agent-transcripts").join("composer-with-file");
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl = dir.join("abc-uuid.jsonl");
+        std::fs::write(&jsonl, "{}").unwrap();
+
+        let found = find_transcript_path_under(tmp.path(), slug, "composer-with-file");
+        assert_eq!(found, Some(jsonl.to_string_lossy().to_string()));
     }
 
     // ── originalFileStates longest-prefix ─────────────────────────────────

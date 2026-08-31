@@ -1328,6 +1328,7 @@ export interface CursorComposerSummary {
   is_subagent: boolean;
   is_archived: boolean;
   resolution_source: string;
+  transcript_path: string | null;
   last_updated_at: string | null;
   created_at: string | null;
 }
@@ -1474,6 +1475,7 @@ export interface TranscriptSession {
   modified_at: string;
   file_size_bytes: number;
   file_path: string;
+  missing_file: boolean;
 }
 
 export interface TranscriptMessage {

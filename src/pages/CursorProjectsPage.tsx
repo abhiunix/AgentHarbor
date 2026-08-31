@@ -5,6 +5,7 @@
  * CursorAnalyticsV2Page (CommitTable layout).
  */
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   getCursorProjectsOverview,
   getCursorProjectDetail,
@@ -90,10 +91,18 @@ function AiPctChip({ pct }: { pct: number }) {
 type DetailTab = "sessions" | "commits" | "models" | "generations" | "mcps" | "plans";
 
 function ProjectDetailPanel({ path }: { path: string }) {
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<CursorProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<DetailTab>("sessions");
+
+  const openTranscript = (composerId: string) => {
+    navigate(`/adapters/cursor/transcripts?session=${composerId}`);
+  };
+  const openInCursor = () => {
+    startCursorInProject(path).catch(() => {});
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +156,7 @@ function ProjectDetailPanel({ path }: { path: string }) {
                   <th className="px-2 py-1.5 font-medium text-right">Tokens</th>
                   <th className="px-2 py-1.5 font-medium">Source</th>
                   <th className="px-2 py-1.5 font-medium">Updated</th>
+                  <th className="px-2 py-1.5 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -168,6 +178,33 @@ function ProjectDetailPanel({ path }: { path: string }) {
                     <td className="px-2 py-1.5 text-right font-mono text-text-muted">{formatNum(s.input_tokens + s.output_tokens)}</td>
                     <td className="px-2 py-1.5 text-[10px] text-text-muted">{s.resolution_source}</td>
                     <td className="px-2 py-1.5 text-[10px] text-text-muted whitespace-nowrap">{timeAgo(s.last_updated_at)}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex items-center gap-1.5">
+                        {s.transcript_path ? (
+                          <button
+                            onClick={() => openTranscript(s.composer_id)}
+                            title="Open this session's transcript"
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 whitespace-nowrap"
+                          >
+                            Transcript
+                          </button>
+                        ) : (
+                          <span
+                            title="Cursor never saved a transcript file for this session (empty or missing composer directory)"
+                            className="text-[10px] text-text-muted italic whitespace-nowrap"
+                          >
+                            no transcript saved
+                          </span>
+                        )}
+                        <button
+                          onClick={openInCursor}
+                          title="Open this project in Cursor"
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 whitespace-nowrap"
+                        >
+                          Open in Cursor
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -352,7 +389,7 @@ function ProjectRow({ p, expanded, onToggle }: { p: CursorProjectStat; expanded:
               title="Open this project in Cursor"
               className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 whitespace-nowrap"
             >
-              Start session
+              Open in Cursor
             </button>
             <button
               onClick={copyDir}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   listTranscriptSessions,
   readTranscript,
@@ -9,6 +9,7 @@ import {
   updateTranscriptMessage,
   openTranscriptInTextEditor,
   deleteTranscriptBackup,
+  startCursorInProject,
 } from "../lib/tauri";
 import type {
   TranscriptSession,
@@ -121,8 +122,10 @@ function groupByProject(sessions: TranscriptSession[]): ProjectGroup[] {
 
 export function TranscriptsPage() {
   const { adapterId } = useParams<{ adapterId?: string }>();
+  const [searchParams] = useSearchParams();
   const defaultSource: "all" | "claude" | "cursor" =
     adapterId === "claude-code" ? "claude" : adapterId === "cursor" ? "cursor" : "all";
+  const deepLinkHandled = useRef(false);
 
   const [allSessions, setAllSessions] = useState<TranscriptSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,8 +153,10 @@ export function TranscriptsPage() {
   const [hasMore, setHasMore] = useState(false);
 
   // Secret-scrubbing state (Claude + Cursor transcripts; both are local JSONL).
+  // A missing_file session has no on-disk content to find/scrub/edit.
   const isScrubbable =
-    selectedSession?.source === "claude" || selectedSession?.source === "cursor";
+    !selectedSession?.missing_file &&
+    (selectedSession?.source === "claude" || selectedSession?.source === "cursor");
   const EDIT_SIZE_LIMIT = 2 * 1024 * 1024; // 2 MB — above this, block in-app edit
   const [editMode, setEditMode] = useState(false);
   // In-flight per-message edits keyed by JSONL line_index.
@@ -265,8 +270,25 @@ export function TranscriptsPage() {
     setMatches([]);
     setActiveMatchIndex(0);
     setBackupNotice(null);
-    loadMessages(session, 0, false);
+    // No .jsonl file exists for this session — nothing to page through.
+    if (!session.missing_file) {
+      loadMessages(session, 0, false);
+    }
   };
+
+  // Deep link from the Cursor Projects page: `?session=<composerId>` expands
+  // that session's project group and selects it. Runs once, after sessions
+  // have loaded.
+  useEffect(() => {
+    if (deepLinkHandled.current || allSessions.length === 0) return;
+    deepLinkHandled.current = true;
+    const sessionId = searchParams.get("session");
+    if (!sessionId) return;
+    const match = allSessions.find((s) => s.session_id === sessionId);
+    if (!match) return;
+    setExpandedProjects((prev) => new Set(prev).add(match.project_name));
+    handleSelectSession(match);
+  }, [allSessions, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Recompute matches against the raw file when the in-transcript find term changes.
   useEffect(() => {
@@ -552,31 +574,45 @@ export function TranscriptsPage() {
             const isExpanded = expandedProjects.has(group.projectPath);
             return (
               <div key={group.projectPath}>
-                <button
-                  onClick={() => toggleProject(group.projectPath)}
-                  className="w-full text-left px-3 py-2.5 flex items-start gap-2 hover:bg-app-card transition-colors border-b border-border/50"
-                >
-                  <span className="text-text-secondary text-xs mt-0.5 flex-shrink-0 w-3">
-                    {isExpanded ? "▼" : "▶"}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-text-primary truncate" title={group.projectPath}>
-                      {group.displayPath}
+                <div className="w-full flex items-start gap-2 px-3 py-2.5 hover:bg-app-card transition-colors border-b border-border/50">
+                  <button
+                    onClick={() => toggleProject(group.projectPath)}
+                    className="flex-1 min-w-0 text-left flex items-start gap-2"
+                  >
+                    <span className="text-text-secondary text-xs mt-0.5 flex-shrink-0 w-3">
+                      {isExpanded ? "▼" : "▶"}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-text-primary truncate" title={group.projectPath}>
+                        {group.displayPath}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        {Array.from(group.sources).map((src) => (
+                          <SourceBadge key={src} source={src} />
+                        ))}
+                        <span className="text-[10px] text-text-muted">
+                          {group.sessions.length} session
+                          {group.sessions.length !== 1 ? "s" : ""}
+                        </span>
+                        <span className="text-[10px] text-text-muted">
+                          · {formatDate(group.latestDate)}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      {Array.from(group.sources).map((src) => (
-                        <SourceBadge key={src} source={src} />
-                      ))}
-                      <span className="text-[10px] text-text-muted">
-                        {group.sessions.length} session
-                        {group.sessions.length !== 1 ? "s" : ""}
-                      </span>
-                      <span className="text-[10px] text-text-muted">
-                        · {formatDate(group.latestDate)}
-                      </span>
-                    </div>
-                  </div>
-                </button>
+                  </button>
+                  {group.sources.has("cursor") && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startCursorInProject(group.projectPath).catch(() => {});
+                      }}
+                      title="Open this project in Cursor"
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 whitespace-nowrap shrink-0 mt-0.5"
+                    >
+                      Open in Cursor
+                    </button>
+                  )}
+                </div>
 
                 {isExpanded && (
                   <div className="bg-app-bg/50">
@@ -588,7 +624,7 @@ export function TranscriptsPage() {
                           selectedSession?.session_id === session.session_id
                             ? "bg-indigo-500/10"
                             : "hover:bg-app-card/60"
-                        }`}
+                        } ${session.missing_file ? "opacity-60" : ""}`}
                       >
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-mono text-text-secondary truncate">
@@ -596,11 +632,17 @@ export function TranscriptsPage() {
                           </span>
                           <SourceBadge source={session.source} />
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
-                          <span>{formatFileSize(session.file_size_bytes)}</span>
-                          <span>·</span>
-                          <span>{formatDate(session.modified_at)}</span>
-                        </div>
+                        {session.missing_file ? (
+                          <div className="text-[10px] text-text-muted italic mt-0.5">
+                            no transcript saved by Cursor
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
+                            <span>{formatFileSize(session.file_size_bytes)}</span>
+                            <span>·</span>
+                            <span>{formatDate(session.modified_at)}</span>
+                          </div>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -808,6 +850,25 @@ export function TranscriptsPage() {
               ref={conversationRef}
               className="flex-1 overflow-y-auto p-4 space-y-3"
             >
+              {selectedSession.missing_file ? (
+                <div className="flex flex-col items-center justify-center h-full text-center gap-3 px-8">
+                  <div className="text-4xl opacity-30">🗒️</div>
+                  <p className="text-text-secondary text-sm max-w-sm">
+                    Cursor didn't save a transcript file for this session — it
+                    only exists in Cursor's local database, so there's
+                    nothing to display here.
+                  </p>
+                  <button
+                    onClick={() =>
+                      startCursorInProject(selectedSession.project_name).catch(() => {})
+                    }
+                    className="px-3 py-1.5 text-xs rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 whitespace-nowrap"
+                  >
+                    Open in Cursor
+                  </button>
+                </div>
+              ) : (
+              <>
               {messagesLoading && messages.length === 0 && (
                 <div className="text-text-secondary text-sm text-center py-8">
                   Loading messages...
@@ -955,6 +1016,8 @@ export function TranscriptsPage() {
                     {messagesLoading ? "Loading..." : "Load More"}
                   </button>
                 </div>
+              )}
+              </>
               )}
             </div>
           </>
