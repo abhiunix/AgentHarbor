@@ -1215,6 +1215,8 @@ export interface ScoredCommit {
   scored_at: number;
   lines_added?: number;
   lines_deleted?: number;
+  tab_lines_added?: number;
+  tab_lines_deleted?: number;
   composer_lines_added?: number;
   composer_lines_deleted?: number;
   human_lines_added?: number;
@@ -1270,6 +1272,115 @@ export async function getAiFileTypeBreakdown(): Promise<FileTypeBreakdown[]> {
 
 export async function getAiTrackingModelBreakdown(): Promise<Record<string, number>> {
   return invoke<Record<string, number>>("get_ai_tracking_model_breakdown");
+}
+
+// --- Cursor Projects ---
+
+export interface CursorProjectTotals {
+  sessions: number;
+  input_tokens: number;
+  output_tokens: number;
+  lines_added: number;
+  lines_removed: number;
+  files_changed: number;
+  commit_count: number;
+}
+
+export interface CursorProjectStat {
+  path: string;
+  name: string;
+  sessions: number;
+  input_tokens: number;
+  output_tokens: number;
+  lines_added: number;
+  lines_removed: number;
+  files_changed: number;
+  commit_count: number;
+  ai_line_pct: number;
+  mcp_count: number;
+  plan_count: number;
+  last_activity: string | null;
+  repo_path: string | null;
+}
+
+export interface CursorProjectsOverview {
+  projects: CursorProjectStat[];
+  unattributed_commits: number;
+  unresolved_sessions: number;
+  commit_resolution_pending: boolean;
+  totals: CursorProjectTotals;
+}
+
+export interface CursorComposerSummary {
+  composer_id: string;
+  name: string | null;
+  model: string | null;
+  context_usage_percent: number | null;
+  lines_added: number;
+  lines_removed: number;
+  files_changed: number;
+  input_tokens: number;
+  output_tokens: number;
+  is_subagent: boolean;
+  is_archived: boolean;
+  resolution_source: string;
+  last_updated_at: string | null;
+  created_at: string | null;
+}
+
+export interface CursorProjectCommit {
+  commit_hash: string;
+  branch_name: string;
+  commit_message: string | null;
+  commit_date: string | null;
+  ai_percentage: number;
+  lines_added: number | null;
+  lines_deleted: number | null;
+  tab_lines_added: number | null;
+  tab_lines_deleted: number | null;
+}
+
+export interface CursorGeneration {
+  unix_ms: number;
+  generation_uuid: string;
+  kind: string;
+  text_description: string | null;
+}
+
+export interface CursorMcpEntry {
+  server_identifier: string;
+  server_name: string | null;
+  status_summary: string | null;
+}
+
+export interface CursorPlanSummary {
+  name: string;
+  file_path: string;
+  total_todos: number;
+  completed_todos: number;
+}
+
+export interface CursorProjectDetail {
+  path: string;
+  name: string;
+  sessions: CursorComposerSummary[];
+  commits: CursorProjectCommit[];
+  model_mix: Record<string, number>;
+  generations: CursorGeneration[];
+  mcps: CursorMcpEntry[];
+  plans: CursorPlanSummary[];
+}
+
+export async function getCursorProjectsOverview(forceRefresh?: boolean): Promise<CursorProjectsOverview> {
+  return invoke<CursorProjectsOverview>("get_cursor_projects_overview", { forceRefresh: forceRefresh ?? null });
+}
+
+export async function getCursorProjectDetail(projectPath: string): Promise<CursorProjectDetail> {
+  return invoke<CursorProjectDetail>("get_cursor_project_detail", { projectPath });
+}
+
+export async function startCursorInProject(projectPath: string): Promise<void> {
+  return invoke<void>("start_cursor_in_project", { projectPath });
 }
 
 // --- Session Stats ---

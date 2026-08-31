@@ -14,6 +14,7 @@ pub mod opencode;
 
 pub mod cursor;
 pub mod cursor_v2;
+pub mod cursor_projects;
 pub mod copilot;
 pub mod openrouter;
 pub mod kimi;

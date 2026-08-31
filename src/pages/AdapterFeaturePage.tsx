@@ -49,6 +49,9 @@ const CursorPlansPage = lazy(() =>
 const CursorAnalyticsV2Page = lazy(() =>
   import("./CursorAnalyticsV2Page").then((m) => ({ default: m.CursorAnalyticsV2Page }))
 );
+const CursorProjectsPage = lazy(() =>
+  import("./CursorProjectsPage").then((m) => ({ default: m.CursorProjectsPage }))
+);
 const ClaudeAnalyticsV2Page = lazy(() =>
   import("./ClaudeAnalyticsV2Page").then((m) => ({ default: m.ClaudeAnalyticsV2Page }))
 );
@@ -158,6 +161,7 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
   },
   cursor: {
     "global-config": AdapterGlobalConfigPage as LazyPage,
+    projects: CursorProjectsPage as LazyPage,
     rules: CursorRulesPage as LazyPage,
     permissions: CursorPermissionsPage as LazyPage,
     hooks: CursorHooksPage as LazyPage,

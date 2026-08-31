@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAiTrackingStore } from "../stores/aiTrackingStore";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -37,6 +38,7 @@ function CommitTable({ commits }: { commits: ScoredCommit[] }) {
             <th className="px-3 py-2 text-right">Human +</th>
             <th className="px-3 py-2 text-right">+Lines</th>
             <th className="px-3 py-2 text-right">-Lines</th>
+            <th className="px-3 py-2 text-right">Tab Lines</th>
             <th className="px-3 py-2">Date</th>
           </tr>
         </thead>
@@ -55,6 +57,9 @@ function CommitTable({ commits }: { commits: ScoredCommit[] }) {
               <td className="px-3 py-2 text-right font-mono text-cyan-400">{c.human_lines_added ?? 0}</td>
               <td className="px-3 py-2 text-right font-mono text-emerald-400">+{c.lines_added ?? 0}</td>
               <td className="px-3 py-2 text-right font-mono text-red-400">-{c.lines_deleted ?? 0}</td>
+              <td className="px-3 py-2 text-right font-mono text-text-muted">
+                +{c.tab_lines_added ?? 0}/-{c.tab_lines_deleted ?? 0}
+              </td>
               <td className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">
                 {c.commit_date ? formatCommitDate(c.commit_date) : formatEpoch(c.scored_at)}
               </td>
@@ -178,6 +183,7 @@ function ModelBreakdownChart({ data }: { data: Record<string, number> }) {
 }
 
 export function AiAttributionPage() {
+  const navigate = useNavigate();
   const { commits, summary, fileTypes, modelBreakdown, loading, error, fetchAll } = useAiTrackingStore();
   const [activeTab, setActiveTab] = useState<"overview" | "commits" | "conversations">("overview");
 
@@ -208,8 +214,14 @@ export function AiAttributionPage() {
         </button>
       </div>
 
-      <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg px-4 py-3 text-sm text-blue-200">
-        Global data only. Cursor&apos;s ai-tracking database does not store project or repo, so attribution cannot be filtered by project.
+      <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg px-4 py-3 text-sm text-blue-200 flex items-center justify-between gap-3 flex-wrap">
+        <span>Commits are attributed per project on the Projects page; unmatched commits are listed globally below.</span>
+        <button
+          onClick={() => navigate("/adapters/cursor/projects")}
+          className="text-xs px-2 py-1 rounded border border-blue-500/40 text-blue-200 hover:bg-blue-500/20 whitespace-nowrap"
+        >
+          Open Projects →
+        </button>
       </div>
 
       {error && <p className="text-sm text-accent-red">{error}</p>}

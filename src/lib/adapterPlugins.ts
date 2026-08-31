@@ -77,6 +77,7 @@ export const adapterPlugins: AdapterPlugin[] = [
     defaultExpanded: false,
     features: [
       { id: "global-config", label: "Global Config", icon: "⊕", route: "/adapters/cursor/global-config" },
+      { id: "projects", label: "Projects", icon: "📁", route: "/adapters/cursor/projects" },
       { id: "rules", label: "Rules", icon: "☰", route: "/adapters/cursor/rules" },
       { id: "permissions", label: "Permissions", icon: "🔒", route: "/adapters/cursor/permissions" },
       { id: "hooks", label: "Hooks", icon: "⚡", route: "/adapters/cursor/hooks" },

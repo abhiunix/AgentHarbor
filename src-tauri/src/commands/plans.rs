@@ -27,21 +27,21 @@ pub struct TodoStats {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-struct CursorPlanFrontmatter {
+pub(crate) struct CursorPlanFrontmatter {
     #[serde(default)]
-    name: String,
+    pub(crate) name: String,
     #[serde(default)]
-    overview: String,
+    pub(crate) overview: String,
     #[serde(default)]
-    todos: Vec<CursorPlanTodo>,
+    pub(crate) todos: Vec<CursorPlanTodo>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-struct CursorPlanTodo {
+pub(crate) struct CursorPlanTodo {
     #[serde(default)]
-    content: String,
+    pub(crate) content: String,
     #[serde(default)]
-    status: String,
+    pub(crate) status: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -62,7 +62,7 @@ fn get_modified_at(path: &std::path::Path) -> String {
         .unwrap_or_default()
 }
 
-fn parse_cursor_frontmatter(content: &str) -> Option<CursorPlanFrontmatter> {
+pub(crate) fn parse_cursor_frontmatter(content: &str) -> Option<CursorPlanFrontmatter> {
     let trimmed = content.trim_start();
     if !trimmed.starts_with("---") { return None; }
     let after_first = &trimmed[3..];
