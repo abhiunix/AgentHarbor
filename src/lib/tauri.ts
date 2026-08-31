@@ -1280,6 +1280,8 @@ export interface CursorProjectTotals {
   sessions: number;
   input_tokens: number;
   output_tokens: number;
+  cost_cents: number;
+  requests: number;
   lines_added: number;
   lines_removed: number;
   files_changed: number;
@@ -1292,6 +1294,8 @@ export interface CursorProjectStat {
   sessions: number;
   input_tokens: number;
   output_tokens: number;
+  cost_cents: number;
+  requests: number;
   lines_added: number;
   lines_removed: number;
   files_changed: number;
