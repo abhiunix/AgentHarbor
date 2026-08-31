@@ -43,11 +43,65 @@ struct CodexAuth {
     last_refresh: Option<String>,
 }
 
+/// Lenient `Option<f64>` deserializer: accepts a JSON number, a numeric
+/// string (e.g. `"0"`, `"12.5"`), or null/absent → `None`. OpenAI's WHAM
+/// usage API has been observed to send numeric fields as stringified
+/// numbers (same class of drift as DeepSeek's decimal strings and Gemini's
+/// `remainingAmount`).
+fn de_lenient_opt_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => Ok(n.as_f64()),
+        Some(serde_json::Value::String(s)) if s.trim().is_empty() => Ok(None),
+        Some(serde_json::Value::String(s)) => s
+            .trim()
+            .parse::<f64>()
+            .map(Some)
+            .map_err(|e| serde::de::Error::custom(format!("invalid numeric string {:?}: {}", s, e))),
+        Some(other) => Err(serde::de::Error::custom(format!(
+            "expected number or numeric string, got {}",
+            other
+        ))),
+    }
+}
+
+/// Same as [`de_lenient_opt_f64`] but for `Option<i64>` fields (unix
+/// timestamps, window durations in seconds).
+fn de_lenient_opt_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => Ok(n.as_i64().or_else(|| n.as_f64().map(|f| f as i64))),
+        Some(serde_json::Value::String(s)) if s.trim().is_empty() => Ok(None),
+        Some(serde_json::Value::String(s)) => s
+            .trim()
+            .parse::<i64>()
+            .or_else(|_| s.trim().parse::<f64>().map(|f| f as i64))
+            .map(Some)
+            .map_err(|e| serde::de::Error::custom(format!("invalid integer string {:?}: {}", s, e))),
+        Some(other) => Err(serde::de::Error::custom(format!(
+            "expected integer or numeric string, got {}",
+            other
+        ))),
+    }
+}
+
 #[derive(Deserialize, Debug)]
 struct WhamRateWindow {
+    #[serde(default, deserialize_with = "de_lenient_opt_f64")]
     used_percent: Option<f64>,
-    reset_at: Option<i64>,            // unix timestamp
+    #[serde(default, deserialize_with = "de_lenient_opt_i64")]
+    reset_at: Option<i64>, // unix timestamp
+    #[serde(default, deserialize_with = "de_lenient_opt_i64")]
     reset_after_seconds: Option<i64>,
+    #[serde(default, deserialize_with = "de_lenient_opt_i64")]
     limit_window_seconds: Option<i64>,
 }
 
@@ -63,6 +117,7 @@ struct WhamRateLimit {
 struct WhamCredits {
     has_credits: Option<bool>,
     unlimited: Option<bool>,
+    #[serde(default, deserialize_with = "de_lenient_opt_f64")]
     balance: Option<f64>,
 }
 
@@ -1585,5 +1640,127 @@ mod tests {
         assert_eq!(combined_rate_per_million("gpt-5.6-sol"), 12.0);
         assert_eq!(combined_rate_per_million("gpt-5.5"), 10.0);
         assert_eq!(combined_rate_per_million("gpt-5.1-codex-max"), 7.5);
+    }
+
+    // ── WHAM usage API: lenient numeric deserialization ─────────────────────
+    // Regression coverage for the "invalid type: string \"0\", expected f64"
+    // crash: OpenAI started sending numeric WHAM fields as stringified
+    // numbers (e.g. `"used_percent": "0"`) instead of bare JSON numbers.
+
+    const WHAM_RESPONSE_WITH_STRING_NUMBERS: &str = r#"{
+        "user_id": "user_abc",
+        "account_id": "acct_abc",
+        "email": "dev@example.com",
+        "plan_type": "team",
+        "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window": {
+                "used_percent": "0",
+                "reset_at": "1787421418",
+                "reset_after_seconds": "3600",
+                "limit_window_seconds": "18000"
+            },
+            "secondary_window": {
+                "used_percent": "12.5",
+                "reset_at": 1787421999,
+                "reset_after_seconds": null,
+                "limit_window_seconds": 604800
+            }
+        },
+        "code_review_rate_limit": null,
+        "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "0"
+        }
+    }"#;
+
+    const WHAM_RESPONSE_WITH_NUMBERS: &str = r#"{
+        "user_id": "user_abc",
+        "account_id": "acct_abc",
+        "email": "dev@example.com",
+        "plan_type": "team",
+        "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window": {
+                "used_percent": 0,
+                "reset_at": 1787421418,
+                "reset_after_seconds": 3600,
+                "limit_window_seconds": 18000
+            },
+            "secondary_window": null
+        },
+        "code_review_rate_limit": null,
+        "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": 12.5
+        }
+    }"#;
+
+    #[test]
+    fn wham_response_parses_when_numeric_fields_are_strings() {
+        let wham: WhamUsageResponse = serde_json::from_str(WHAM_RESPONSE_WITH_STRING_NUMBERS).unwrap();
+        let rl = wham.rate_limit.unwrap();
+        let primary = rl.primary_window.unwrap();
+        assert_eq!(primary.used_percent, Some(0.0));
+        assert_eq!(primary.reset_at, Some(1787421418));
+        assert_eq!(primary.reset_after_seconds, Some(3600));
+        assert_eq!(primary.limit_window_seconds, Some(18000));
+
+        let secondary = rl.secondary_window.unwrap();
+        assert_eq!(secondary.used_percent, Some(12.5));
+        assert_eq!(secondary.reset_at, Some(1787421999));
+        assert_eq!(secondary.reset_after_seconds, None);
+        assert_eq!(secondary.limit_window_seconds, Some(604800));
+
+        let credits = wham.credits.unwrap();
+        assert_eq!(credits.balance, Some(0.0));
+    }
+
+    #[test]
+    fn wham_response_parses_when_numeric_fields_are_numbers() {
+        let wham: WhamUsageResponse = serde_json::from_str(WHAM_RESPONSE_WITH_NUMBERS).unwrap();
+        let rl = wham.rate_limit.unwrap();
+        let primary = rl.primary_window.unwrap();
+        assert_eq!(primary.used_percent, Some(0.0));
+        assert_eq!(primary.reset_at, Some(1787421418));
+        assert_eq!(primary.reset_after_seconds, Some(3600));
+        assert_eq!(primary.limit_window_seconds, Some(18000));
+        assert!(rl.secondary_window.is_none());
+
+        let credits = wham.credits.unwrap();
+        assert_eq!(credits.balance, Some(12.5));
+    }
+
+    #[test]
+    fn de_lenient_opt_f64_accepts_number_string_and_null() {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            #[serde(default, deserialize_with = "de_lenient_opt_f64")]
+            v: Option<f64>,
+        }
+        let from = |s: &str| serde_json::from_str::<Wrapper>(s).unwrap().v;
+        assert_eq!(from(r#"{"v":"0"}"#), Some(0.0));
+        assert_eq!(from(r#"{"v":"12.5"}"#), Some(12.5));
+        assert_eq!(from(r#"{"v":12.5}"#), Some(12.5));
+        assert_eq!(from(r#"{"v":null}"#), None);
+        assert_eq!(from(r#"{}"#), None);
+    }
+
+    #[test]
+    fn de_lenient_opt_i64_accepts_number_string_and_null() {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            #[serde(default, deserialize_with = "de_lenient_opt_i64")]
+            v: Option<i64>,
+        }
+        let from = |s: &str| serde_json::from_str::<Wrapper>(s).unwrap().v;
+        assert_eq!(from(r#"{"v":"1787421418"}"#), Some(1787421418));
+        assert_eq!(from(r#"{"v":1787421418}"#), Some(1787421418));
+        assert_eq!(from(r#"{"v":null}"#), None);
+        assert_eq!(from(r#"{}"#), None);
     }
 }

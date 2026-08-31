@@ -1,5 +1,7 @@
 use crate::utils::paths::{atomic_write_str, normalize_line_endings, read_with_sharing};
+use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
@@ -11,6 +13,11 @@ pub struct TranscriptSession {
     pub modified_at: String,
     pub file_size_bytes: u64,
     pub file_path: String,
+    /// True for a Cursor session known only from its DB — the
+    /// `agent-transcripts/<composerId>/` directory is missing or empty, so
+    /// there's no `.jsonl` file to open. Defaults to `false` (a real file).
+    #[serde(default)]
+    pub missing_file: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +173,7 @@ fn scan_claude_transcripts() -> Vec<TranscriptSession> {
                 modified_at,
                 file_size_bytes: meta.len(),
                 file_path: file_path.to_string_lossy().to_string(),
+                missing_file: false,
             });
         }
     }
@@ -249,8 +257,45 @@ fn scan_cursor_transcripts() -> Vec<TranscriptSession> {
                 modified_at,
                 file_size_bytes: meta.len(),
                 file_path: jsonl_path.to_string_lossy().to_string(),
+                missing_file: false,
             });
         }
+    }
+
+    // Merge in DB-known composers that never got a transcript file written
+    // (an empty or missing `agent-transcripts/<composerId>/` dir) — reads the
+    // cached corpus only, so a missing/unreadable Cursor DB just yields an
+    // empty merge rather than failing the whole scan.
+    merge_resolved_sessions(sessions, crate::analytics::cursor_projects::list_resolved_sessions())
+}
+
+/// Pure merge step of `scan_cursor_transcripts`: appends a `missing_file`
+/// placeholder session for every `resolved` composer whose id isn't already
+/// present in `sessions` (i.e. it has no `.jsonl` file on disk). Split out
+/// from the corpus lookup so it's testable without the process-global,
+/// live-Cursor-DB-backed corpus cache.
+fn merge_resolved_sessions(
+    mut sessions: Vec<TranscriptSession>,
+    resolved: Vec<(String, String, Option<i64>, Option<String>)>,
+) -> Vec<TranscriptSession> {
+    let scanned_ids: HashSet<String> = sessions.iter().map(|s| s.session_id.clone()).collect();
+    for (composer_id, project_path, last_updated_ms, _name) in resolved {
+        if scanned_ids.contains(&composer_id) {
+            continue;
+        }
+        let modified_at = last_updated_ms
+            .and_then(|ms| chrono::Utc.timestamp_millis_opt(ms).single())
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_default();
+        sessions.push(TranscriptSession {
+            session_id: composer_id,
+            project_name: project_path,
+            source: "cursor".to_string(),
+            modified_at,
+            file_size_bytes: 0,
+            file_path: String::new(),
+            missing_file: true,
+        });
     }
     sessions
 }
@@ -286,6 +331,9 @@ pub fn search_transcripts(query: String) -> Result<Vec<TranscriptSession>, Strin
 
     let mut matching = Vec::new();
     for session in &all_sessions {
+        if session.missing_file || session.file_path.is_empty() {
+            continue;
+        }
         if !is_safe_transcript_path(&session.file_path) {
             continue;
         }
@@ -870,6 +918,57 @@ mod tests {
         }
         assert_eq!(count, 2);
         std::fs::remove_file(&file).ok();
+    }
+
+    #[test]
+    fn merge_resolved_sessions_marks_db_only_missing_and_leaves_file_backed_alone() {
+        let file_backed = TranscriptSession {
+            session_id: "composer-with-file".to_string(),
+            project_name: "/repo/a".to_string(),
+            source: "cursor".to_string(),
+            modified_at: "2026-01-01T00:00:00+00:00".to_string(),
+            file_size_bytes: 1234,
+            file_path: "/Users/x/.cursor/projects/repo-a/agent-transcripts/composer-with-file/composer-with-file.jsonl".to_string(),
+            missing_file: false,
+        };
+        let scanned = vec![file_backed.clone()];
+
+        // One resolved composer duplicates a file-backed session (must not
+        // be re-added or altered); the other has no matching scanned file
+        // (must be appended as a `missing_file` placeholder).
+        let resolved = vec![
+            (
+                "composer-with-file".to_string(),
+                "/repo/a".to_string(),
+                Some(1_767_225_600_000), // 2026-01-01T00:00:00Z
+                Some("has a file".to_string()),
+            ),
+            (
+                "composer-db-only".to_string(),
+                "/repo/b".to_string(),
+                Some(1_767_225_600_000), // 2026-01-01T00:00:00Z
+                Some("db only".to_string()),
+            ),
+        ];
+
+        let merged = merge_resolved_sessions(scanned, resolved);
+        assert_eq!(merged.len(), 2, "must not duplicate the file-backed composer");
+
+        let kept = merged.iter().find(|s| s.session_id == "composer-with-file").unwrap();
+        assert!(!kept.missing_file, "file-backed session must stay missing_file=false");
+        assert_eq!(kept.file_path, file_backed.file_path);
+
+        let added = merged.iter().find(|s| s.session_id == "composer-db-only").unwrap();
+        assert!(added.missing_file, "DB-only composer must be marked missing_file=true");
+        assert_eq!(added.project_name, "/repo/b");
+        assert_eq!(added.source, "cursor");
+        assert_eq!(added.file_size_bytes, 0);
+        assert_eq!(added.file_path, "");
+        assert!(
+            added.modified_at.starts_with("2026-01-01T00:00:00"),
+            "unexpected modified_at: {}",
+            added.modified_at
+        );
     }
 
     #[test]
