@@ -25,6 +25,8 @@ pub struct ScoredCommit {
     pub scored_at: i64,
     pub lines_added: Option<i64>,
     pub lines_deleted: Option<i64>,
+    pub tab_lines_added: Option<i64>,
+    pub tab_lines_deleted: Option<i64>,
     pub composer_lines_added: Option<i64>,
     pub composer_lines_deleted: Option<i64>,
     pub human_lines_added: Option<i64>,
@@ -71,19 +73,13 @@ fn parse_ai_percentage(v2: Option<String>, v1: Option<String>) -> f64 {
         .unwrap_or(0.0)
 }
 
-#[tauri::command]
-pub fn get_ai_commit_scores(limit: Option<usize>, offset: Option<usize>) -> Result<Vec<ScoredCommit>, String> {
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return Ok(vec![]),
-    };
-
-    let lim = limit.unwrap_or(200) as i64;
-    let off = offset.unwrap_or(0) as i64;
-
+/// Shared row-mapping so the real command and tests (in-memory fixture DB)
+/// exercise the exact same query + column layout.
+fn query_commit_scores(conn: &Connection, lim: i64, off: i64) -> Result<Vec<ScoredCommit>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT commitHash, branchName, scoredAt, linesAdded, linesDeleted,
+                    tabLinesAdded, tabLinesDeleted,
                     composerLinesAdded, composerLinesDeleted, humanLinesAdded, humanLinesDeleted,
                     blankLinesAdded, blankLinesDeleted, commitMessage, commitDate,
                     v1AiPercentage, v2AiPercentage
@@ -93,22 +89,24 @@ pub fn get_ai_commit_scores(limit: Option<usize>, offset: Option<usize>) -> Resu
 
     let rows = stmt
         .query_map([lim, off], |row| {
-            let v1: Option<String> = row.get(13)?;
-            let v2: Option<String> = row.get(14)?;
+            let v1: Option<String> = row.get(15)?;
+            let v2: Option<String> = row.get(16)?;
             Ok(ScoredCommit {
                 commit_hash: row.get(0)?,
                 branch_name: row.get(1)?,
                 scored_at: row.get(2)?,
                 lines_added: row.get(3)?,
                 lines_deleted: row.get(4)?,
-                composer_lines_added: row.get(5)?,
-                composer_lines_deleted: row.get(6)?,
-                human_lines_added: row.get(7)?,
-                human_lines_deleted: row.get(8)?,
-                blank_lines_added: row.get(9)?,
-                blank_lines_deleted: row.get(10)?,
-                commit_message: row.get(11)?,
-                commit_date: row.get(12)?,
+                tab_lines_added: row.get(5)?,
+                tab_lines_deleted: row.get(6)?,
+                composer_lines_added: row.get(7)?,
+                composer_lines_deleted: row.get(8)?,
+                human_lines_added: row.get(9)?,
+                human_lines_deleted: row.get(10)?,
+                blank_lines_added: row.get(11)?,
+                blank_lines_deleted: row.get(12)?,
+                commit_message: row.get(13)?,
+                commit_date: row.get(14)?,
                 ai_percentage: parse_ai_percentage(v2, v1),
             })
         })
@@ -121,6 +119,18 @@ pub fn get_ai_commit_scores(limit: Option<usize>, offset: Option<usize>) -> Resu
         }
     }
     Ok(results)
+}
+
+#[tauri::command]
+pub fn get_ai_commit_scores(limit: Option<usize>, offset: Option<usize>) -> Result<Vec<ScoredCommit>, String> {
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(_) => return Ok(vec![]),
+    };
+
+    let lim = limit.unwrap_or(200) as i64;
+    let off = offset.unwrap_or(0) as i64;
+    query_commit_scores(&conn, lim, off)
 }
 
 #[tauri::command]
@@ -275,4 +285,52 @@ pub fn get_ai_tracking_model_breakdown() -> Result<HashMap<String, u64>, String>
         }
     }
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scored_commits (
+                commitHash TEXT NOT NULL,
+                branchName TEXT NOT NULL,
+                scoredAt INTEGER NOT NULL, linesAdded INTEGER, linesDeleted INTEGER,
+                tabLinesAdded INTEGER, tabLinesDeleted INTEGER,
+                composerLinesAdded INTEGER, composerLinesDeleted INTEGER,
+                humanLinesAdded INTEGER, humanLinesDeleted INTEGER,
+                blankLinesAdded INTEGER, blankLinesDeleted INTEGER,
+                commitMessage TEXT, commitDate TEXT, v1AiPercentage TEXT, v2AiPercentage TEXT,
+                PRIMARY KEY (commitHash, branchName)
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scored_commits
+             (commitHash, branchName, scoredAt, linesAdded, linesDeleted, tabLinesAdded, tabLinesDeleted,
+              composerLinesAdded, composerLinesDeleted, humanLinesAdded, humanLinesDeleted,
+              blankLinesAdded, blankLinesDeleted, commitMessage, commitDate, v1AiPercentage, v2AiPercentage)
+             VALUES ('abc123', 'main', 1700000000000, 40, 10, 25, 3, 30, 5, 10, 5, 0, 0,
+                     'feat: thing', '2026-01-01T00:00:00Z', '0', '62.5')",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn query_commit_scores_reads_tab_lines_columns() {
+        let conn = fixture_conn();
+        let rows = query_commit_scores(&conn, 200, 0).unwrap();
+        assert_eq!(rows.len(), 1);
+        let c = &rows[0];
+        assert_eq!(c.commit_hash, "abc123");
+        assert_eq!(c.tab_lines_added, Some(25));
+        assert_eq!(c.tab_lines_deleted, Some(3));
+        assert_eq!(c.lines_added, Some(40));
+        assert_eq!(c.lines_deleted, Some(10));
+        assert!((c.ai_percentage - 62.5).abs() < 1e-9);
+    }
 }

@@ -194,6 +194,9 @@ use analytics::cursor_v2::{
     get_cursor_v2_team_spend, get_cursor_v2_request_breakdown, disconnect_cursor_v2,
     set_cursor_v2_cache_ttl, get_cursor_v2_cache_info,
 };
+use analytics::cursor_projects::{
+    get_cursor_projects_overview, get_cursor_project_detail, start_cursor_in_project,
+};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -585,6 +588,9 @@ pub fn run() {
             disconnect_cursor_v2,
             set_cursor_v2_cache_ttl,
             get_cursor_v2_cache_info,
+            get_cursor_projects_overview,
+            get_cursor_project_detail,
+            start_cursor_in_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
