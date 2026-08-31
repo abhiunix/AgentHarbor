@@ -328,7 +328,11 @@ function ProjectRow({ p, expanded, onToggle }: { p: CursorProjectStat; expanded:
         </td>
         <td className="px-3 py-2 text-right text-text-secondary font-mono">{formatNum(p.sessions)}</td>
         <td className="px-3 py-2 text-right text-text-muted font-mono">
-          {formatNum(p.input_tokens)}/{formatNum(p.output_tokens)}
+          {p.cost_cents > 0
+            ? `$${(p.cost_cents / 100).toFixed(2)}${p.input_tokens + p.output_tokens > 0 ? ` · ${formatNum(p.input_tokens + p.output_tokens)} tok` : ""}`
+            : p.input_tokens + p.output_tokens > 0
+              ? `${formatNum(p.input_tokens)}/${formatNum(p.output_tokens)} tok`
+              : "\u2014"}
         </td>
         <td className="px-3 py-2 text-right font-mono">
           <span className="text-emerald-400">+{formatNum(p.lines_added)}</span>{" "}
@@ -425,6 +429,7 @@ export function CursorProjectsPage() {
             <StatCard label="Projects" value={formatNum(overview.projects.length)} />
             <StatCard label="Sessions" value={formatNum(overview.totals.sessions)} />
             <StatCard label="Tokens" value={formatNum(overview.totals.input_tokens + overview.totals.output_tokens)} sub={`${formatNum(overview.totals.input_tokens)} in · ${formatNum(overview.totals.output_tokens)} out`} />
+            <StatCard label="Cost" value={`$${(overview.totals.cost_cents / 100).toFixed(2)}`} sub={`${formatNum(overview.totals.requests)} requests (newer chats)`} />
             <StatCard label="Lines" value={`+${formatNum(overview.totals.lines_added)}/-${formatNum(overview.totals.lines_removed)}`} />
             <StatCard label="Files changed" value={formatNum(overview.totals.files_changed)} />
             <StatCard label="Commits" value={formatNum(overview.totals.commit_count)} />
@@ -451,7 +456,7 @@ export function CursorProjectsPage() {
                     <tr className="text-left text-text-muted border-b border-[#2a2b36]">
                       <th className="px-3 py-2 font-medium">Project</th>
                       <th className="px-3 py-2 font-medium text-right">Sessions</th>
-                      <th className="px-3 py-2 font-medium text-right">Tokens in/out</th>
+                      <th className="px-3 py-2 font-medium text-right">Usage</th>
                       <th className="px-3 py-2 font-medium text-right">±Lines</th>
                       <th className="px-3 py-2 font-medium text-right">Files</th>
                       <th className="px-3 py-2 font-medium text-right">Commits</th>

@@ -32,6 +32,8 @@ pub struct CursorProjectTotals {
     pub sessions: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cost_cents: u64,
+    pub requests: u64,
     pub lines_added: i64,
     pub lines_removed: i64,
     pub files_changed: u64,
@@ -45,6 +47,8 @@ pub struct CursorProjectStat {
     pub sessions: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cost_cents: u64,
+    pub requests: u64,
     pub lines_added: i64,
     pub lines_removed: i64,
     pub files_changed: u64,
@@ -265,6 +269,12 @@ struct ComposerHeader {
     lines_removed: i64,
     files_changed: u64,
     context_usage_percent: Option<f64>,
+    /// New-format usage: total cost in cents and request count summed over
+    /// `composerData.usageData` (`{model: {costInCents, amount}}`). Recent
+    /// (glass-era) chats stopped writing per-bubble tokenCount; cost is the
+    /// usage signal they expose instead.
+    cost_cents: u64,
+    requests: u64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -321,6 +331,8 @@ fn header_from_value(
         lines_removed,
         files_changed,
         context_usage_percent,
+        cost_cents: 0,
+        requests: 0,
     }
 }
 
@@ -417,9 +429,24 @@ fn list_composer_data_ids(conn: &Connection) -> Vec<String> {
     ids
 }
 
+/// Sum `usageData` (`{model: {costInCents, amount}}`) into (cents, requests).
+fn usage_from_composer_data(data: &serde_json::Value) -> (u64, u64) {
+    let Some(obj) = data.get("usageData").and_then(|v| v.as_object()) else {
+        return (0, 0);
+    };
+    let mut cents = 0u64;
+    let mut requests = 0u64;
+    for entry in obj.values() {
+        cents += entry.get("costInCents").and_then(|v| v.as_u64()).unwrap_or(0);
+        requests += entry.get("amount").and_then(|v| v.as_u64()).unwrap_or(0);
+    }
+    (cents, requests)
+}
+
 /// Synthesize a `ComposerHeader` for a legacy composer that has no
 /// `composerHeaders` row, from its `composerData:` JSON.
 fn header_from_composer_data(composer_id: &str, data: &serde_json::Value) -> ComposerHeader {
+    let (cost_cents, requests) = usage_from_composer_data(data);
     ComposerHeader {
         composer_id: composer_id.to_string(),
         workspace_id: None,
@@ -434,6 +461,8 @@ fn header_from_composer_data(composer_id: &str, data: &serde_json::Value) -> Com
         lines_removed: data.get("totalLinesRemoved").and_then(|v| v.as_i64()).unwrap_or(0),
         files_changed: data.get("filesChangedCount").and_then(|v| v.as_u64()).unwrap_or(0),
         context_usage_percent: data.get("contextUsagePercent").and_then(|v| v.as_f64()),
+        cost_cents,
+        requests,
     }
 }
 
@@ -666,9 +695,20 @@ fn build_corpus() -> ProjectsCorpus {
     // get a chance at them.
     if let Some(conn) = conn.as_ref() {
         for id in list_composer_data_ids(conn) {
-            if !headers.contains_key(&id) {
-                if let Some(data) = read_composer_data(conn, &id) {
-                    headers.insert(id.clone(), header_from_composer_data(&id, &data));
+            match headers.get_mut(&id) {
+                None => {
+                    if let Some(data) = read_composer_data(conn, &id) {
+                        headers.insert(id.clone(), header_from_composer_data(&id, &data));
+                    }
+                }
+                Some(h) => {
+                    // Header-era chat: fill new-format usage (cost/requests)
+                    // from its composerData, which the header row lacks.
+                    if let Some(data) = read_composer_data(conn, &id) {
+                        let (cents, reqs) = usage_from_composer_data(&data);
+                        h.cost_cents = cents;
+                        h.requests = reqs;
+                    }
                 }
             }
         }
@@ -1068,6 +1108,8 @@ struct ProjectAgg {
     sessions: u64,
     input_tokens: u64,
     output_tokens: u64,
+    cost_cents: u64,
+    requests: u64,
     lines_added: i64,
     lines_removed: i64,
     files_changed: u64,
@@ -1105,6 +1147,8 @@ fn build_overview(force_refresh: bool) -> CursorProjectsOverview {
                 let a = agg.entry(path.clone()).or_default();
                 a.input_tokens += in_tok;
                 a.output_tokens += out_tok;
+                a.cost_cents += h.cost_cents;
+                a.requests += h.requests;
                 a.lines_added += h.lines_added;
                 a.lines_removed += h.lines_removed;
                 a.files_changed += h.files_changed;
@@ -1154,6 +1198,8 @@ fn build_overview(force_refresh: bool) -> CursorProjectsOverview {
                 sessions: a.sessions,
                 input_tokens: a.input_tokens,
                 output_tokens: a.output_tokens,
+                cost_cents: a.cost_cents,
+                requests: a.requests,
                 lines_added: a.lines_added,
                 lines_removed: a.lines_removed,
                 files_changed: a.files_changed,
@@ -1172,6 +1218,8 @@ fn build_overview(force_refresh: bool) -> CursorProjectsOverview {
         t.sessions += p.sessions;
         t.input_tokens += p.input_tokens;
         t.output_tokens += p.output_tokens;
+        t.cost_cents += p.cost_cents;
+        t.requests += p.requests;
         t.lines_added += p.lines_added;
         t.lines_removed += p.lines_removed;
         t.files_changed += p.files_changed;
@@ -1386,6 +1434,8 @@ mod tests {
         headers.insert(
             "c1".to_string(),
             ComposerHeader {
+                cost_cents: 0,
+                requests: 0,
                 composer_id: "c1".into(),
                 workspace_id: Some("hash-1".into()),
                 fs_path_hint: Some("/fallback/fspath".into()),
@@ -1666,6 +1716,8 @@ mod tests {
 
     fn project_stat(path: &str, last_activity: Option<&str>) -> CursorProjectStat {
         CursorProjectStat {
+            cost_cents: 0,
+            requests: 0,
             path: path.to_string(),
             name: path.to_string(),
             sessions: 0,
