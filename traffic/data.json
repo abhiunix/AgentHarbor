@@ -1035,6 +1035,13 @@
         "count": 13,
         "uniques": 6
       }
+    ],
+    "2026-09-01": [
+      {
+        "referrer": "github.com",
+        "count": 13,
+        "uniques": 6
+      }
     ]
   },
   "paths": {
@@ -2597,6 +2604,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-09-01": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 45,
+        "uniques": 16
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulse",
+        "count": 5,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/graphs/traffic",
+        "count": 4,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.1.4",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/stargazers",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/screenshot-cost-analysis.webp",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/forks",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulls",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -2749,10 +2808,15 @@
       "stars": 11,
       "forks": 1,
       "issues": 8
+    },
+    "2026-09-01": {
+      "stars": 11,
+      "forks": 0,
+      "issues": 8
     }
   },
   "window": {
-    "asOf": "2026-08-31",
+    "asOf": "2026-09-01",
     "views": {
       "count": 67,
       "uniques": 16
