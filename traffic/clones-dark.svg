@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 430" width="620" height="430" role="img" aria-label="Clones in last 14 days: 308 Clones">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 430" width="620" height="430" role="img" aria-label="Clones in last 14 days: 296 Clones">
   <rect x="0.5" y="0.5" width="619" height="429" fill="#0d1117" stroke="#30363d" rx="6"/>
   <g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
   <text x="28" y="44" fill="#e6edf3" font-size="18" font-weight="600">Clones in last 14 days</text>
-  <text x="28" y="70" fill="#848d97" font-size="14">308 Clones</text>
+  <text x="28" y="70" fill="#848d97" font-size="14">296 Clones</text>
   <line x1="64" y1="372.0" x2="592" y2="372.0" stroke="#21262d" stroke-width="1"/>
   <text x="52" y="376.0" text-anchor="end" fill="#848d97" font-size="12">0</text>
   <line x1="64" y1="318.4" x2="592" y2="318.4" stroke="#21262d" stroke-width="1"/>
@@ -30,27 +30,27 @@
   <line x1="551.4" y1="104" x2="551.4" y2="372" stroke="#21262d" stroke-width="0.5"/>
   <line x1="592.0" y1="104" x2="592.0" y2="372" stroke="#21262d" stroke-width="0.5"/>
   
-  <text x="64.0" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/17</text>
-  <text x="145.2" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/19</text>
-  <text x="226.5" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/21</text>
-  <text x="307.7" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/23</text>
-  <text x="388.9" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/25</text>
-  <text x="470.2" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/27</text>
-  <text x="551.4" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/29</text>
-  <path d="M 64.0 238.0 L 104.6 307.7 L 145.2 291.6 L 185.8 313.0 L 226.5 307.7 L 267.1 195.1 L 307.7 211.2 L 348.3 163.0 L 388.9 168.3 L 429.5 227.3 L 470.2 323.8 L 510.8 339.8 L 551.4 152.2 L 592.0 318.4" fill="none" stroke="#3fb950" stroke-width="2" stroke-linejoin="round"/>
-  <text x="64.0" y="230.0" text-anchor="start" fill="#e6edf3" font-size="11" font-weight="600">25</text>
-  <text x="104.6" y="299.7" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">12</text>
-  <text x="145.2" y="283.6" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">15</text>
-  <text x="185.8" y="305.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">11</text>
-  <text x="226.5" y="299.7" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">12</text>
-  <text x="267.1" y="187.1" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">33</text>
-  <text x="307.7" y="203.2" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">30</text>
-  <text x="348.3" y="155.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">39</text>
-  <text x="388.9" y="160.3" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">38</text>
-  <text x="429.5" y="219.3" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">27</text>
-  <text x="470.2" y="315.8" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">9</text>
-  <text x="510.8" y="331.8" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">6</text>
-  <text x="551.4" y="144.2" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">41</text>
-  <text x="592.0" y="310.4" text-anchor="end" fill="#e6edf3" font-size="11" font-weight="600">10</text>
+  <text x="64.0" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/18</text>
+  <text x="145.2" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/20</text>
+  <text x="226.5" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/22</text>
+  <text x="307.7" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/24</text>
+  <text x="388.9" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/26</text>
+  <text x="470.2" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/28</text>
+  <text x="551.4" y="396" text-anchor="middle" fill="#848d97" font-size="12">08/30</text>
+  <path d="M 64.0 307.7 L 104.6 291.6 L 145.2 313.0 L 185.8 307.7 L 226.5 195.1 L 267.1 211.2 L 307.7 163.0 L 348.3 168.3 L 388.9 227.3 L 429.5 323.8 L 470.2 339.8 L 510.8 152.2 L 551.4 318.4 L 592.0 302.3" fill="none" stroke="#3fb950" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64.0" y="299.7" text-anchor="start" fill="#e6edf3" font-size="11" font-weight="600">12</text>
+  <text x="104.6" y="283.6" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">15</text>
+  <text x="145.2" y="305.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">11</text>
+  <text x="185.8" y="299.7" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">12</text>
+  <text x="226.5" y="187.1" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">33</text>
+  <text x="267.1" y="203.2" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">30</text>
+  <text x="307.7" y="155.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">39</text>
+  <text x="348.3" y="160.3" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">38</text>
+  <text x="388.9" y="219.3" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">27</text>
+  <text x="429.5" y="315.8" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">9</text>
+  <text x="470.2" y="331.8" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">6</text>
+  <text x="510.8" y="144.2" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">41</text>
+  <text x="551.4" y="310.4" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">10</text>
+  <text x="592.0" y="294.3" text-anchor="end" fill="#e6edf3" font-size="11" font-weight="600">13</text>
   </g>
 </svg>
