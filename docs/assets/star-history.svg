@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" width="720" height="320" role="img" aria-label="Cumulative GitHub stars for abhiunix/AgentHarbor: 11 as of Sep 1">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" width="720" height="320" role="img" aria-label="Cumulative GitHub stars for abhiunix/AgentHarbor: 11 as of Sep 2">
   <rect width="720" height="320" fill="#fcfcfb" rx="6"/>
   <g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
   <line x1="40" y1="284.0" x2="672" y2="284.0" stroke="#e1e0d9" stroke-width="1"/>
@@ -9,9 +9,9 @@
   <text x="32" y="31.5" text-anchor="end" fill="#898781" font-size="11">13</text>
   <line x1="40" y1="284" x2="672" y2="284" stroke="#c3c2b7" stroke-width="1"/>
   <text x="40.0" y="308" text-anchor="start" fill="#898781" font-size="11">May 21</text>
-  <text x="356.0" y="308" text-anchor="middle" fill="#898781" font-size="11">Jul 11</text>
-  <text x="672.0" y="308" text-anchor="end" fill="#898781" font-size="11">Sep 1</text>
-  <path d="M 40.0 284.0 L 40.0 284.0 L 40.0 264.3 L 60.7 264.3 L 60.7 244.6 L 75.5 244.6 L 75.5 224.9 L 77.0 224.9 L 77.0 205.2 L 303.5 205.2 L 303.5 185.5 L 323.3 185.5 L 323.3 165.8 L 377.8 165.8 L 377.8 146.2 L 407.5 146.2 L 407.5 126.5 L 505.0 126.5 L 505.0 106.8 L 575.5 106.8 L 575.5 87.1 L 585.0 87.1 L 585.0 67.4 L 672.0 67.4" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
+  <text x="356.0" y="308" text-anchor="middle" fill="#898781" font-size="11">Jul 12</text>
+  <text x="672.0" y="308" text-anchor="end" fill="#898781" font-size="11">Sep 2</text>
+  <path d="M 40.0 284.0 L 40.0 284.0 L 40.0 264.3 L 60.5 264.3 L 60.5 244.6 L 75.2 244.6 L 75.2 224.9 L 76.6 224.9 L 76.6 205.2 L 301.0 205.2 L 301.0 185.5 L 320.6 185.5 L 320.6 165.8 L 374.6 165.8 L 374.6 146.2 L 404.0 146.2 L 404.0 126.5 L 500.6 126.5 L 500.6 106.8 L 570.5 106.8 L 570.5 87.1 L 579.8 87.1 L 579.8 67.4 L 672.0 67.4" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
   <circle cx="672.0" cy="67.4" r="4" fill="#2a78d6"/>
   <text x="680.0" y="71.4" fill="#52514e" font-size="12" font-weight="600">11</text>
   </g>
