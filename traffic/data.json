@@ -179,6 +179,10 @@
     "2026-08-31": {
       "count": 4,
       "uniques": 1
+    },
+    "2026-09-01": {
+      "count": 0,
+      "uniques": 0
     }
   },
   "clones": {
@@ -361,6 +365,10 @@
     "2026-08-31": {
       "count": 13,
       "uniques": 9
+    },
+    "2026-09-01": {
+      "count": 10,
+      "uniques": 5
     }
   },
   "referrers": {
@@ -1056,6 +1064,13 @@
         "referrer": "github.com",
         "count": 13,
         "uniques": 6
+      }
+    ],
+    "2026-09-03": [
+      {
+        "referrer": "github.com",
+        "count": 7,
+        "uniques": 5
       }
     ]
   },
@@ -2723,6 +2738,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-09-03": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 39,
+        "uniques": 15
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/graphs/traffic",
+        "count": 4,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulse",
+        "count": 4,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.1.4",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/stargazers",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/screenshot-cost-analysis.webp",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/forks",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.2.0",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -2885,17 +2952,22 @@
       "stars": 11,
       "forks": 0,
       "issues": 8
+    },
+    "2026-09-03": {
+      "stars": 11,
+      "forks": 0,
+      "issues": 8
     }
   },
   "window": {
-    "asOf": "2026-09-02",
+    "asOf": "2026-09-03",
     "views": {
-      "count": 67,
-      "uniques": 16
+      "count": 58,
+      "uniques": 15
     },
     "clones": {
-      "count": 296,
-      "uniques": 84
+      "count": 294,
+      "uniques": 82
     }
   }
 }
