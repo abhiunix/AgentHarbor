@@ -33,7 +33,7 @@ const ADAPTERS: AdapterInfo[] = [
   { id: "cursor", name: "Cursor", color: "#3b82f6", supportsAgents: true, supportsMcp: true, supportsRules: true, supportsSkills: true },
   { id: "windsurf", name: "Windsurf", color: "#22c55e", supportsAgents: false, supportsMcp: true, supportsRules: true, supportsSkills: false },
   { id: "gemini", name: "Gemini CLI", color: "#4285f4", supportsAgents: true, supportsMcp: true, supportsRules: true, supportsSkills: true },
-  { id: "codex", name: "Codex", color: "#10a37f", supportsAgents: false, supportsMcp: false, supportsRules: false, supportsSkills: true },
+  { id: "codex", name: "Codex", color: "#10a37f", supportsAgents: false, supportsMcp: false, supportsRules: true, supportsSkills: true },
   { id: "opencode", name: "OpenCode", color: "#f5a623", supportsAgents: true, supportsMcp: true, supportsRules: true, supportsSkills: true },
 ];
 

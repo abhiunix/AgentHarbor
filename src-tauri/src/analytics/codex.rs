@@ -1,11 +1,12 @@
 //! Codex (OpenAI) analytics provider.
-//! Auth fallback: user token → auto-detect ~/.codex/auth.json
-//! API: chatgpt.com/backend-api/wham/usage
+//! Auth fallback: user token, then auto-detect ~/.codex/auth.json
+//! API: documented Codex App Server, with legacy WHAM as a compatibility fallback
 //! Local data: ~/.codex/state_5.sqlite, ~/.codex/models_cache.json, ~/.codex/config.toml
 
 use crate::analytics::http;
 use crate::analytics::token_store;
 use crate::analytics::types::*;
+use crate::commands::codex_app_server;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -57,11 +58,9 @@ where
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Number(n)) => Ok(n.as_f64()),
         Some(serde_json::Value::String(s)) if s.trim().is_empty() => Ok(None),
-        Some(serde_json::Value::String(s)) => s
-            .trim()
-            .parse::<f64>()
-            .map(Some)
-            .map_err(|e| serde::de::Error::custom(format!("invalid numeric string {:?}: {}", s, e))),
+        Some(serde_json::Value::String(s)) => s.trim().parse::<f64>().map(Some).map_err(|e| {
+            serde::de::Error::custom(format!("invalid numeric string {:?}: {}", s, e))
+        }),
         Some(other) => Err(serde::de::Error::custom(format!(
             "expected number or numeric string, got {}",
             other
@@ -78,14 +77,18 @@ where
     let value = Option::<serde_json::Value>::deserialize(deserializer)?;
     match value {
         None | Some(serde_json::Value::Null) => Ok(None),
-        Some(serde_json::Value::Number(n)) => Ok(n.as_i64().or_else(|| n.as_f64().map(|f| f as i64))),
+        Some(serde_json::Value::Number(n)) => {
+            Ok(n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)))
+        }
         Some(serde_json::Value::String(s)) if s.trim().is_empty() => Ok(None),
         Some(serde_json::Value::String(s)) => s
             .trim()
             .parse::<i64>()
             .or_else(|_| s.trim().parse::<f64>().map(|f| f as i64))
             .map(Some)
-            .map_err(|e| serde::de::Error::custom(format!("invalid integer string {:?}: {}", s, e))),
+            .map_err(|e| {
+                serde::de::Error::custom(format!("invalid integer string {:?}: {}", s, e))
+            }),
         Some(other) => Err(serde::de::Error::custom(format!(
             "expected integer or numeric string, got {}",
             other
@@ -122,6 +125,13 @@ struct WhamCredits {
 }
 
 #[derive(Deserialize, Debug)]
+struct WhamAdditionalRateLimit {
+    limit_name: Option<String>,
+    metered_feature: Option<String>,
+    rate_limit: Option<WhamRateLimit>,
+}
+
+#[derive(Deserialize, Debug)]
 struct WhamUsageResponse {
     user_id: Option<String>,
     account_id: Option<String>,
@@ -129,27 +139,68 @@ struct WhamUsageResponse {
     plan_type: Option<String>,
     rate_limit: Option<WhamRateLimit>,
     code_review_rate_limit: Option<WhamRateLimit>,
+    additional_rate_limits: Option<Vec<WhamAdditionalRateLimit>>,
     credits: Option<WhamCredits>,
 }
 
-fn auth_path() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".codex").join("auth.json")
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AppServerRateWindow {
+    used_percent: Option<f64>,
+    window_duration_mins: Option<i64>,
+    resets_at: Option<i64>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AppServerCredits {
+    has_credits: Option<bool>,
+    unlimited: Option<bool>,
+    #[serde(default, deserialize_with = "de_lenient_opt_f64")]
+    balance: Option<f64>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AppServerRateLimit {
+    limit_id: Option<String>,
+    limit_name: Option<String>,
+    primary: Option<AppServerRateWindow>,
+    secondary: Option<AppServerRateWindow>,
+    credits: Option<AppServerCredits>,
+    plan_type: Option<String>,
+    rate_limit_reached_type: Option<String>,
+    spend_control_reached: Option<bool>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct AppServerRateLimitsResponse {
+    rate_limits: Option<AppServerRateLimit>,
+    rate_limits_by_limit_id: Option<HashMap<String, AppServerRateLimit>>,
+}
+
+fn auth_path() -> Result<PathBuf, String> {
+    Ok(crate::utils::codex_paths::codex_home()?.join("auth.json"))
 }
 
 fn resolve_token() -> Result<(String, String, Option<String>), String> {
     // 1. User-provided
     if let Ok(Some(token)) = token_store::get_provider_token("codex", "access-token") {
-        let account_id = token_store::get_provider_token("codex", "account-id").ok().flatten();
+        let account_id = token_store::get_provider_token("codex", "account-id")
+            .ok()
+            .flatten();
         return Ok((token, "token-manual".into(), account_id));
     }
 
     // 2. Auto-detect
-    let path = auth_path();
+    let path = auth_path()?;
     if !path.exists() {
         return Err("Codex auth.json not found".into());
     }
     let content = fs::read_to_string(&path).map_err(|e| format!("Read error: {}", e))?;
-    let auth: CodexAuth = serde_json::from_str(&content).map_err(|e| format!("Parse error: {}", e))?;
+    let auth: CodexAuth =
+        serde_json::from_str(&content).map_err(|e| format!("Parse error: {}", e))?;
 
     if let Some(ref tokens) = auth.tokens {
         if let Some(ref at) = tokens.access_token {
@@ -174,6 +225,241 @@ fn parse_wham_window(w: &Option<WhamRateWindow>, label: &str) -> Option<RateLimi
         }),
         resets_in_seconds: win.reset_after_seconds,
         window_seconds: win.limit_window_seconds,
+    })
+}
+
+fn wham_window_label(
+    window: &Option<WhamRateWindow>,
+    prefix: Option<&str>,
+    fallback: &str,
+) -> String {
+    let period = window
+        .as_ref()
+        .and_then(|w| w.limit_window_seconds)
+        .filter(|seconds| *seconds > 0)
+        .map(|seconds| {
+            if seconds % 86_400 == 0 {
+                format!("{}d", seconds / 86_400)
+            } else if seconds % 3_600 == 0 {
+                format!("{}h", seconds / 3_600)
+            } else if seconds % 60 == 0 {
+                format!("{}m", seconds / 60)
+            } else {
+                format!("{}s", seconds)
+            }
+        });
+
+    match (prefix, period.as_deref()) {
+        (Some(name), Some(period)) => format!("{} ({})", name, period),
+        (Some(name), None) => format!("{} ({})", name, fallback),
+        (None, Some("7d")) => "Weekly (7d)".into(),
+        (None, Some(period)) => format!("{} ({})", fallback, period),
+        (None, None) => match fallback {
+            "Primary" => "Primary (5h)".into(),
+            "Secondary" => "Weekly (7d)".into(),
+            _ => fallback.into(),
+        },
+    }
+}
+
+fn append_wham_windows(
+    windows: &mut Vec<RateLimitWindow>,
+    rate_limit: &WhamRateLimit,
+    prefix: Option<&str>,
+) {
+    let primary_label = wham_window_label(&rate_limit.primary_window, prefix, "Primary");
+    if let Some(window) = parse_wham_window(&rate_limit.primary_window, &primary_label) {
+        windows.push(window);
+    }
+
+    let secondary_label = wham_window_label(&rate_limit.secondary_window, prefix, "Secondary");
+    if let Some(window) = parse_wham_window(&rate_limit.secondary_window, &secondary_label) {
+        windows.push(window);
+    }
+}
+
+fn parse_wham_credit_usage(
+    credits: Option<&WhamCredits>,
+    plan_type: Option<&str>,
+) -> Option<CreditUsage> {
+    let credits = credits?;
+    if credits.has_credits == Some(false) {
+        return None;
+    }
+
+    let remaining = credits
+        .balance
+        .or_else(|| (credits.unlimited == Some(true)).then_some(0.0))?;
+
+    Some(CreditUsage {
+        provider_id: "codex".into(),
+        used: 0.0,
+        limit: None,
+        remaining,
+        currency: "credits".into(),
+        billing_cycle_end: None,
+        plan_name: plan_type.map(str::to_owned),
+    })
+}
+
+fn rate_window_period(minutes: Option<i64>) -> Option<String> {
+    let minutes = minutes.filter(|value| *value > 0)?;
+    if minutes % (24 * 60) == 0 {
+        Some(format!("{}d", minutes / (24 * 60)))
+    } else if minutes % 60 == 0 {
+        Some(format!("{}h", minutes / 60))
+    } else {
+        Some(format!("{}m", minutes))
+    }
+}
+
+fn app_server_window_label(
+    limit: &AppServerRateLimit,
+    window: &AppServerRateWindow,
+    secondary: bool,
+) -> String {
+    let period = rate_window_period(window.window_duration_mins);
+    if let Some(name) = limit
+        .limit_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        return period
+            .map(|period| format!("{name} ({period})"))
+            .unwrap_or_else(|| name.to_string());
+    }
+
+    match period.as_deref() {
+        Some("7d") => "Weekly (7d)".into(),
+        Some(period) => format!(
+            "{} ({period})",
+            if secondary { "Secondary" } else { "Primary" }
+        ),
+        None if secondary => "Secondary".into(),
+        None => "Primary".into(),
+    }
+}
+
+fn app_server_window(
+    limit: &AppServerRateLimit,
+    window: &AppServerRateWindow,
+    secondary: bool,
+) -> Option<RateLimitWindow> {
+    let used = window.used_percent?;
+    Some(RateLimitWindow {
+        provider_id: "codex".into(),
+        label: app_server_window_label(limit, window, secondary),
+        used_percent: used,
+        remaining_percent: (100.0 - used).clamp(0.0, 100.0),
+        resets_at: window.resets_at.map(|timestamp| {
+            chrono::DateTime::from_timestamp(timestamp, 0)
+                .map(|date| date.to_rfc3339())
+                .unwrap_or_default()
+        }),
+        resets_in_seconds: window
+            .resets_at
+            .map(|timestamp| (timestamp - Utc::now().timestamp()).max(0)),
+        window_seconds: window.window_duration_mins.map(|minutes| minutes * 60),
+    })
+}
+
+fn append_app_server_windows(windows: &mut Vec<RateLimitWindow>, limit: &AppServerRateLimit) {
+    if let Some(primary) = limit.primary.as_ref() {
+        if let Some(window) = app_server_window(limit, primary, false) {
+            windows.push(window);
+        }
+    }
+    if let Some(secondary) = limit.secondary.as_ref() {
+        if let Some(window) = app_server_window(limit, secondary, true) {
+            windows.push(window);
+        }
+    }
+}
+
+fn ordered_app_server_limits(response: &AppServerRateLimitsResponse) -> Vec<AppServerRateLimit> {
+    let mut limits = Vec::new();
+    let primary_id = response
+        .rate_limits
+        .as_ref()
+        .and_then(|limit| limit.limit_id.clone());
+    if let Some(primary) = response.rate_limits.clone() {
+        limits.push(primary);
+    }
+
+    let mut additional: Vec<(String, AppServerRateLimit)> = response
+        .rate_limits_by_limit_id
+        .as_ref()
+        .into_iter()
+        .flat_map(|limits| limits.iter())
+        .filter(|(id, limit)| {
+            primary_id.as_deref() != Some(id.as_str())
+                && primary_id.as_deref() != limit.limit_id.as_deref()
+        })
+        .map(|(id, limit)| (id.clone(), limit.clone()))
+        .collect();
+    additional.sort_by(|(left_id, left), (right_id, right)| {
+        left.limit_name
+            .as_deref()
+            .unwrap_or(left_id)
+            .cmp(right.limit_name.as_deref().unwrap_or(right_id))
+    });
+    limits.extend(additional.into_iter().map(|(_, limit)| limit));
+    limits
+}
+
+fn app_server_credit_usage(limits: &[AppServerRateLimit]) -> Option<CreditUsage> {
+    limits.iter().find_map(|limit| {
+        let credits = limit.credits.as_ref()?;
+        if credits.has_credits == Some(false) {
+            return None;
+        }
+        Some(CreditUsage {
+            provider_id: "codex".into(),
+            used: 0.0,
+            limit: None,
+            remaining: credits
+                .balance
+                .or_else(|| (credits.unlimited == Some(true)).then_some(0.0))?,
+            currency: "credits".into(),
+            billing_cycle_end: None,
+            plan_name: limit.plan_type.clone(),
+        })
+    })
+}
+
+fn app_server_limit_state(limits: &[AppServerRateLimit]) -> Option<LimitState> {
+    limits.iter().find_map(|limit| {
+        let reached = limit.rate_limit_reached_type.is_some()
+            || limit.spend_control_reached == Some(true)
+            || limit
+                .primary
+                .iter()
+                .chain(limit.secondary.iter())
+                .any(|window| window.used_percent.is_some_and(|percent| percent >= 100.0));
+        if !reached {
+            return None;
+        }
+        let used_pct = limit
+            .primary
+            .iter()
+            .chain(limit.secondary.iter())
+            .filter_map(|window| window.used_percent)
+            .fold(100.0_f64, f64::max);
+        let resets_at = limit
+            .primary
+            .iter()
+            .chain(limit.secondary.iter())
+            .filter_map(|window| window.resets_at)
+            .min()
+            .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+            .map(|date| date.to_rfc3339());
+        Some(LimitState::Reached {
+            scope: LimitScope::Custom(limit.limit_id.clone().unwrap_or_else(|| "codex".into())),
+            used_pct,
+            cap: None,
+            resets_at,
+        })
     })
 }
 
@@ -272,8 +558,8 @@ struct OpenAIMeResponse {
 
 // ── Local data parsing ──────────────────────────────────────────────────────
 
-fn codex_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".codex")
+fn codex_dir() -> Result<PathBuf, String> {
+    crate::utils::codex_paths::codex_home()
 }
 
 /// Convert a millisecond epoch timestamp (as stored in `threads.created_at_ms`
@@ -287,7 +573,7 @@ fn ms_to_rfc3339(ms: i64) -> Option<String> {
 
 /// Open `~/.codex/state_5.sqlite` read-only, or `None` if missing/unreadable.
 fn open_codex_db() -> Option<rusqlite::Connection> {
-    let db_path = codex_dir().join("state_5.sqlite");
+    let db_path = codex_dir().ok()?.join("state_5.sqlite");
     if !db_path.exists() {
         return None;
     }
@@ -369,7 +655,9 @@ fn parse_token_count_line(line: &str) -> Option<(RolloutTokenUsage, Option<Rollo
 /// Scan a rollout file for its *last* `token_count` event — the cumulative
 /// usage for that session — plus the rate limits attached to that event.
 /// Skips oversized/corrupt files rather than failing the whole enrichment.
-fn scan_rollout_file(path: &std::path::Path) -> Option<(RolloutTokenUsage, Option<RolloutRateLimits>)> {
+fn scan_rollout_file(
+    path: &std::path::Path,
+) -> Option<(RolloutTokenUsage, Option<RolloutRateLimits>)> {
     const MAX_ROLLOUT_BYTES: u64 = 25 * 1024 * 1024;
     if let Ok(meta) = fs::metadata(path) {
         if meta.len() > MAX_ROLLOUT_BYTES {
@@ -402,7 +690,10 @@ fn rollout_window_label(minutes: Option<i64>, secondary: bool) -> String {
     }
 }
 
-fn rollout_rate_window_to_window(w: &RolloutRateWindow, secondary: bool) -> Option<RateLimitWindow> {
+fn rollout_rate_window_to_window(
+    w: &RolloutRateWindow,
+    secondary: bool,
+) -> Option<RateLimitWindow> {
     let used = w.used_percent?;
     Some(RateLimitWindow {
         provider_id: "codex".into(),
@@ -472,10 +763,11 @@ fn scan_recent_rollouts(conn: &rusqlite::Connection) -> RolloutScanResult {
         Ok(s) => s,
         Err(_) => return empty,
     };
-    let paths: Vec<String> = match stmt.query_map([ROLLOUT_SCAN_LIMIT], |row| row.get::<_, String>(0)) {
-        Ok(rows) => rows.flatten().collect(),
-        Err(_) => return empty,
-    };
+    let paths: Vec<String> =
+        match stmt.query_map([ROLLOUT_SCAN_LIMIT], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => return empty,
+        };
 
     let mut total = RolloutTokenUsage::default();
     let mut scanned = 0usize;
@@ -591,7 +883,10 @@ fn compute_activity_stats(created_at_ms: &[i64]) -> CodexActivityStats {
         if max_val == 0 {
             None
         } else {
-            hour_counts.iter().position(|&v| v == max_val).map(|i| i as u32)
+            hour_counts
+                .iter()
+                .position(|&v| v == max_val)
+                .map(|i| i as u32)
         }
     };
 
@@ -606,10 +901,11 @@ fn compute_activity_stats(created_at_ms: &[i64]) -> CodexActivityStats {
 }
 
 fn fetch_activity_timestamps(conn: &rusqlite::Connection) -> Vec<i64> {
-    let mut stmt = match conn.prepare("SELECT COALESCE(created_at_ms, created_at * 1000) FROM threads") {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
+    let mut stmt =
+        match conn.prepare("SELECT COALESCE(created_at_ms, created_at * 1000) FROM threads") {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
     let timestamps: Vec<i64> = match stmt.query_map([], |row| row.get::<_, i64>(0)) {
         Ok(rows) => rows.flatten().collect(),
         Err(_) => vec![],
@@ -620,7 +916,15 @@ fn fetch_activity_timestamps(conn: &rusqlite::Connection) -> Vec<i64> {
 // ── Per-project deep breakdown ───────────────────────────────────────────────
 
 /// One row read back from `threads` for per-project aggregation.
-type ThreadProjectRow = (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, i64);
+type ThreadProjectRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+);
 
 #[derive(Serialize, Clone, Debug)]
 struct CodexProjectBreakdown {
@@ -768,7 +1072,10 @@ fn parse_models_cache_json(content: &str) -> Vec<ModelCatalogEntry> {
 }
 
 fn read_model_catalog() -> Vec<ModelCatalogEntry> {
-    let path = codex_dir().join("models_cache.json");
+    let path = match codex_dir() {
+        Ok(directory) => directory.join("models_cache.json"),
+        Err(_) => return vec![],
+    };
     let content = match fs::read_to_string(&path) {
         Ok(c) => c,
         Err(_) => return vec![],
@@ -786,7 +1093,11 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
         .unwrap_or(0);
 
     let total_tokens_used: i64 = conn
-        .query_row("SELECT COALESCE(SUM(tokens_used), 0) FROM threads", [], |row| row.get(0))
+        .query_row(
+            "SELECT COALESCE(SUM(tokens_used), 0) FROM threads",
+            [],
+            |row| row.get(0),
+        )
         .unwrap_or(0);
 
     // Get recent sessions (last 50). created_at/updated_at are epoch-second
@@ -882,9 +1193,29 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
     })
 }
 
-/// Read config from ~/.codex/config.toml (simple key=value parsing)
+fn parse_codex_config(content: &str) -> (Option<String>, Option<String>) {
+    let document = match content.parse::<toml_edit::DocumentMut>() {
+        Ok(document) => document,
+        Err(_) => return (None, None),
+    };
+
+    let model = document
+        .get("model")
+        .and_then(toml_edit::Item::as_str)
+        .map(str::to_string);
+    let reasoning_effort = document
+        .get("model_reasoning_effort")
+        .and_then(toml_edit::Item::as_str)
+        .map(str::to_string);
+    (model, reasoning_effort)
+}
+
+/// Read model settings from the effective Codex home config.
 fn read_codex_config() -> (Option<String>, Option<String>) {
-    let path = codex_dir().join("config.toml");
+    let path = match codex_dir() {
+        Ok(directory) => directory.join("config.toml"),
+        Err(_) => return (None, None),
+    };
     if !path.exists() {
         return (None, None);
     }
@@ -892,33 +1223,12 @@ fn read_codex_config() -> (Option<String>, Option<String>) {
         Ok(c) => c,
         Err(_) => return (None, None),
     };
-    let mut model = None;
-    let mut reasoning_effort = None;
-    for line in content.lines() {
-        let line = line.trim();
-        if line.starts_with('#') || !line.contains('=') {
-            continue;
-        }
-        let mut parts = line.splitn(2, '=');
-        let key = parts.next().unwrap_or("").trim().trim_matches('"');
-        let val = parts.next().unwrap_or("").trim().trim_matches('"');
-        match key {
-            "model" => model = Some(val.to_string()),
-            "reasoning_effort" => reasoning_effort = Some(val.to_string()),
-            _ => {}
-        }
-    }
-    (model, reasoning_effort)
+    parse_codex_config(&content)
 }
 
 /// Fetch account profile from api.openai.com/v1/me
 fn fetch_account_profile(token: &str) -> Option<OpenAIMeResponse> {
-    http::authed_get::<OpenAIMeResponse>(
-        "https://api.openai.com/v1/me",
-        token,
-        None,
-    )
-    .ok()
+    http::authed_get::<OpenAIMeResponse>("https://api.openai.com/v1/me", token, None).ok()
 }
 
 /// Stats for a time window
@@ -931,14 +1241,22 @@ struct CodexWindowStats {
 /// Run a windowed session/token/cost query against `threads`. Hoisted to
 /// module scope (rather than nested in `fetch_multi_window_stats`) so the
 /// date-window SQL fix is directly unit-testable against a fixture DB.
-fn query_window(conn: &rusqlite::Connection, where_clause: &str, params: &[&str]) -> CodexWindowStats {
+fn query_window(
+    conn: &rusqlite::Connection,
+    where_clause: &str,
+    params: &[&str],
+) -> CodexWindowStats {
     let sql_count = format!(
         "SELECT COUNT(*), COALESCE(SUM(tokens_used), 0) FROM threads WHERE {}",
         where_clause
     );
-    let (sessions, tokens): (i64, i64) = conn.query_row(&sql_count, rusqlite::params_from_iter(params.iter()), |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    }).unwrap_or((0, 0));
+    let (sessions, tokens): (i64, i64) = conn
+        .query_row(
+            &sql_count,
+            rusqlite::params_from_iter(params.iter()),
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap_or((0, 0));
 
     let sql_cost = format!(
         "SELECT COALESCE(model, 'unknown'), COALESCE(tokens_used, 0) FROM threads WHERE {}",
@@ -956,7 +1274,11 @@ fn query_window(conn: &rusqlite::Connection, where_clause: &str, params: &[&str]
             }
         }
     }
-    CodexWindowStats { sessions, tokens, cost }
+    CodexWindowStats {
+        sessions,
+        tokens,
+        cost,
+    }
 }
 
 /// Get stats for 2 time windows from SQLite: today (since midnight), this week (since Monday)
@@ -988,25 +1310,63 @@ fn fetch_multi_window_stats() -> Option<(CodexWindowStats, CodexWindowStats)> {
 /// Enrich an extra HashMap with all local data. Returns offline (rollout-derived)
 /// rate-limit windows so the caller can fall back to them when the WHAM API
 /// call fails or returns nothing.
-fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) -> Option<Vec<RateLimitWindow>> {
+fn enrich_with_local_data(
+    extra: &mut HashMap<String, serde_json::Value>,
+) -> Option<Vec<RateLimitWindow>> {
     // SQLite local stats
     if let Ok(stats) = fetch_local_stats() {
-        extra.insert("total_sessions".into(), serde_json::json!(stats.total_sessions));
-        extra.insert("total_tokens_used".into(), serde_json::json!(stats.total_tokens_used));
-        extra.insert("sessions".into(), serde_json::to_value(&stats.sessions).unwrap_or_default());
-        extra.insert("tokens_by_model".into(), serde_json::to_value(&stats.tokens_by_model).unwrap_or_default());
-        extra.insert("sessions_by_project".into(), serde_json::to_value(&stats.sessions_by_project).unwrap_or_default());
-        extra.insert("estimated_total_cost".into(), serde_json::json!(stats.estimated_total_cost));
-        extra.insert("cost_by_model".into(), serde_json::to_value(&stats.cost_by_model).unwrap_or_default());
+        extra.insert(
+            "total_sessions".into(),
+            serde_json::json!(stats.total_sessions),
+        );
+        extra.insert(
+            "total_tokens_used".into(),
+            serde_json::json!(stats.total_tokens_used),
+        );
+        extra.insert(
+            "sessions".into(),
+            serde_json::to_value(&stats.sessions).unwrap_or_default(),
+        );
+        extra.insert(
+            "tokens_by_model".into(),
+            serde_json::to_value(&stats.tokens_by_model).unwrap_or_default(),
+        );
+        extra.insert(
+            "sessions_by_project".into(),
+            serde_json::to_value(&stats.sessions_by_project).unwrap_or_default(),
+        );
+        extra.insert(
+            "estimated_total_cost".into(),
+            serde_json::json!(stats.estimated_total_cost),
+        );
+        extra.insert(
+            "cost_by_model".into(),
+            serde_json::to_value(&stats.cost_by_model).unwrap_or_default(),
+        );
     }
 
     // Multi-window stats (today, this week)
     if let Some((stats_today, stats_week)) = fetch_multi_window_stats() {
-        extra.insert("start_today_sessions".into(), serde_json::json!(stats_today.sessions));
-        extra.insert("start_today_tokens".into(), serde_json::json!(stats_today.tokens));
-        extra.insert("start_today_cost".into(), serde_json::json!(stats_today.cost));
-        extra.insert("this_week_sessions".into(), serde_json::json!(stats_week.sessions));
-        extra.insert("this_week_tokens".into(), serde_json::json!(stats_week.tokens));
+        extra.insert(
+            "start_today_sessions".into(),
+            serde_json::json!(stats_today.sessions),
+        );
+        extra.insert(
+            "start_today_tokens".into(),
+            serde_json::json!(stats_today.tokens),
+        );
+        extra.insert(
+            "start_today_cost".into(),
+            serde_json::json!(stats_today.cost),
+        );
+        extra.insert(
+            "this_week_sessions".into(),
+            serde_json::json!(stats_week.sessions),
+        );
+        extra.insert(
+            "this_week_tokens".into(),
+            serde_json::json!(stats_week.tokens),
+        );
         extra.insert("this_week_cost".into(), serde_json::json!(stats_week.cost));
     }
 
@@ -1015,9 +1375,15 @@ fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) -> Opt
     if !model_catalog.is_empty() {
         extra.insert(
             "available_models".into(),
-            serde_json::json!(model_catalog.iter().map(|m| m.slug.clone()).collect::<Vec<_>>()),
+            serde_json::json!(model_catalog
+                .iter()
+                .map(|m| m.slug.clone())
+                .collect::<Vec<_>>()),
         );
-        extra.insert("model_catalog".into(), serde_json::to_value(&model_catalog).unwrap_or_default());
+        extra.insert(
+            "model_catalog".into(),
+            serde_json::to_value(&model_catalog).unwrap_or_default(),
+        );
     }
 
     // Config
@@ -1026,7 +1392,10 @@ fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) -> Opt
         extra.insert("config_model".into(), serde_json::Value::String(m.clone()));
     }
     if let Some(r) = config_reasoning {
-        extra.insert("config_reasoning_effort".into(), serde_json::Value::String(r));
+        extra.insert(
+            "config_reasoning_effort".into(),
+            serde_json::Value::String(r),
+        );
     }
 
     // Activity (daily heatmap, streaks, peak hour) + per-project breakdown +
@@ -1040,10 +1409,22 @@ fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) -> Opt
                 "daily_activity".into(),
                 serde_json::to_value(&activity.daily_activity).unwrap_or_default(),
             );
-            extra.insert("hour_counts".into(), serde_json::json!(activity.hour_counts.to_vec()));
-            extra.insert("active_days".into(), serde_json::json!(activity.active_days));
-            extra.insert("longest_streak".into(), serde_json::json!(activity.longest_streak));
-            extra.insert("current_streak".into(), serde_json::json!(activity.current_streak));
+            extra.insert(
+                "hour_counts".into(),
+                serde_json::json!(activity.hour_counts.to_vec()),
+            );
+            extra.insert(
+                "active_days".into(),
+                serde_json::json!(activity.active_days),
+            );
+            extra.insert(
+                "longest_streak".into(),
+                serde_json::json!(activity.longest_streak),
+            );
+            extra.insert(
+                "current_streak".into(),
+                serde_json::json!(activity.current_streak),
+            );
             if let Some(ph) = activity.peak_hour {
                 extra.insert("peak_hour".into(), serde_json::json!(ph));
             }
@@ -1051,11 +1432,17 @@ fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) -> Opt
 
         let projects = fetch_project_breakdown(&conn);
         if !projects.is_empty() {
-            extra.insert("project_breakdown".into(), serde_json::to_value(&projects).unwrap_or_default());
+            extra.insert(
+                "project_breakdown".into(),
+                serde_json::to_value(&projects).unwrap_or_default(),
+            );
         }
 
         let scan = scan_recent_rollouts(&conn);
-        extra.insert("token_breakdown".into(), serde_json::to_value(&scan.token_breakdown).unwrap_or_default());
+        extra.insert(
+            "token_breakdown".into(),
+            serde_json::to_value(&scan.token_breakdown).unwrap_or_default(),
+        );
         let cost_model = config_model.as_deref().unwrap_or("gpt-5.5");
         let breakdown_usage = RolloutTokenUsage {
             input_tokens: scan.token_breakdown.input_tokens,
@@ -1069,7 +1456,10 @@ fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) -> Opt
             "token_breakdown_estimated_cost".into(),
             serde_json::json!(estimate_split_cost(&breakdown_usage, cost_model)),
         );
-        extra.insert("token_breakdown_cost_model".into(), serde_json::Value::String(cost_model.to_string()));
+        extra.insert(
+            "token_breakdown_cost_model".into(),
+            serde_json::Value::String(cost_model.to_string()),
+        );
 
         if let Some(rl) = scan.offline_rate_limits {
             let windows = rollout_rate_limits_to_windows(&rl);
@@ -1077,7 +1467,10 @@ fn enrich_with_local_data(extra: &mut HashMap<String, serde_json::Value>) -> Opt
                 extra.insert("offline_plan_type".into(), serde_json::Value::String(pt));
             }
             if !windows.is_empty() {
-                extra.insert("offline_rate_limits".into(), serde_json::to_value(&windows).unwrap_or_default());
+                extra.insert(
+                    "offline_rate_limits".into(),
+                    serde_json::to_value(&windows).unwrap_or_default(),
+                );
                 offline_windows = Some(windows);
             }
         }
@@ -1151,8 +1544,95 @@ pub fn fetch_codex_analytics() -> ProviderAnalytics {
     result
 }
 
+fn fetch_codex_analytics_from_app_server(now: &str) -> Result<ProviderAnalytics, String> {
+    let result = codex_app_server::request("account/rateLimits/read", serde_json::json!({}))
+        .map_err(|error| error.to_string())?;
+    let response: AppServerRateLimitsResponse = serde_json::from_value(result)
+        .map_err(|error| format!("Could not parse Codex App Server rate limits: {error}"))?;
+    let limits = ordered_app_server_limits(&response);
+    let mut rate_limits = Vec::new();
+    for limit in &limits {
+        append_app_server_windows(&mut rate_limits, limit);
+    }
+
+    let account_result =
+        codex_app_server::request("account/read", serde_json::json!({ "refreshToken": false }));
+    let (account_email, account_plan, account_warning) = match account_result {
+        Ok(value) => (
+            value
+                .pointer("/account/email")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            value
+                .pointer("/account/planType")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            None,
+        ),
+        Err(error) => (None, None, Some(error.to_string())),
+    };
+    let plan_name = account_plan.or_else(|| {
+        limits
+            .iter()
+            .find_map(|limit| limit.plan_type.as_ref().cloned())
+    });
+    let credit_usage = app_server_credit_usage(&limits);
+    let limit_state = app_server_limit_state(&limits);
+
+    let mut extra = HashMap::new();
+    extra.insert(
+        "rate_limit_source".into(),
+        serde_json::Value::String("codex-app-server".into()),
+    );
+    if let Some(plan) = plan_name.as_ref() {
+        extra.insert("plan_type".into(), serde_json::Value::String(plan.clone()));
+    }
+    if limits
+        .iter()
+        .any(|limit| limit.credits.as_ref().and_then(|credits| credits.unlimited) == Some(true))
+    {
+        extra.insert("unlimited_credits".into(), serde_json::Value::Bool(true));
+    }
+    if let Some(warning) = account_warning {
+        extra.insert(
+            "account_metadata_warning".into(),
+            serde_json::Value::String(warning),
+        );
+    }
+
+    let offline_rate_limits = enrich_with_local_data(&mut extra).unwrap_or_default();
+    if rate_limits.is_empty() {
+        rate_limits = offline_rate_limits;
+    }
+
+    Ok(ProviderAnalytics {
+        provider_id: "codex".into(),
+        provider_name: "Codex (OpenAI)".into(),
+        status: ProviderStatus {
+            provider_id: "codex".into(),
+            provider_name: "Codex (OpenAI)".into(),
+            connected: true,
+            connection_method: "app-server".into(),
+            account_email,
+            plan_name,
+            org_name: None,
+            error: None,
+        },
+        rate_limits,
+        credit_usage,
+        token_counts: None,
+        limit_state,
+        extra,
+        fetched_at: now.to_string(),
+    })
+}
+
 fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
     let now = Utc::now().to_rfc3339();
+    let app_server_error = match fetch_codex_analytics_from_app_server(&now) {
+        Ok(analytics) => return analytics,
+        Err(error) => error,
+    };
 
     let (token, method, account_id) = match resolve_token() {
         Ok(t) => t,
@@ -1162,6 +1642,11 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
             let offline_rate_limits = enrich_with_local_data(&mut extra).unwrap_or_default();
             let has_local = extra.contains_key("total_sessions");
 
+            extra.insert(
+                "rate_limit_source_warning".into(),
+                serde_json::Value::String(app_server_error.clone()),
+            );
+
             return ProviderAnalytics {
                 provider_id: "codex".into(),
                 provider_name: "Codex (OpenAI)".into(),
@@ -1169,20 +1654,31 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
                     provider_id: "codex".into(),
                     provider_name: "Codex (OpenAI)".into(),
                     connected: has_local, // connected if we have local data
-                    connection_method: if has_local { "local-file".into() } else { "none".into() },
-                    account_email: None, plan_name: None, org_name: None,
-                    error: if has_local { None } else { Some(e) },
+                    connection_method: if has_local {
+                        "local-file".into()
+                    } else {
+                        "none".into()
+                    },
+                    account_email: None,
+                    plan_name: None,
+                    org_name: None,
+                    error: if has_local {
+                        None
+                    } else {
+                        Some(format!("{app_server_error}; {e}"))
+                    },
                 },
-                rate_limits: offline_rate_limits, credit_usage: None, token_counts: None,
+                rate_limits: offline_rate_limits,
+                credit_usage: None,
+                token_counts: None,
                 limit_state: None,
-                extra, fetched_at: now,
+                extra,
+                fetched_at: now,
             };
         }
     };
 
-    let mut headers_vec: Vec<(&str, &str)> = vec![
-        ("User-Agent", "CodexBar"),
-    ];
+    let mut headers_vec: Vec<(&str, &str)> = vec![("User-Agent", "CodexBar")];
     let account_id_owned = account_id.unwrap_or_default();
     if !account_id_owned.is_empty() {
         headers_vec.push(("ChatGPT-Account-Id", &account_id_owned));
@@ -1213,11 +1709,18 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
 
             let mut rate_limits = Vec::new();
             if let Some(ref rl) = wham.rate_limit {
-                if let Some(w) = parse_wham_window(&rl.primary_window, "Primary (5h)") {
-                    rate_limits.push(w);
-                }
-                if let Some(w) = parse_wham_window(&rl.secondary_window, "Weekly (7d)") {
-                    rate_limits.push(w);
+                append_wham_windows(&mut rate_limits, rl, None);
+            }
+            if let Some(ref additional_limits) = wham.additional_rate_limits {
+                for additional in additional_limits {
+                    if let Some(ref rl) = additional.rate_limit {
+                        let fallback_name = additional
+                            .metered_feature
+                            .as_deref()
+                            .unwrap_or("Additional limit");
+                        let name = additional.limit_name.as_deref().unwrap_or(fallback_name);
+                        append_wham_windows(&mut rate_limits, rl, Some(name));
+                    }
                 }
             }
             if let Some(ref cr) = wham.code_review_rate_limit {
@@ -1226,19 +1729,14 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
                 }
             }
 
-            let credit_usage = wham.credits.as_ref().and_then(|c| {
-                c.balance.map(|b| CreditUsage {
-                    provider_id: "codex".into(),
-                    used: 0.0,
-                    limit: None,
-                    remaining: b,
-                    currency: "credits".into(),
-                    billing_cycle_end: None,
-                    plan_name: wham.plan_type.clone(),
-                })
-            });
+            let credit_usage =
+                parse_wham_credit_usage(wham.credits.as_ref(), wham.plan_type.as_deref());
 
             let mut extra = HashMap::new();
+            extra.insert(
+                "rate_limit_source_warning".into(),
+                serde_json::Value::String(app_server_error.clone()),
+            );
             if let Some(ref pt) = wham.plan_type {
                 extra.insert("plan_type".into(), serde_json::Value::String(pt.clone()));
             }
@@ -1256,7 +1754,11 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
 
             // WHAM returned no usable windows (e.g. empty rate_limit object) —
             // fall back to the rollout-derived offline snapshot.
-            let rate_limits = if rate_limits.is_empty() { offline_rate_limits } else { rate_limits };
+            let rate_limits = if rate_limits.is_empty() {
+                offline_rate_limits
+            } else {
+                rate_limits
+            };
 
             ProviderAnalytics {
                 provider_id: "codex".into(),
@@ -1293,19 +1795,52 @@ fn fetch_codex_analytics_uncached() -> ProviderAnalytics {
                     provider_name: "Codex (OpenAI)".into(),
                     connected: true,
                     connection_method: method,
-                    account_email: None, plan_name: None, org_name: None,
-                    error: Some(e),
+                    account_email: None,
+                    plan_name: None,
+                    org_name: None,
+                    error: Some(format!("{app_server_error}; WHAM fallback failed: {e}")),
                 },
-                rate_limits: offline_rate_limits, credit_usage: None, token_counts: None,
+                rate_limits: offline_rate_limits,
+                credit_usage: None,
+                token_counts: None,
                 limit_state: None,
-                extra, fetched_at: now,
+                extra,
+                fetched_at: now,
             }
         }
     }
 }
 
 pub fn check_connection() -> ProviderStatus {
-    // 1. Try resolving a token (auth.json or manual)
+    // 1. Prefer the documented App Server account surface. This also works
+    // when Codex stores credentials in the operating system keychain.
+    if let Ok(result) =
+        codex_app_server::request("account/read", serde_json::json!({ "refreshToken": false }))
+    {
+        if result
+            .get("account")
+            .is_some_and(|account| !account.is_null())
+        {
+            return ProviderStatus {
+                provider_id: "codex".into(),
+                provider_name: "Codex (OpenAI)".into(),
+                connected: true,
+                connection_method: "app-server".into(),
+                account_email: result
+                    .pointer("/account/email")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                plan_name: result
+                    .pointer("/account/planType")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                org_name: None,
+                error: None,
+            };
+        }
+    }
+
+    // 2. Try resolving a token (auth.json or manual)
     if let Ok((_, method, _)) = resolve_token() {
         return ProviderStatus {
             provider_id: "codex".into(),
@@ -1318,9 +1853,9 @@ pub fn check_connection() -> ProviderStatus {
             error: None,
         };
     }
-    // 2. Fallback: check local SQLite database
-    let db_path = codex_dir().join("state_5.sqlite");
-    if db_path.exists() {
+    // 3. Fallback: check local SQLite database
+    let db_path = codex_dir().map(|directory| directory.join("state_5.sqlite"));
+    if db_path.as_ref().is_ok_and(|path| path.exists()) {
         return ProviderStatus {
             provider_id: "codex".into(),
             provider_name: "Codex (OpenAI)".into(),
@@ -1348,6 +1883,27 @@ pub fn check_connection() -> ProviderStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_documented_model_settings_from_top_level_config() {
+        let config = r#"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+
+[profiles.fast]
+model = "gpt-5.6-luna"
+"#;
+        let (model, effort) = parse_codex_config(config);
+        assert_eq!(model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn invalid_config_does_not_leak_partial_model_settings() {
+        let (model, effort) = parse_codex_config("model = [\n");
+        assert!(model.is_none());
+        assert!(effort.is_none());
+    }
 
     // ── Rollout token_count parsing ─────────────────────────────────────────
 
@@ -1521,7 +2077,11 @@ mod tests {
     #[test]
     fn skips_rate_windows_without_used_percent() {
         let rl = RolloutRateLimits {
-            primary: Some(RolloutRateWindow { used_percent: None, window_minutes: Some(10080), resets_at: None }),
+            primary: Some(RolloutRateWindow {
+                used_percent: None,
+                window_minutes: Some(10080),
+                resets_at: None,
+            }),
             secondary: None,
             plan_type: None,
         };
@@ -1583,7 +2143,11 @@ mod tests {
         .unwrap();
 
         let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let stats = query_window(&conn, "date(created_at) = ?1 OR date(updated_at) = ?1", &[&today_str]);
+        let stats = query_window(
+            &conn,
+            "date(created_at) = ?1 OR date(updated_at) = ?1",
+            &[&today_str],
+        );
         assert_eq!(stats.sessions, 0);
     }
 
@@ -1640,6 +2204,129 @@ mod tests {
         assert_eq!(combined_rate_per_million("gpt-5.6-sol"), 12.0);
         assert_eq!(combined_rate_per_million("gpt-5.5"), 10.0);
         assert_eq!(combined_rate_per_million("gpt-5.1-codex-max"), 7.5);
+    }
+
+    const APP_SERVER_RATE_LIMITS_WITH_SPARK: &str = r#"{
+        "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "primary": {
+                "usedPercent": 22,
+                "windowDurationMins": 10080,
+                "resetsAt": 1788929319
+            },
+            "secondary": null,
+            "credits": {
+                "hasCredits": false,
+                "unlimited": false,
+                "balance": "0"
+            },
+            "planType": "pro",
+            "rateLimitReachedType": null
+        },
+        "rateLimitsByLimitId": {
+            "codex_bengalfox": {
+                "limitId": "codex_bengalfox",
+                "limitName": "GPT-5.3-Codex-Spark",
+                "primary": {
+                    "usedPercent": 0,
+                    "windowDurationMins": 300,
+                    "resetsAt": 1788406761
+                },
+                "secondary": {
+                    "usedPercent": 0,
+                    "windowDurationMins": 10080,
+                    "resetsAt": 1788993561
+                },
+                "credits": null,
+                "planType": "pro",
+                "rateLimitReachedType": null
+            },
+            "codex": {
+                "limitId": "codex",
+                "limitName": null,
+                "primary": {
+                    "usedPercent": 22,
+                    "windowDurationMins": 10080,
+                    "resetsAt": 1788929319
+                },
+                "secondary": null,
+                "credits": {
+                    "hasCredits": false,
+                    "unlimited": false,
+                    "balance": "0"
+                },
+                "planType": "pro",
+                "rateLimitReachedType": null
+            }
+        }
+    }"#;
+
+    #[test]
+    fn app_server_maps_general_and_spark_rate_limits_without_duplicate_base_bucket() {
+        let response: AppServerRateLimitsResponse =
+            serde_json::from_str(APP_SERVER_RATE_LIMITS_WITH_SPARK).unwrap();
+        let limits = ordered_app_server_limits(&response);
+        assert_eq!(limits.len(), 2);
+
+        let mut windows = Vec::new();
+        for limit in &limits {
+            append_app_server_windows(&mut windows, limit);
+        }
+        let labels: Vec<&str> = windows.iter().map(|window| window.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Weekly (7d)",
+                "GPT-5.3-Codex-Spark (5h)",
+                "GPT-5.3-Codex-Spark (7d)"
+            ]
+        );
+        assert_eq!(windows[0].used_percent, 22.0);
+        assert_eq!(windows[1].used_percent, 0.0);
+        assert!(app_server_credit_usage(&limits).is_none());
+    }
+
+    #[test]
+    fn app_server_accepts_numeric_credit_balance_strings() {
+        let response: AppServerRateLimitsResponse = serde_json::from_str(
+            r#"{
+                "rateLimits": {
+                    "limitId": "codex",
+                    "credits": {
+                        "hasCredits": true,
+                        "unlimited": false,
+                        "balance": "12.5"
+                    },
+                    "planType": "pro"
+                }
+            }"#,
+        )
+        .unwrap();
+        let limits = ordered_app_server_limits(&response);
+        let credits = app_server_credit_usage(&limits).unwrap();
+        assert_eq!(credits.remaining, 12.5);
+        assert_eq!(credits.plan_name.as_deref(), Some("pro"));
+    }
+
+    #[test]
+    fn app_server_hides_credits_when_has_credits_is_false() {
+        let response: AppServerRateLimitsResponse = serde_json::from_str(
+            r#"{
+                "rateLimits": {
+                    "limitId": "codex",
+                    "credits": {
+                        "hasCredits": false,
+                        "unlimited": true,
+                        "balance": "99.5"
+                    },
+                    "planType": "pro"
+                }
+            }"#,
+        )
+        .unwrap();
+        let limits = ordered_app_server_limits(&response);
+        assert!(app_server_credit_usage(&limits).is_none());
     }
 
     // ── WHAM usage API: lenient numeric deserialization ─────────────────────
@@ -1700,9 +2387,52 @@ mod tests {
         }
     }"#;
 
+    const WHAM_RESPONSE_WITH_ADDITIONAL_LIMITS: &str = r#"{
+        "plan_type": "pro",
+        "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window": {
+                "used_percent": "18",
+                "reset_at": "1788990614",
+                "reset_after_seconds": "543638",
+                "limit_window_seconds": "604800"
+            },
+            "secondary_window": null
+        },
+        "additional_rate_limits": [
+            {
+                "limit_name": "GPT-5.3-Codex-Spark",
+                "metered_feature": "codex_bengalfox",
+                "rate_limit": {
+                    "allowed": true,
+                    "limit_reached": false,
+                    "primary_window": {
+                        "used_percent": "0",
+                        "reset_at": "1788403814",
+                        "reset_after_seconds": "18000",
+                        "limit_window_seconds": "18000"
+                    },
+                    "secondary_window": {
+                        "used_percent": "0",
+                        "reset_at": "1788990614",
+                        "reset_after_seconds": "604800",
+                        "limit_window_seconds": "604800"
+                    }
+                }
+            }
+        ],
+        "credits": {
+            "has_credits": false,
+            "unlimited": false,
+            "balance": "0"
+        }
+    }"#;
+
     #[test]
     fn wham_response_parses_when_numeric_fields_are_strings() {
-        let wham: WhamUsageResponse = serde_json::from_str(WHAM_RESPONSE_WITH_STRING_NUMBERS).unwrap();
+        let wham: WhamUsageResponse =
+            serde_json::from_str(WHAM_RESPONSE_WITH_STRING_NUMBERS).unwrap();
         let rl = wham.rate_limit.unwrap();
         let primary = rl.primary_window.unwrap();
         assert_eq!(primary.used_percent, Some(0.0));
@@ -1733,6 +2463,52 @@ mod tests {
 
         let credits = wham.credits.unwrap();
         assert_eq!(credits.balance, Some(12.5));
+    }
+
+    #[test]
+    fn wham_windows_use_durations_and_include_additional_limits() {
+        let wham: WhamUsageResponse =
+            serde_json::from_str(WHAM_RESPONSE_WITH_ADDITIONAL_LIMITS).unwrap();
+        let mut windows = Vec::new();
+
+        append_wham_windows(&mut windows, wham.rate_limit.as_ref().unwrap(), None);
+        for additional in wham.additional_rate_limits.as_ref().unwrap() {
+            append_wham_windows(
+                &mut windows,
+                additional.rate_limit.as_ref().unwrap(),
+                additional.limit_name.as_deref(),
+            );
+        }
+
+        let labels: Vec<&str> = windows.iter().map(|window| window.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Weekly (7d)",
+                "GPT-5.3-Codex-Spark (5h)",
+                "GPT-5.3-Codex-Spark (7d)",
+            ]
+        );
+    }
+
+    #[test]
+    fn unavailable_codex_credits_are_hidden() {
+        let wham: WhamUsageResponse =
+            serde_json::from_str(WHAM_RESPONSE_WITH_ADDITIONAL_LIMITS).unwrap();
+        assert!(parse_wham_credit_usage(wham.credits.as_ref(), Some("pro")).is_none());
+    }
+
+    #[test]
+    fn enabled_codex_credits_keep_their_balance() {
+        let credits = WhamCredits {
+            has_credits: Some(true),
+            unlimited: Some(false),
+            balance: Some(12.5),
+        };
+        let usage = parse_wham_credit_usage(Some(&credits), Some("pro")).unwrap();
+        assert_eq!(usage.remaining, 12.5);
+        assert_eq!(usage.currency, "credits");
+        assert_eq!(usage.plan_name.as_deref(), Some("pro"));
     }
 
     #[test]

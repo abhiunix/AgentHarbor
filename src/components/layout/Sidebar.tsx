@@ -10,6 +10,7 @@ import type { CapabilityType } from "../../lib/types";
 import logoIcon from "../../assets/icon.png";
 import mcpIcon from "../../assets/mcp_logo.png";
 import { ClaudeCodeSwitchModal } from "../common/ClaudeCodeSwitchModal";
+import { CodexSwitchModelModal } from "../common/CodexSwitchModelModal";
 
 // Half-white (Ollama) + half-orange (Claude) brain icon.
 function SplitBrainIcon({ className = "w-4 h-4" }: { className?: string }) {
@@ -212,6 +213,7 @@ export function Sidebar() {
   const newItemsCount = useNewItemsCount();
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [showCcSwitch, setShowCcSwitch] = useState(false);
+  const [showCodexSwitch, setShowCodexSwitch] = useState(false);
   const debateView = useDebateRunStore((s) => s.view);
   const debateCurrentTurn = useDebateRunStore((s) => s.runState?.currentTurn ?? 0);
   const debateIsRunning = debateView === "running";
@@ -286,6 +288,15 @@ export function Sidebar() {
                           onClick: () => setShowCcSwitch(true),
                         },
                       ]
+                    : plugin.id === "codex"
+                      ? [
+                          {
+                            id: "switch-model",
+                            label: "Switch Model",
+                            icon: "◉",
+                            onClick: () => setShowCodexSwitch(true),
+                          },
+                        ]
                     : undefined
                 }
               />
@@ -383,6 +394,10 @@ export function Sidebar() {
       <ClaudeCodeSwitchModal
         open={showCcSwitch}
         onClose={() => setShowCcSwitch(false)}
+      />
+      <CodexSwitchModelModal
+        open={showCodexSwitch}
+        onClose={() => setShowCodexSwitch(false)}
       />
     </aside>
   );

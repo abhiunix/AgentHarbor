@@ -125,7 +125,10 @@ function formatResetLabel(rl: RateLimitWindow): string {
 }
 
 function formatCurrency(amount: number, currency: string): string {
-  return `${currency === "USD" ? "$" : currency}${amount.toFixed(2)}`;
+  const unit = currency.trim();
+  if (unit === "USD") return `$${amount.toFixed(2)}`;
+  if (unit.toLowerCase() === "credits") return `${amount.toFixed(2)} credits`;
+  return unit ? `${unit} ${amount.toFixed(2)}` : amount.toFixed(2);
 }
 
 function formatTimeAgo(iso: string): string {
@@ -359,7 +362,7 @@ function TokenWindowRow({ label, stats }: {
   if (!hasData) return null;
 
   // Providers without a per-window input/output/cache split (e.g. Codex) never
-  // populate these extra keys — hide the split grid rather than show zeros.
+  // populate these extra keys, so hide the split grid rather than show zeros.
   const hasSplit =
     stats.inputTokens !== undefined ||
     stats.outputTokens !== undefined ||
@@ -470,7 +473,7 @@ function ClaudeCard({ provider }: { provider: TrayProviderSummary }) {
 
   return (
     <div>
-      {/* Enterprise plans have no 5h/7d windows — show $-spend instead. */}
+      {/* Enterprise plans have no 5h/7d windows, so show $-spend instead. */}
       {isEnterprise && cu && (
         <EnterpriseSpendBar
           used={cu.used}
@@ -749,7 +752,6 @@ function CodexCard({ provider }: { provider: TrayProviderSummary }) {
   const totalSessions = ex.total_sessions as number | undefined;
   const totalTokens = ex.total_tokens_used as number | undefined;
   const totalCost = ex.estimated_total_cost as number | undefined;
-  const costByModel = ex.cost_by_model as Record<string, number> | undefined;
   const tokensByModel = ex.tokens_by_model as Record<string, number> | undefined;
   const projectCount = ex.sessions_by_project ? Object.keys(ex.sessions_by_project as Record<string, unknown>).length : 0;
   const modelCount = tokensByModel ? Object.keys(tokensByModel).length : 0;
@@ -765,15 +767,15 @@ function CodexCard({ provider }: { provider: TrayProviderSummary }) {
   return (
     <div>
       {/* Rate limits */}
-      {provider.rate_limits.slice(0, 3).map((rl, i) => (
+      {provider.rate_limits.map((rl, i) => (
         <RateLimitBar key={i} rl={rl} />
       ))}
 
-      {/* Credits */}
+      {/* Optional additional credits */}
       {provider.credit_usage && (
         <div className={`${provider.rate_limits.length > 0 ? "mt-2 pt-2 border-t border-[#2a2b36]" : ""}`}>
           <div className="flex items-center justify-between text-[11px]">
-            <span className="text-[#9394a1]">Credits</span>
+            <span className="text-[#9394a1]">Additional credits</span>
             {unlimitedCredits ? (
               <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 font-medium">
                 Unlimited
@@ -810,36 +812,6 @@ function CodexCard({ provider }: { provider: TrayProviderSummary }) {
               <div className="text-[11px] text-[#e8e9ed] font-mono">{projectCount}</div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Cost analysis */}
-      {totalCost != null && totalCost > 0 && (
-        <div className="mt-2 pt-2 border-t border-[#2a2b36]">
-          <div className="text-[10px] text-[#9394a1] uppercase tracking-wider mb-1.5">Cost Analysis</div>
-          <div className="flex items-center justify-between text-[11px] mb-1">
-            <span className="text-[#9394a1]">API-Equivalent Value</span>
-            <span className="text-emerald-400 font-mono font-semibold">{formatCost(totalCost)}</span>
-          </div>
-          {totalSessions != null && totalSessions > 0 && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-[#9394a1]">Per Message</span>
-              <span className="text-[#e8e9ed] font-mono">{formatCost(totalCost / totalSessions)}</span>
-            </div>
-          )}
-          {costByModel && Object.keys(costByModel).length > 0 && (
-            <div className="mt-1.5 space-y-0.5">
-              {Object.entries(costByModel)
-                .sort(([, a], [, b]) => b - a)
-                .slice(0, 3)
-                .map(([model, cost]) => (
-                  <div key={model} className="flex items-center justify-between text-[9px]">
-                    <span className="text-[#9394a1] truncate mr-2">{model}</span>
-                    <span className="text-emerald-400 font-mono">{formatCost(cost)}</span>
-                  </div>
-                ))}
-            </div>
-          )}
         </div>
       )}
 
@@ -983,7 +955,7 @@ function KimiCard({ provider }: { provider: TrayProviderSummary }) {
 
   return (
     <div>
-      {/* Moonshot balance — the thing that runs out and needs timely attention */}
+      {/* Moonshot balance: the thing that runs out and needs timely attention */}
       {cu && (
         <div>
           <div className="text-[10px] text-[#9394a1] uppercase tracking-wider mb-1.5">
@@ -1065,7 +1037,7 @@ function DeepSeekCard({ provider }: { provider: TrayProviderSummary }) {
 
   return (
     <div>
-      {/* Available balance — the thing that runs out and needs timely attention */}
+      {/* Available balance: the thing that runs out and needs timely attention */}
       {balances.length > 0 && (
         <div>
           <div className="text-[10px] text-[#9394a1] uppercase tracking-wider mb-1.5">
