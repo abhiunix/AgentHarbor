@@ -1,11 +1,11 @@
 /**
  * Codex (OpenAI) Analytics Page
  * Shows connection status, account info, rate limits, credit usage,
- * and local session/usage analytics from ~/.codex/ files.
+ * and local session/usage analytics from the active Codex home.
  */
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { getCodexHomePath } from "../lib/tauri";
 import {
   PieChart,
   Pie,
@@ -292,7 +292,18 @@ function CodexDashboardSkeleton() {
 
 // ── Not Connected ───────────────────────────────────────────────────────────
 
-function NotConnected({ error }: { error?: string | null }) {
+function codexPath(codexHomePath: string | null, child: string): string {
+  const home = codexHomePath?.replace(/\/+$/, "");
+  return home ? `${home}/${child}` : `Codex home/${child}`;
+}
+
+function NotConnected({
+  error,
+  codexHomePath,
+}: {
+  error?: string | null;
+  codexHomePath: string | null;
+}) {
   return (
     <div className="px-6 py-6">
       <h1 className="text-lg font-semibold text-text-primary mb-2">Codex Analytics</h1>
@@ -303,7 +314,7 @@ function NotConnected({ error }: { error?: string | null }) {
         <h2 className="text-sm font-semibold text-text-primary mb-2">Codex Not Connected</h2>
         <p className="text-xs text-text-muted mb-4">
           Install OpenAI Codex and sign in to see your analytics. AgentHarbor auto-detects
-          credentials from <code className="font-mono text-[10px] bg-[#22232e] px-1 py-0.5 rounded">~/.codex/auth.json</code>.
+          credentials from <code className="font-mono text-[10px] bg-[#22232e] px-1 py-0.5 rounded">{codexPath(codexHomePath, "auth.json")}</code>.
         </p>
         {error && (
           <p className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/20 rounded px-3 py-2 mt-2">
@@ -419,7 +430,7 @@ function ActivityHeatmap({ daily }: { daily: DailyActivityPoint[] }) {
                   gridColumn: wi + 1,
                   gridRow: di + 2,
                 }}
-                title={`${day.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} — ${day.value > 0 ? `${day.value} session${day.value === 1 ? "" : "s"}` : "No activity"}`}
+                title={`${day.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}: ${day.value > 0 ? `${day.value} session${day.value === 1 ? "" : "s"}` : "No activity"}`}
               />
             );
           })
@@ -477,6 +488,7 @@ function HourlyActivityChart({ hourCounts }: { hourCounts: number[] }) {
 
 export function CodexAnalyticsPage() {
   const [analytics, setAnalytics] = useState<ProviderAnalytics | null>(null);
+  const [codexHomePath, setCodexHomePath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
@@ -511,6 +523,20 @@ export function CodexAnalyticsPage() {
     loadData(false);
   }, [loadData]);
 
+  useEffect(() => {
+    let active = true;
+    void getCodexHomePath()
+      .then((path) => {
+        if (active) setCodexHomePath(path);
+      })
+      .catch(() => {
+        if (active) setCodexHomePath(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Auto-refresh every 5 minutes
   useEffect(() => {
     const interval = setInterval(() => loadData(true), 5 * 60 * 1000);
@@ -541,7 +567,7 @@ export function CodexAnalyticsPage() {
   }
 
   if (!analytics?.status.connected) {
-    return <NotConnected error={analytics?.status.error} />;
+    return <NotConnected error={analytics?.status.error} codexHomePath={codexHomePath} />;
   }
 
   // ── Derived data ─────────────────────────────────────────────────────
@@ -702,7 +728,7 @@ export function CodexAnalyticsPage() {
           )}
         </Section>
 
-        {/* Session Stats — only show if we have local data */}
+        {/* Session Stats: only show if we have local data */}
         {hasLocalData && (
           <Section title="Session Stats">
             <div className="grid grid-cols-4 gap-4">
@@ -729,7 +755,7 @@ export function CodexAnalyticsPage() {
           </Section>
         )}
 
-        {/* Token Breakdown — input/output/cache/reasoning split from rollout logs */}
+        {/* Token Breakdown: input/output/cache/reasoning split from rollout logs */}
         {tokenBreakdown && tokenBreakdown.total_tokens > 0 && (
           <Section title="Token Breakdown">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -744,7 +770,7 @@ export function CodexAnalyticsPage() {
               <StatCard label="Reasoning" value={formatTokens(tokenBreakdown.reasoning_output_tokens)} />
             </div>
             <p className="text-[10px] text-text-muted mt-2">
-              Aggregated from the last {tokenBreakdown.sessions_scanned} session{tokenBreakdown.sessions_scanned === 1 ? "" : "s"}&apos; rollout logs (~/.codex/sessions).
+              Aggregated from the last {tokenBreakdown.sessions_scanned} session{tokenBreakdown.sessions_scanned === 1 ? "" : "s"}&apos; rollout logs ({codexPath(codexHomePath, "sessions")}).
               {tokenBreakdownCostModel && (
                 <> Split-rate estimate at {tokenBreakdownCostModel} rates: <span className="text-emerald-400 font-medium">{formatUsd(tokenBreakdownCost)}</span>.</>
               )}
@@ -752,7 +778,7 @@ export function CodexAnalyticsPage() {
           </Section>
         )}
 
-        {/* Activity — daily heatmap, streaks, peak hour */}
+        {/* Activity: daily heatmap, streaks, peak hour */}
         {hasActivity && (
           <Section title="Activity">
             <div className="grid grid-cols-4 gap-4 mb-4">
@@ -789,7 +815,7 @@ export function CodexAnalyticsPage() {
               </div>
               <div className="bg-[#0e0f13] rounded-lg p-3 text-[10px] text-text-muted leading-relaxed">
                 <span className="text-amber-400 font-medium">How to read this:</span> Your Team subscription includes all this usage in your flat monthly fee.
-                The &quot;{formatUsd(estimatedTotalCost)}&quot; represents what equivalent API usage would cost without a subscription &mdash; it shows the
+                The &quot;{formatUsd(estimatedTotalCost)}&quot; represents what equivalent API usage would cost without a subscription; it shows the
                 <span className="text-emerald-400 font-medium"> compute value</span> you&apos;re getting from your plan, not what you&apos;re being charged.
               </div>
             </div>
@@ -830,7 +856,7 @@ export function CodexAnalyticsPage() {
                     <a href="https://openai.com/api/pricing/" target="_blank" rel="noopener noreferrer" className="text-[#10a37f] hover:underline">
                       OpenAI Pricing
                     </a>{" "}
-                    &mdash; estimated combined (avg input+output) per Mtok:
+                    (estimated combined average input and output per Mtok):
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-text-muted font-mono">
                     <span><span className="text-emerald-400">GPT-5.4:</span> ~$10/Mtok</span>
@@ -874,11 +900,11 @@ export function CodexAnalyticsPage() {
           </Section>
         )}
 
-        {/* Charts — Tokens by Model & Sessions by Project */}
+        {/* Charts: Tokens by Model and Sessions by Project */}
         {hasLocalData && (Object.keys(tokensByModel).length > 0 || Object.keys(sessionsByProject).length > 0) && (
           <Section title="Usage Breakdown">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Tokens by Model — Pie Chart */}
+              {/* Tokens by Model: Pie Chart */}
               {Object.keys(tokensByModel).length > 0 && (
                 <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
                   <p className="text-[10px] text-text-muted uppercase tracking-wider mb-3">Tokens by Model</p>
@@ -927,7 +953,7 @@ export function CodexAnalyticsPage() {
                 </div>
               )}
 
-              {/* Sessions by Project — Bar Chart */}
+              {/* Sessions by Project: Bar Chart */}
               {Object.keys(sessionsByProject).length > 0 && (
                 <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
                   <p className="text-[10px] text-text-muted uppercase tracking-wider mb-3">Sessions by Project</p>
@@ -1025,7 +1051,7 @@ export function CodexAnalyticsPage() {
               <div className="flex items-center gap-2 mb-3">
                 <Badge color="#f59e0b">Offline snapshot</Badge>
                 <span className="text-[10px] text-text-muted">
-                  Live API unreachable &mdash; showing the last rate-limit snapshot from local session logs
+                  Live API unreachable; showing the last rate-limit snapshot from local session logs
                   {offlinePlanType && ` (plan: ${offlinePlanType})`}.
                 </span>
               </div>
@@ -1051,10 +1077,10 @@ export function CodexAnalyticsPage() {
           </Section>
         )}
 
-        {/* Credits */}
+        {/* Optional additional credits */}
         {credit_usage && (
-          <Section title="Credits">
-            <div className="grid grid-cols-3 gap-4">
+          <Section title="Additional Credits">
+            <div className="grid grid-cols-2 gap-4">
               <StatCard
                 label="Balance"
                 value={
@@ -1064,31 +1090,10 @@ export function CodexAnalyticsPage() {
                 }
               />
               <StatCard
-                label="Used"
-                value={`${credit_usage.used.toFixed(2)} ${credit_usage.currency}`}
-              />
-              <StatCard
                 label="Plan"
                 value={credit_usage.plan_name ?? planType}
                 sub={credit_usage.billing_cycle_end ? `Resets ${formatResetTime(credit_usage.billing_cycle_end)}` : undefined}
               />
-            </div>
-            <div className="flex justify-end mt-2">
-              <a
-                href="https://openai.com/api/pricing/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-text-muted hover:text-blue-400 transition-colors inline-flex items-center gap-1"
-                onClick={async (e) => {
-                  e.preventDefault();
-                  await openUrl("https://openai.com/api/pricing/");
-                }}
-              >
-                View pricing
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-              </a>
             </div>
           </Section>
         )}
@@ -1234,7 +1239,7 @@ export function CodexAnalyticsPage() {
           )
         )}
 
-        {/* Extra info badges — filter out keys we already display */}
+        {/* Extra info badges: filter out keys we already display */}
         {(() => {
           const displayedKeys = new Set([
             "plan_type", "unlimited_credits", "total_sessions", "total_tokens_used",

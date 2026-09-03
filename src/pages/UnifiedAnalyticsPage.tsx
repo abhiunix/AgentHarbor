@@ -75,6 +75,7 @@ function Section({
 function CreditCard({ credit }: { credit: ReturnType<typeof useAllCredits>[0] }) {
   const icon = getAdapterIconImg(credit.provider_id);
   const pct = credit.limit ? Math.round((credit.used / credit.limit) * 100) : null;
+  const isRemainingOnly = credit.provider_id === "codex" && credit.limit == null;
 
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 bg-[#1a1b23] rounded-lg border border-[#2a2b36]">
@@ -84,15 +85,21 @@ function CreditCard({ credit }: { credit: ReturnType<typeof useAllCredits>[0] })
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-text-primary">
-            {credit.currency === "USD" ? `$${credit.used.toFixed(2)}` : `${Math.round(credit.used)}`}
-            {credit.limit != null && (
+            {isRemainingOnly
+              ? `${credit.remaining.toFixed(2)} ${credit.currency} remaining`
+              : credit.currency === "USD"
+              ? `$${credit.used.toFixed(2)}`
+              : `${Math.round(credit.used)}`}
+            {!isRemainingOnly && credit.limit != null && (
               <span className="text-text-muted">
                 {" / "}
                 {credit.currency === "USD" ? `$${credit.limit.toFixed(2)}` : `${Math.round(credit.limit)}`}
               </span>
             )}
           </span>
-          <span className="text-[10px] text-text-muted">{credit.currency !== "USD" ? credit.currency : ""}</span>
+          {!isRemainingOnly && (
+            <span className="text-[10px] text-text-muted">{credit.currency !== "USD" ? credit.currency : ""}</span>
+          )}
         </div>
         {credit.plan_name && (
           <span className="text-[10px] text-text-muted">{credit.plan_name}</span>

@@ -112,6 +112,24 @@ const CodexSkillsPage = lazy(() =>
 const CodexGlobalConfigPage = lazy(() =>
   import("./CodexGlobalConfigPage").then((m) => ({ default: m.CodexGlobalConfigPage }))
 );
+const CodexInstructionsPage = lazy(() =>
+  import("./CodexInstructionsPage").then((m) => ({ default: m.CodexInstructionsPage }))
+);
+const CodexControlPage = lazy(() =>
+  import("./CodexControlPage").then((m) => ({ default: m.CodexControlPage }))
+);
+const CodexPromptHistoryPage = lazy(() =>
+  import("./CodexPromptHistoryPage").then((m) => ({ default: m.CodexPromptHistoryPage }))
+);
+const CodexTranscriptsPage = lazy(() =>
+  import("./CodexTranscriptsPage").then((m) => ({ default: m.CodexTranscriptsPage }))
+);
+const CodexPlansPage = lazy(() =>
+  import("./CodexPlansPage").then((m) => ({ default: m.CodexPlansPage }))
+);
+const CodexMemoryPage = lazy(() =>
+  import("./CodexMemoryPage").then((m) => ({ default: m.CodexMemoryPage }))
+);
 
 // DeepSeek-specific
 const DeepSeekAnalyticsV2Page = lazy(() =>
@@ -188,8 +206,14 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
   },
   codex: {
     "global-config": CodexGlobalConfigPage as LazyPage,
+    instructions: CodexInstructionsPage as LazyPage,
+    control: CodexControlPage as LazyPage,
     skills: CodexSkillsPage as LazyPage,
     analytics: CodexAnalyticsPage as LazyPage,
+    prompts: CodexPromptHistoryPage as LazyPage,
+    transcripts: CodexTranscriptsPage as LazyPage,
+    plans: CodexPlansPage as LazyPage,
+    memory: CodexMemoryPage as LazyPage,
   },
   deepseek: {
     "analytics-v2": DeepSeekAnalyticsV2Page as LazyPage,

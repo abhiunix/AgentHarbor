@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DebugPath } from "../components/common/DebugPath";
+import { ProjectScopeSelector } from "../components/common/ProjectScopeSelector";
 
 const CODEX_COLOR = "#10a37f";
 
@@ -9,55 +10,78 @@ interface CodexSkill {
   file_path: string;
   has_scripts: boolean;
   has_resources: boolean;
+  scope: string;
+  source_root: string;
 }
 
 export function CodexSkillsPage() {
+  const [projectScope, setProjectScope] = useState<string | null>(null);
+  const [codexHome, setCodexHome] = useState<string>("$CODEX_HOME");
   const [skills, setSkills] = useState<CodexSkill[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [skillContent, setSkillContent] = useState<string>("");
   const [contentLoading, setContentLoading] = useState(false);
+  const listRequestId = useRef(0);
+  const contentRequestId = useRef(0);
 
   const load = useCallback(async () => {
+    const currentRequest = ++listRequestId.current;
+    contentRequestId.current += 1;
     setLoading(true);
     setError(null);
     setExpandedSkill(null);
     setSkillContent("");
     try {
       const list = await invoke<CodexSkill[]>("list_codex_skills", {
-        projectPath: null,
+        projectPath: projectScope,
       });
+      if (currentRequest !== listRequestId.current) return;
       setSkills(list);
     } catch (e) {
+      if (currentRequest !== listRequestId.current) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (currentRequest === listRequestId.current) setLoading(false);
     }
-  }, []);
+  }, [projectScope]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  useEffect(() => {
+    invoke<string>("get_codex_home_path")
+      .then(setCodexHome)
+      .catch(() => {});
+  }, []);
+
   const handleExpand = async (skill: CodexSkill) => {
     if (expandedSkill === skill.file_path) {
+      contentRequestId.current += 1;
       setExpandedSkill(null);
       setSkillContent("");
       return;
     }
+    const currentRequest = ++contentRequestId.current;
     setExpandedSkill(skill.file_path);
     setContentLoading(true);
     try {
       const content = await invoke<string>("read_codex_skill_file", {
         filePath: skill.file_path + "/SKILL.md",
+        projectPath: projectScope,
       });
+      if (currentRequest !== contentRequestId.current) return;
       setSkillContent(content);
     } catch {
+      if (currentRequest !== contentRequestId.current) return;
       setSkillContent("(Unable to read SKILL.md)");
     } finally {
-      setContentLoading(false);
+      if (currentRequest === contentRequestId.current) {
+        setContentLoading(false);
+      }
     }
   };
 
@@ -71,48 +95,84 @@ export function CodexSkillsPage() {
                 className="w-3 h-3 rounded-full"
                 style={{ backgroundColor: CODEX_COLOR }}
               />
-              <h1 className="text-2xl font-semibold text-text-primary">Codex — Skills</h1>
+              <h1 className="text-2xl font-semibold text-text-primary">
+                Codex - Skills
+              </h1>
             </div>
-            <p className="text-text-muted text-sm">Browse Codex skills and their resources</p>
-            <DebugPath path="~/.codex/skills/" />
+            <p className="text-text-muted text-sm">
+              Browse global or project Codex skills and their resources
+            </p>
+            <DebugPath
+              path={
+                projectScope
+                  ? `${projectScope}/.agents/skills/`
+                  : `${codexHome}/skills/`
+              }
+            />
           </div>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="text-sm text-accent-blue hover:underline disabled:opacity-50"
-          >
-            Refresh
-          </button>
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            <ProjectScopeSelector
+              value={projectScope}
+              onChange={(nextScope) => {
+                if (nextScope === projectScope) return;
+                listRequestId.current += 1;
+                contentRequestId.current += 1;
+                setProjectScope(nextScope);
+              }}
+            />
+            <button
+              onClick={load}
+              disabled={loading}
+              className="text-sm text-accent-blue hover:underline disabled:opacity-50"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
         {error && (
-          <div className="mb-4 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+          <div
+            className="mb-4 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400"
+            role="alert"
+          >
             {error}
           </div>
         )}
 
         {loading ? (
-          <div className="h-64 flex items-center justify-center text-text-muted">Loading...</div>
+          <div className="h-64 flex items-center justify-center text-text-muted">
+            Loading...
+          </div>
         ) : skills.length === 0 ? (
           <div className="py-16 text-center text-text-muted text-sm">
-            No skills found. Skills are stored in ~/.codex/skills/ directories.
+            {projectScope
+              ? "No project skills found in .agents/skills/."
+              : `No global skills found in ${codexHome}/skills/.`}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {skills.map((skill) => (
               <div key={skill.file_path}>
-                <div
+                <button
+                  type="button"
                   onClick={() => handleExpand(skill)}
-                  className={`p-4 bg-app-card border rounded-lg cursor-pointer transition-colors hover:bg-card-hover ${
+                  aria-expanded={expandedSkill === skill.file_path}
+                  aria-controls={`codex-skill-${encodeURIComponent(skill.file_path)}`}
+                  className={`w-full text-left p-4 bg-app-card border rounded-lg cursor-pointer transition-colors hover:bg-card-hover ${
                     expandedSkill === skill.file_path
                       ? "border-[#10a37f]"
                       : "border-border"
                   }`}
                 >
-                  <h3 className="text-sm font-semibold text-text-primary mb-2">{skill.name}</h3>
+                  <h3 className="text-sm font-semibold text-text-primary mb-2">
+                    {skill.name}
+                  </h3>
                   <div className="flex items-center gap-2">
+                    <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-500/15 text-blue-300">
+                      {skill.scope}
+                    </span>
                     {skill.has_scripts && (
                       <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-500/20 text-purple-400">
                         Scripts
@@ -124,14 +184,21 @@ export function CodexSkillsPage() {
                       </span>
                     )}
                     {!skill.has_scripts && !skill.has_resources && (
-                      <span className="text-xs text-text-muted">SKILL.md only</span>
+                      <span className="text-xs text-text-muted">
+                        SKILL.md only
+                      </span>
                     )}
                   </div>
-                </div>
+                </button>
 
                 {expandedSkill === skill.file_path && (
-                  <div className="mt-2 p-4 bg-app-card border border-border rounded-lg">
-                    <h4 className="text-xs font-semibold text-text-muted mb-2">SKILL.md</h4>
+                  <div
+                    id={`codex-skill-${encodeURIComponent(skill.file_path)}`}
+                    className="mt-2 p-4 bg-app-card border border-border rounded-lg"
+                  >
+                    <h4 className="text-xs font-semibold text-text-muted mb-2">
+                      SKILL.md
+                    </h4>
                     {contentLoading ? (
                       <p className="text-sm text-text-muted">Loading...</p>
                     ) : (

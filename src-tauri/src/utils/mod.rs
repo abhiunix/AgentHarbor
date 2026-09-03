@@ -1,10 +1,11 @@
-pub mod fs;
-pub mod diff;
-pub mod markdown;
 pub mod backup;
+pub mod codex_paths;
+pub mod diff;
 pub mod drift;
+pub mod fs;
 pub mod keychain;
 pub mod manifest;
+pub mod markdown;
 pub mod paths;
 pub mod platform;
 pub mod project_inventory;

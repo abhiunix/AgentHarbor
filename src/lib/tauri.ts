@@ -2431,6 +2431,193 @@ export async function deleteDebate(id: string): Promise<void> {
   return invoke<void>("delete_debate", { id });
 }
 
+// --- Codex read-only history surfaces ---
+
+export interface CodexPromptEntry {
+  display: string;
+  timestamp: string;
+  timestampMs: number;
+  project: string | null;
+  projectName: string | null;
+  sessionId: string;
+}
+
+export interface CodexPromptHistoryPage {
+  entries: CodexPromptEntry[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  sourcePath: string;
+  sourceType: string;
+  truncated: boolean;
+}
+
+export async function getCodexPromptHistory(
+  limit?: number,
+  offset?: number,
+  projectPath?: string | null,
+  query?: string
+): Promise<CodexPromptHistoryPage> {
+  return invoke<CodexPromptHistoryPage>("get_codex_prompt_history", {
+    limit: limit ?? null,
+    offset: offset ?? null,
+    projectPath: projectPath ?? null,
+    query: query?.trim() || null,
+  });
+}
+
+export interface CodexTranscriptSession {
+  sessionId: string;
+  title: string;
+  projectPath: string;
+  projectName: string;
+  createdAt: string;
+  updatedAt: string;
+  fileSizeBytes: number;
+  archived: boolean;
+}
+
+export interface CodexTranscriptSessionPage {
+  sessions: CodexTranscriptSession[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  sourcePath: string;
+  sourceType: string;
+  truncated: boolean;
+}
+
+export interface CodexTranscriptMessage {
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string | null;
+  ordinal: number;
+}
+
+export interface CodexTranscriptPage {
+  session: CodexTranscriptSession;
+  messages: CodexTranscriptMessage[];
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  truncated: boolean;
+}
+
+export async function listCodexTranscriptSessions(
+  limit?: number,
+  offset?: number,
+  projectPath?: string | null,
+  query?: string
+): Promise<CodexTranscriptSessionPage> {
+  return invoke<CodexTranscriptSessionPage>("list_codex_transcript_sessions", {
+    limit: limit ?? null,
+    offset: offset ?? null,
+    projectPath: projectPath ?? null,
+    query: query?.trim() || null,
+  });
+}
+
+export async function readCodexTranscript(
+  sessionId: string,
+  limit?: number,
+  offset?: number
+): Promise<CodexTranscriptPage> {
+  return invoke<CodexTranscriptPage>("read_codex_transcript", {
+    sessionId,
+    limit: limit ?? null,
+    offset: offset ?? null,
+  });
+}
+
+export interface CodexPlanItem {
+  content: string;
+  status: string;
+}
+
+export interface CodexPlanSnapshot {
+  sessionId: string;
+  title: string;
+  projectPath: string;
+  updatedAt: string;
+  explanation: string | null;
+  items: CodexPlanItem[];
+}
+
+export interface CodexTodoItem {
+  content: string;
+  status: string;
+  sessionId: string;
+  sessionTitle: string;
+  projectPath: string;
+  updatedAt: string;
+}
+
+export interface CodexPlansAndTodos {
+  plans: CodexPlanSnapshot[];
+  todos: CodexTodoItem[];
+  source: string;
+  sourcePath: string;
+  sourceType: string;
+  truncated: boolean;
+}
+
+export async function getCodexPlansAndTodos(
+  limit?: number,
+  projectPath?: string | null
+): Promise<CodexPlansAndTodos> {
+  return invoke<CodexPlansAndTodos>("get_codex_plans_and_todos", {
+    limit: limit ?? null,
+    projectPath: projectPath ?? null,
+  });
+}
+
+export interface CodexMemoryDocument {
+  id: string;
+  title: string;
+  relativePath: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+export interface CodexMemoryStatus {
+  available: boolean;
+  scope: string;
+  sourcePath: string;
+  sourceType: string;
+  description: string;
+  warning: string | null;
+  documents: CodexMemoryDocument[];
+}
+
+export interface CodexMemoryDocumentContent {
+  id: string;
+  title: string;
+  content: string;
+  truncated: boolean;
+}
+
+export async function getCodexMemoryStatus(
+  projectPath?: string | null
+): Promise<CodexMemoryStatus> {
+  return invoke<CodexMemoryStatus>("get_codex_memory_status", {
+    projectPath: projectPath ?? null,
+  });
+}
+
+export async function readCodexMemoryDocument(
+  documentId: string
+): Promise<CodexMemoryDocumentContent> {
+  return invoke<CodexMemoryDocumentContent>("read_codex_memory_document", {
+    documentId,
+  });
+}
+
+export async function getCodexHomePath(): Promise<string> {
+  return invoke<string>("get_codex_home_path");
+}
+
 // --- Token Optimizer: Model Routing ---
 
 export interface ModelRoutingMessage {

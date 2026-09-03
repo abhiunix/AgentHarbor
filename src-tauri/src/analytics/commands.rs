@@ -13,9 +13,9 @@ use tauri_plugin_notification::NotificationExt;
 
 use crate::analytics::types::*;
 use crate::analytics::{
-    claude, claude_desktop, codex, gemini, cursor, copilot,
-    openrouter, kimi, kimi_v2, deepseek, deepseek_v2, moonshot, zai, augment, amp, droid, kiro, jetbrains, vertex_ai,
-    opencode, token_store,
+    amp, augment, claude, claude_desktop, codex, copilot, cursor, deepseek, deepseek_v2, droid,
+    gemini, jetbrains, kimi, kimi_v2, kiro, moonshot, opencode, openrouter, token_store, vertex_ai,
+    zai,
 };
 use crate::commands::config::{load_settings, ALL_TRAY_PROVIDER_IDS};
 use crate::utils::paths::app_data_dir;
@@ -24,7 +24,7 @@ use crate::utils::paths::app_data_dir;
 
 lazy_static::lazy_static! {
     /// Pre-computed TraySummary, updated by the background thread.
-    /// get_tray_summary() reads from here — never fetches.
+    /// get_tray_summary() reads from here when available.
     static ref TRAY_SUMMARY_CACHE: StdMutex<Option<TraySummary>> = StdMutex::new(None);
 
     /// AppHandle for emitting events from the background thread.
@@ -48,9 +48,11 @@ const KIMI_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/kimi.png
 const DEEPSEEK_TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/providers/deepseek.png");
 const CLAUDE_CODE_TRAY_ICON_ACTIVE_PNG: &[u8] =
     include_bytes!("../../icons/providers/claude-code-active.png");
-const CURSOR_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/cursor-active.png");
+const CURSOR_TRAY_ICON_ACTIVE_PNG: &[u8] =
+    include_bytes!("../../icons/providers/cursor-active.png");
 const CODEX_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/codex-active.png");
-const GEMINI_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/gemini-active.png");
+const GEMINI_TRAY_ICON_ACTIVE_PNG: &[u8] =
+    include_bytes!("../../icons/providers/gemini-active.png");
 const KIMI_TRAY_ICON_ACTIVE_PNG: &[u8] = include_bytes!("../../icons/providers/kimi-active.png");
 const DEEPSEEK_TRAY_ICON_ACTIVE_PNG: &[u8] =
     include_bytes!("../../icons/providers/deepseek-active.png");
@@ -86,7 +88,9 @@ fn save_limit_notification_persist(p: &LimitNotificationPersist) {
 }
 
 fn format_limit_countdown(iso: Option<&String>) -> String {
-    let Some(s) = iso else { return "soon".to_string() };
+    let Some(s) = iso else {
+        return "soon".to_string();
+    };
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
         let dt = dt.with_timezone(&chrono::Utc);
         let diff = (dt - chrono::Utc::now()).num_seconds();
@@ -124,7 +128,11 @@ fn format_retry_after(seconds: u64) -> String {
 fn describe_api_disabled(reason: &str, org_name: &str) -> (String, String) {
     let norm = reason.trim().to_ascii_lowercase();
     let org_trim = org_name.trim();
-    let org = if org_trim.is_empty() { "Your organization" } else { org_trim };
+    let org = if org_trim.is_empty() {
+        "Your organization"
+    } else {
+        org_trim
+    };
     match norm.as_str() {
         "out_of_credits" => (
             format!("{} has reached its monthly usage limit", org),
@@ -193,7 +201,9 @@ fn limit_notification_for_transition(
                 format!("Session or weekly limit reached — resets in {}", countdown),
             ))
         }
-        ApiDisabled { reason, org_name, .. } => {
+        ApiDisabled {
+            reason, org_name, ..
+        } => {
             if matches!(prev, Some(ApiDisabled { .. })) {
                 return None;
             }
@@ -222,7 +232,9 @@ fn limit_notification_for_transition(
                 format!("{} — billing paused until {}.", org_name, until),
             ))
         }
-        RateLimited { retry_after_secs, .. } => {
+        RateLimited {
+            retry_after_secs, ..
+        } => {
             if matches!(prev, Some(RateLimited { .. })) {
                 return None;
             }
@@ -244,7 +256,12 @@ fn limit_notification_for_transition(
                     .into(),
             ))
         }
-        Approaching { worst_pct, label, resets_at, .. } => match prev {
+        Approaching {
+            worst_pct,
+            label,
+            resets_at,
+            ..
+        } => match prev {
             Some(Healthy) if *worst_pct >= 80.0 => {
                 let countdown = format_limit_countdown(resets_at.as_ref());
                 Some((
@@ -264,7 +281,9 @@ fn limit_notification_first_fetch(
 ) -> Option<(String, String)> {
     use LimitState::*;
     match new {
-        ApiDisabled { reason, org_name, .. } => {
+        ApiDisabled {
+            reason, org_name, ..
+        } => {
             let (title, body) = describe_api_disabled(reason, org_name);
             Some((title, body))
         }
@@ -282,7 +301,9 @@ fn limit_notification_first_fetch(
             "Billing paused".into(),
             format!("{} — billing paused until {}.", org_name, until),
         )),
-        RateLimited { retry_after_secs, .. } => {
+        RateLimited {
+            retry_after_secs, ..
+        } => {
             let when = retry_after_secs
                 .map(|s| format!("retry in {}", format_retry_after(s)))
                 .unwrap_or_else(|| "Anthropic is throttling requests".into());
@@ -302,7 +323,12 @@ fn limit_notification_first_fetch(
                 format!("Usage limit reached — resets in {}", countdown),
             ))
         }
-        Approaching { worst_pct, label, resets_at, .. } if *worst_pct >= 80.0 => {
+        Approaching {
+            worst_pct,
+            label,
+            resets_at,
+            ..
+        } if *worst_pct >= 80.0 => {
             let countdown = format_limit_countdown(resets_at.as_ref());
             Some((
                 format!("{} usage high", provider_label),
@@ -328,8 +354,8 @@ fn maybe_emit_limit_notifications(app: &AppHandle<Wry>, summary: &TraySummary) {
             continue;
         }
         let prev_json = persist.providers.get(&p.provider_id);
-        let prev_ls: Option<LimitState> = prev_json
-            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let prev_ls: Option<LimitState> =
+            prev_json.and_then(|v| serde_json::from_value(v.clone()).ok());
 
         if let Some(ref nls) = p.limit_state {
             let msg = if prev_json.is_none() {
@@ -355,9 +381,8 @@ fn maybe_emit_limit_notifications(app: &AppHandle<Wry>, summary: &TraySummary) {
 
 // ── Provider status ─────────────────────────────────────────────────────────
 
-/// Get connection status for all providers (fast, no API calls for most).
-#[tauri::command]
-pub fn get_all_provider_status() -> Vec<ProviderStatus> {
+/// Get connection status for all providers.
+fn get_all_provider_status_sync() -> Vec<ProviderStatus> {
     vec![
         claude::check_connection(),
         claude_desktop::check_connection(),
@@ -381,9 +406,15 @@ pub fn get_all_provider_status() -> Vec<ProviderStatus> {
     ]
 }
 
-/// Get full analytics for a single provider.
 #[tauri::command]
-pub fn get_provider_analytics(provider_id: String) -> Result<ProviderAnalytics, String> {
+pub async fn get_all_provider_status() -> Result<Vec<ProviderStatus>, String> {
+    tauri::async_runtime::spawn_blocking(get_all_provider_status_sync)
+        .await
+        .map_err(|error| format!("Provider status worker failed: {error}"))
+}
+
+/// Get full analytics for a single provider.
+fn get_provider_analytics_sync(provider_id: String) -> Result<ProviderAnalytics, String> {
     match provider_id.as_str() {
         "claude-code" => Ok(claude::fetch_claude_analytics()),
         "claude-desktop" => Ok(claude_desktop::fetch_claude_desktop_analytics()),
@@ -408,19 +439,24 @@ pub fn get_provider_analytics(provider_id: String) -> Result<ProviderAnalytics, 
     }
 }
 
+#[tauri::command]
+pub async fn get_provider_analytics(provider_id: String) -> Result<ProviderAnalytics, String> {
+    tauri::async_runtime::spawn_blocking(move || get_provider_analytics_sync(provider_id))
+        .await
+        .map_err(|error| format!("Provider analytics worker failed: {error}"))?
+}
+
 /// Fetch analytics for all connected providers.
 /// Returns results for every provider (disconnected ones return status only).
-#[tauri::command]
-pub fn get_all_provider_analytics() -> Vec<ProviderAnalytics> {
-    // Check connections first (fast)
-    let statuses = get_all_provider_status();
+fn get_all_provider_analytics_sync() -> Vec<ProviderAnalytics> {
+    let statuses = get_all_provider_status_sync();
 
     statuses
         .into_iter()
         .map(|s| {
             if s.connected {
                 // Fetch full analytics for connected providers
-                get_provider_analytics(s.provider_id.clone()).unwrap_or_else(|e| {
+                get_provider_analytics_sync(s.provider_id.clone()).unwrap_or_else(|e| {
                     ProviderAnalytics {
                         provider_id: s.provider_id.clone(),
                         provider_name: s.provider_name.clone(),
@@ -452,6 +488,13 @@ pub fn get_all_provider_analytics() -> Vec<ProviderAnalytics> {
             }
         })
         .collect()
+}
+
+#[tauri::command]
+pub async fn get_all_provider_analytics() -> Result<Vec<ProviderAnalytics>, String> {
+    tauri::async_runtime::spawn_blocking(get_all_provider_analytics_sync)
+        .await
+        .map_err(|error| format!("Provider analytics worker failed: {error}"))
 }
 
 // ── Tray popover summary ────────────────────────────────────────────────────
@@ -634,10 +677,7 @@ fn pick_primary_provider_rate(provider: &TrayProviderSummary) -> Option<RateLimi
         .cloned()
 }
 
-fn numeric_extra_value(
-    provider: &TrayProviderSummary,
-    key: &str,
-) -> Option<f64> {
+fn numeric_extra_value(provider: &TrayProviderSummary, key: &str) -> Option<f64> {
     provider.extra.get(key).and_then(|value| value.as_f64())
 }
 
@@ -826,8 +866,7 @@ fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
         .lock()
         .ok()
         .and_then(|guard| guard.clone());
-    let display_provider_id =
-        pick_display_provider_id(summary, active_provider_id.as_deref());
+    let display_provider_id = pick_display_provider_id(summary, active_provider_id.as_deref());
     let display_provider = display_provider_id.as_ref().and_then(|provider_id| {
         summary
             .providers
@@ -886,13 +925,17 @@ fn update_tray_indicator(app: &AppHandle<Wry>, summary: &TraySummary) {
         // Tooltip: shown on hover on Windows/Linux, harmless on macOS.
         let tooltip = match (display_provider, title.as_deref()) {
             (Some(p), Some(t)) => Some(format!("{} \u{00B7} {}", p.provider_name, t)),
-            (Some(p), None)    => Some(p.provider_name.clone()),
-            (None, Some(t))    => Some(t.to_string()),
-            (None, None)       => None,
+            (Some(p), None) => Some(p.provider_name.clone()),
+            (None, Some(t)) => Some(t.to_string()),
+            (None, None) => None,
         };
         match tooltip {
-            Some(ref s) => { let _ = tray.set_tooltip(Some(s.as_str())); }
-            None        => { let _ = tray.set_tooltip(Option::<&str>::None); }
+            Some(ref s) => {
+                let _ = tray.set_tooltip(Some(s.as_str()));
+            }
+            None => {
+                let _ = tray.set_tooltip(Option::<&str>::None);
+            }
         }
 
         if let Some(ref provider_id) = display_provider_id {
@@ -943,21 +986,25 @@ fn fetch_deepseek_tray_analytics() -> ProviderAnalytics {
     let mut analytics = deepseek::fetch_deepseek_analytics();
     if analytics.status.connected {
         let overview = deepseek_v2::overview_for_tray();
-        analytics
-            .extra
-            .insert("total_sessions".into(), serde_json::json!(overview.total_sessions));
-        analytics
-            .extra
-            .insert("total_turns".into(), serde_json::json!(overview.total_turns));
-        analytics
-            .extra
-            .insert("total_tokens".into(), serde_json::json!(overview.total_tokens));
+        analytics.extra.insert(
+            "total_sessions".into(),
+            serde_json::json!(overview.total_sessions),
+        );
+        analytics.extra.insert(
+            "total_turns".into(),
+            serde_json::json!(overview.total_turns),
+        );
+        analytics.extra.insert(
+            "total_tokens".into(),
+            serde_json::json!(overview.total_tokens),
+        );
         analytics
             .extra
             .insert("active_now".into(), serde_json::json!(overview.active_now));
-        analytics
-            .extra
-            .insert("current_streak".into(), serde_json::json!(overview.current_streak));
+        analytics.extra.insert(
+            "current_streak".into(),
+            serde_json::json!(overview.current_streak),
+        );
     }
     analytics
 }
@@ -968,21 +1015,25 @@ fn fetch_kimi_tray_analytics() -> ProviderAnalytics {
     let mut analytics = kimi::fetch_kimi_analytics();
     if analytics.status.connected {
         let overview = kimi_v2::overview_for_tray();
-        analytics
-            .extra
-            .insert("total_sessions".into(), serde_json::json!(overview.total_sessions));
-        analytics
-            .extra
-            .insert("total_messages".into(), serde_json::json!(overview.total_messages));
-        analytics
-            .extra
-            .insert("total_turns".into(), serde_json::json!(overview.total_turns));
+        analytics.extra.insert(
+            "total_sessions".into(),
+            serde_json::json!(overview.total_sessions),
+        );
+        analytics.extra.insert(
+            "total_messages".into(),
+            serde_json::json!(overview.total_messages),
+        );
+        analytics.extra.insert(
+            "total_turns".into(),
+            serde_json::json!(overview.total_turns),
+        );
         analytics
             .extra
             .insert("active_now".into(), serde_json::json!(overview.active_now));
-        analytics
-            .extra
-            .insert("current_streak".into(), serde_json::json!(overview.current_streak));
+        analytics.extra.insert(
+            "current_streak".into(),
+            serde_json::json!(overview.current_streak),
+        );
     }
     analytics
 }
@@ -1088,7 +1139,10 @@ fn build_tray_summary() -> TraySummary {
 
     // Live running-agent count — computed per summary build (cheap PID probes),
     // not taken from the cached analytics snapshot.
-    if let Some(p) = providers.iter_mut().find(|p| p.provider_id == "claude-code") {
+    if let Some(p) = providers
+        .iter_mut()
+        .find(|p| p.provider_id == "claude-code")
+    {
         let n = crate::commands::claude_history::get_claude_active_sessions()
             .map(|s| s.iter().filter(|x| x.is_running).count())
             .unwrap_or(0);
@@ -1174,22 +1228,24 @@ pub fn start_tray_background_refresh(app_handle: AppHandle<Wry>) {
 
 /// Get a quick summary of all primary providers for the tray popover.
 /// Instant: reads from pre-computed cache (sub-millisecond).
-/// Falls back to synchronous fetch only on the very first call.
+/// Fetches on the blocking worker pool only when the cache is still cold.
 #[tauri::command]
-pub fn get_tray_summary() -> TraySummary {
+pub async fn get_tray_summary() -> Result<TraySummary, String> {
     // Fast path: read from background-refreshed cache
     if let Ok(guard) = TRAY_SUMMARY_CACHE.lock() {
         if let Some(ref cached) = *guard {
-            return cached.clone();
+            return Ok(cached.clone());
         }
     }
 
     // Cold start: cache not yet seeded by background thread
-    let summary = build_tray_summary();
+    let summary = tauri::async_runtime::spawn_blocking(build_tray_summary)
+        .await
+        .map_err(|error| format!("Tray summary worker failed: {error}"))?;
     if let Ok(mut guard) = TRAY_SUMMARY_CACHE.lock() {
         *guard = Some(summary.clone());
     }
-    summary
+    Ok(summary)
 }
 
 /// Trigger a background refresh of tray data. Fire-and-forget.
@@ -1200,8 +1256,7 @@ pub fn refresh_tray_data() {
 
 /// Force-refresh a specific provider by clearing its cache and re-fetching.
 /// Returns the fresh analytics data.
-#[tauri::command]
-pub fn force_refresh_provider(provider_id: String) -> Result<ProviderAnalytics, String> {
+fn force_refresh_provider_sync(provider_id: String) -> Result<ProviderAnalytics, String> {
     match provider_id.as_str() {
         "gemini" => {
             gemini::clear_cache();
@@ -1210,9 +1265,16 @@ pub fn force_refresh_provider(provider_id: String) -> Result<ProviderAnalytics, 
         // Add other providers as needed
         _ => {
             // For providers without explicit cache-clear, just re-fetch
-            get_provider_analytics(provider_id)
+            get_provider_analytics_sync(provider_id)
         }
     }
+}
+
+#[tauri::command]
+pub async fn force_refresh_provider(provider_id: String) -> Result<ProviderAnalytics, String> {
+    tauri::async_runtime::spawn_blocking(move || force_refresh_provider_sync(provider_id))
+        .await
+        .map_err(|error| format!("Provider refresh worker failed: {error}"))?
 }
 
 /// Update the tray icon tooltip text (called from frontend).
@@ -1254,7 +1316,11 @@ pub fn set_tray_active_provider(app: tauri::AppHandle, provider_id: String) -> R
 
 /// Save a token for a provider.
 #[tauri::command]
-pub fn save_provider_token(provider_id: String, key_type: String, value: String) -> Result<(), String> {
+pub fn save_provider_token(
+    provider_id: String,
+    key_type: String,
+    value: String,
+) -> Result<(), String> {
     token_store::store_provider_token(&provider_id, &key_type, &value)
 }
 
@@ -1309,7 +1375,15 @@ mod tray_provider_filter_tests {
         ];
         assert_eq!(
             select_tray_providers(&configured),
-            ["claude-code", "cursor", "codex", "gemini", "kimi", "deepseek", "opencode"]
+            [
+                "claude-code",
+                "cursor",
+                "codex",
+                "gemini",
+                "kimi",
+                "deepseek",
+                "opencode"
+            ]
         );
     }
 

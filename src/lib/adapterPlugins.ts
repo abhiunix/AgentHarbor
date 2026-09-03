@@ -164,9 +164,15 @@ export const adapterPlugins: AdapterPlugin[] = [
     color: "#10a37f",
     defaultExpanded: false,
     features: [
+      { id: "analytics", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/codex/analytics" },
+      { id: "instructions", label: "Instructions", icon: "\uD83D\uDCDD", route: "/adapters/codex/instructions" },
+      { id: "memory", label: "Memory", icon: "\uD83E\uDDE0", route: "/adapters/codex/memory" },
+      { id: "control", label: "Permissions & Control", icon: "\uD83D\uDD12", route: "/adapters/codex/control" },
+      { id: "prompts", label: "Prompt History", icon: "\uD83D\uDCAC", route: "/adapters/codex/prompts" },
+      { id: "transcripts", label: "Transcripts", icon: "\uD83D\uDCDC", route: "/adapters/codex/transcripts" },
+      { id: "plans", label: "Plans & Todos", icon: "\uD83D\uDCCB", route: "/adapters/codex/plans" },
       { id: "global-config", label: "Global Config", icon: "\u2295", route: "/adapters/codex/global-config" },
       { id: "skills", label: "Skills", icon: "\u2726", route: "/adapters/codex/skills" },
-      { id: "analytics", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/codex/analytics" },
     ],
   },
   {

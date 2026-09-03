@@ -1,4 +1,4 @@
-use crate::adapters::{AdapterRegistry, AdapterCapabilities};
+use crate::adapters::{AdapterCapabilities, AdapterRegistry};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -37,20 +37,17 @@ fn load_recent_projects_from_file() -> Vec<RecentProject> {
 
 fn save_recent_projects_to_file(projects: &[RecentProject]) -> Result<(), String> {
     let path = get_projects_file_path();
-    
+
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
     let content = serde_json::to_string_pretty(projects)
         .map_err(|e| format!("Failed to serialize projects: {}", e))?;
 
     let temp_path = path.with_extension("tmp");
-    fs::write(&temp_path, &content)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
-    fs::rename(&temp_path, &path)
-        .map_err(|e| format!("Failed to rename temp file: {}", e))?;
+    fs::write(&temp_path, &content).map_err(|e| format!("Failed to write temp file: {}", e))?;
+    fs::rename(&temp_path, &path).map_err(|e| format!("Failed to rename temp file: {}", e))?;
 
     Ok(())
 }
@@ -58,15 +55,13 @@ fn save_recent_projects_to_file(projects: &[RecentProject]) -> Result<(), String
 #[tauri::command]
 pub async fn select_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use std::sync::mpsc;
-    
+
     let (tx, rx) = mpsc::channel();
-    
-    app.dialog()
-        .file()
-        .pick_folder(move |folder| {
-            let _ = tx.send(folder);
-        });
-    
+
+    app.dialog().file().pick_folder(move |folder| {
+        let _ = tx.send(folder);
+    });
+
     match rx.recv() {
         Ok(Some(path)) => Ok(Some(path.to_string())),
         Ok(None) => Ok(None),
@@ -139,20 +134,30 @@ pub struct GlobalConfigInfo {
     pub has_config: bool,
 }
 
-fn get_global_config_path(adapter_id: &str) -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
-    match adapter_id {
+fn get_global_config_path(adapter_id: &str) -> Result<Option<PathBuf>, String> {
+    if adapter_id == "codex" {
+        return Ok(Some(
+            crate::utils::codex_paths::codex_home()?.join("config.toml"),
+        ));
+    }
+    let Some(home) = dirs::home_dir() else {
+        return Ok(None);
+    };
+    Ok(match adapter_id {
         "claude-code" => Some(home.join(".claude.json")),
         "cursor" => Some(home.join(".cursor").join("mcp.json")),
-        "windsurf" => Some(home.join(".codeium").join("windsurf").join("mcp_config.json")),
-        "codex" => Some(home.join(".codex").join("config.toml")),
+        "windsurf" => Some(
+            home.join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"),
+        ),
         _ => None,
-    }
+    })
 }
 
 #[tauri::command]
 pub fn get_global_config(adapter_id: String) -> Result<GlobalConfigInfo, String> {
-    let config_path = get_global_config_path(&adapter_id)
+    let config_path = get_global_config_path(&adapter_id)?
         .ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
 
     // Codex uses TOML, not JSON — return empty MCP list (no MCP support)
@@ -170,11 +175,11 @@ pub fn get_global_config(adapter_id: String) -> Result<GlobalConfigInfo, String>
         });
     }
 
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
+    let content =
+        fs::read_to_string(&config_path).map_err(|e| format!("Failed to read config: {}", e))?;
 
-    let json: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
 
     let mcp_servers = json
         .get("mcpServers")
@@ -225,7 +230,7 @@ mod tests {
     fn test_detect_adapters_claude_project() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         fs::create_dir(temp_dir.path().join(".claude")).unwrap();
-        
+
         let adapters = detect_adapters(temp_dir.path().to_string_lossy().to_string());
         assert!(adapters.iter().any(|a| a.id == "claude-code"));
     }

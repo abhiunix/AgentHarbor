@@ -21,19 +21,29 @@ fn claude_memory_path() -> Option<PathBuf> {
     home_dir().map(|h| h.join(".claude").join("CLAUDE.md"))
 }
 
-fn global_config_path(adapter_id: &str) -> Option<PathBuf> {
+fn global_config_path(adapter_id: &str) -> Result<Option<PathBuf>, String> {
     // Claude Desktop lives under the data dir, not home.
     if adapter_id == "claude-desktop" {
-        return claude_desktop_config_path();
+        return Ok(claude_desktop_config_path());
     }
-    let home = home_dir()?;
-    match adapter_id {
+    if adapter_id == "codex" {
+        return Ok(Some(
+            crate::utils::codex_paths::codex_home()?.join("config.toml"),
+        ));
+    }
+    let Some(home) = home_dir() else {
+        return Ok(None);
+    };
+    Ok(match adapter_id {
         "claude-code" => Some(home.join(".claude.json")),
         "cursor" => Some(home.join(".cursor").join("mcp.json")),
-        "windsurf" => Some(home.join(".codeium").join("windsurf").join("mcp_config.json")),
-        "codex" => Some(home.join(".codex").join("config.toml")),
+        "windsurf" => Some(
+            home.join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"),
+        ),
         _ => None,
-    }
+    })
 }
 
 fn write_atomic(path: &PathBuf, content: &str) -> Result<(), String> {
@@ -63,11 +73,7 @@ pub fn write_claude_settings(content: String) -> Result<(), String> {
 // We deliberately do NOT set ANTHROPIC_AUTH_TOKEN alongside ANTHROPIC_API_KEY —
 // Claude Code treats them as competing auth methods and warns when both are present.
 // ANTHROPIC_API_KEY=ollama is the single correct override for local/proxy endpoints.
-const OLLAMA_ENV_KEYS: [&str; 3] = [
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_MODEL",
-];
+const OLLAMA_ENV_KEYS: [&str; 3] = ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"];
 // Also clean up ANTHROPIC_AUTH_TOKEN if a previous version wrote it.
 const LEGACY_OLLAMA_KEYS: [&str; 1] = ["ANTHROPIC_AUTH_TOKEN"];
 
@@ -223,7 +229,11 @@ pub fn get_claude_desktop_config_path() -> Result<String, String> {
 
 #[tauri::command]
 pub fn read_global_config_raw(adapter_id: String) -> Result<String, String> {
-    let path = global_config_path(&adapter_id).ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
+    if adapter_id == "codex" {
+        return crate::commands::codex::read_codex_config();
+    }
+    let path = global_config_path(&adapter_id)?
+        .ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
     if !path.exists() {
         return Ok(if adapter_id == "claude-code" {
             r#"{"mcpServers":{}}"#.to_string()
@@ -244,8 +254,13 @@ pub fn read_global_config_raw(adapter_id: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn write_global_config_raw(adapter_id: String, content: String) -> Result<(), String> {
-    let path = global_config_path(&adapter_id).ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
-    let new_json: Value = serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {}", e))?;
+    if adapter_id == "codex" {
+        return crate::commands::codex::write_codex_config(content);
+    }
+    let path = global_config_path(&adapter_id)?
+        .ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
+    let new_json: Value =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {}", e))?;
     if adapter_id == "claude-code" {
         let mcp_servers = new_json.get("mcpServers").cloned().unwrap_or(json!({}));
         let mut full: Value = if path.exists() {
@@ -268,7 +283,11 @@ pub fn add_global_mcp_server(
     name: String,
     config: Value,
 ) -> Result<(), String> {
-    let path = global_config_path(&adapter_id).ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
+    if adapter_id == "codex" {
+        return Err("Codex MCP changes are not supported by this command".to_string());
+    }
+    let path = global_config_path(&adapter_id)?
+        .ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
     let mut json: Value = if path.exists() {
         let s = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         serde_json::from_str(&s).map_err(|e| e.to_string())?
@@ -285,7 +304,11 @@ pub fn add_global_mcp_server(
 
 #[tauri::command]
 pub fn remove_global_mcp_server(adapter_id: String, name: String) -> Result<(), String> {
-    let path = global_config_path(&adapter_id).ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
+    if adapter_id == "codex" {
+        return Err("Codex MCP changes are not supported by this command".to_string());
+    }
+    let path = global_config_path(&adapter_id)?
+        .ok_or_else(|| format!("Unknown adapter: {}", adapter_id))?;
     if !path.exists() {
         return Ok(());
     }
@@ -314,20 +337,37 @@ pub struct DiscoveredCapability {
     pub adapter_ids: Vec<String>,
 }
 
-fn parse_mcp_entry(name: &str, v: &Value, source: &str, adapter_id: &str) -> Option<DiscoveredCapability> {
+fn parse_mcp_entry(
+    name: &str,
+    v: &Value,
+    source: &str,
+    adapter_id: &str,
+) -> Option<DiscoveredCapability> {
     let obj = v.as_object()?;
     let transport = obj
         .get("type")
         .and_then(|t| t.as_str())
         .unwrap_or("stdio")
         .to_string();
-    let command = obj.get("command").and_then(|c| c.as_str()).unwrap_or("").to_string();
+    let command = obj
+        .get("command")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
     let args: Vec<String> = obj
         .get("args")
         .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
-    let url = obj.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+    let url = obj
+        .get("url")
+        .and_then(|u| u.as_str())
+        .unwrap_or("")
+        .to_string();
     let env: HashMap<String, Value> = obj
         .get("env")
         .and_then(|e| e.as_object())
@@ -416,7 +456,9 @@ pub fn discover_capabilities() -> Result<Vec<DiscoveredCapability>, String> {
         ("cursor", home.join(".cursor").join("mcp.json")),
         (
             "windsurf",
-            home.join(".codeium").join("windsurf").join("mcp_config.json"),
+            home.join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"),
         ),
         ("gemini", home.join(".gemini").join("settings.json")),
     ] {
@@ -469,7 +511,9 @@ pub fn discover_capabilities() -> Result<Vec<DiscoveredCapability>, String> {
                 let source = source_str(&path);
                 if let Ok(content) = fs::read_to_string(&path) {
                     if let Ok(json) = serde_json::from_str::<Value>(&content) {
-                        collect_mcp_servers_from_value(&json, &source, adapter_id, &mut seen, &mut out);
+                        collect_mcp_servers_from_value(
+                            &json, &source, adapter_id, &mut seen, &mut out,
+                        );
                     }
                 }
             }
@@ -514,7 +558,10 @@ mod claude_env_tests {
         let raw = fs::read_to_string(&path).unwrap();
         let v: Value = serde_json::from_str(&raw).unwrap();
         let env = v.get("env").unwrap().as_object().unwrap();
-        assert_eq!(env.get("ANTHROPIC_BASE_URL").unwrap(), "http://localhost:11434");
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").unwrap(),
+            "http://localhost:11434"
+        );
         assert_eq!(env.get("ANTHROPIC_API_KEY").unwrap(), "ollama");
         assert_eq!(env.get("ANTHROPIC_MODEL").unwrap(), "llama3.1:8b");
         // ANTHROPIC_AUTH_TOKEN must NOT be written — causes auth conflict warning in Claude Code
@@ -561,7 +608,10 @@ mod claude_env_tests {
         let env = v.get("env").unwrap().as_object().unwrap();
         assert!(env.get("ANTHROPIC_BASE_URL").is_none());
         assert!(env.get("ANTHROPIC_API_KEY").is_none());
-        assert!(env.get("ANTHROPIC_AUTH_TOKEN").is_none(), "legacy key must be cleaned up");
+        assert!(
+            env.get("ANTHROPIC_AUTH_TOKEN").is_none(),
+            "legacy key must be cleaned up"
+        );
         assert!(env.get("ANTHROPIC_MODEL").is_none());
         assert_eq!(env.get("MY_OTHER").unwrap(), "foo");
     }
