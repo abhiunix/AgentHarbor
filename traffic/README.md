@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-09-06.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-09-07.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 458 | 143 |
-| Clones | 940 | 453 |
+| Views | 460 | 145 |
+| Clones | 950 | 461 |
 
 Stars 11 | Forks 0 | Open issues 9
 
@@ -28,13 +28,13 @@ Stars 11 | Forks 0 | Open issues 9
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| github.com | 5 | 4 |
+| github.com | 4 | 3 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 37 | 16 |
+| / | 35 | 15 |
 | /graphs/traffic | 3 | 1 |
 | /pulse | 3 | 1 |
 | /issues | 2 | 2 |
