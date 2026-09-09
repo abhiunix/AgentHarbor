@@ -199,6 +199,14 @@
     "2026-09-05": {
       "count": 2,
       "uniques": 2
+    },
+    "2026-09-06": {
+      "count": 0,
+      "uniques": 0
+    },
+    "2026-09-07": {
+      "count": 1,
+      "uniques": 1
     }
   },
   "clones": {
@@ -400,6 +408,14 @@
     },
     "2026-09-05": {
       "count": 10,
+      "uniques": 8
+    },
+    "2026-09-06": {
+      "count": 6,
+      "uniques": 5
+    },
+    "2026-09-07": {
+      "count": 14,
       "uniques": 8
     }
   },
@@ -1138,6 +1154,13 @@
         "referrer": "github.com",
         "count": 4,
         "uniques": 3
+      }
+    ],
+    "2026-09-09": [
+      {
+        "referrer": "github.com",
+        "count": 3,
+        "uniques": 2
       }
     ]
   },
@@ -3117,6 +3140,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-09-09": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 26,
+        "uniques": 14
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/graphs/traffic",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pulse",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/analytics.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/presets.png",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/features.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/getting-started.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/opencode-adapter-research.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/regression-checklist.md",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -3309,17 +3384,22 @@
       "stars": 11,
       "forks": 0,
       "issues": 9
+    },
+    "2026-09-09": {
+      "stars": 11,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-09-08",
+    "asOf": "2026-09-09",
     "views": {
-      "count": 55,
-      "uniques": 15
+      "count": 41,
+      "uniques": 14
     },
     "clones": {
-      "count": 265,
-      "uniques": 89
+      "count": 216,
+      "uniques": 79
     }
   }
 }
