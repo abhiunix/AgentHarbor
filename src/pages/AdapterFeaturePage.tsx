@@ -106,6 +106,9 @@ const GeminiAnalyticsPage = lazy(() =>
 const CodexAnalyticsPage = lazy(() =>
   import("./CodexAnalyticsPage").then((m) => ({ default: m.CodexAnalyticsPage }))
 );
+const CodexProjectsPage = lazy(() =>
+  import("./CodexProjectsPage").then((m) => ({ default: m.CodexProjectsPage }))
+);
 const CodexSkillsPage = lazy(() =>
   import("./CodexSkillsPage").then((m) => ({ default: m.CodexSkillsPage }))
 );
@@ -210,6 +213,7 @@ const ADAPTER_FEATURE_COMPONENTS: Record<string, Record<string, LazyPage>> = {
     control: CodexControlPage as LazyPage,
     skills: CodexSkillsPage as LazyPage,
     analytics: CodexAnalyticsPage as LazyPage,
+    projects: CodexProjectsPage as LazyPage,
     prompts: CodexPromptHistoryPage as LazyPage,
     transcripts: CodexTranscriptsPage as LazyPage,
     plans: CodexPlansPage as LazyPage,

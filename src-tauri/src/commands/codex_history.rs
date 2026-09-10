@@ -650,7 +650,11 @@ fn load_sessions_from_db(root: &Path) -> Option<(Vec<SessionRecord>, bool)> {
     let mut statement = connection
         .prepare(
             "SELECT id, title, cwd, created_at, updated_at, rollout_path, archived \
-             FROM threads WHERE has_user_event = 1 \
+             FROM threads \
+             WHERE has_user_event = 1 \
+                OR TRIM(COALESCE(first_user_message, '')) <> '' \
+                OR TRIM(COALESCE(preview, '')) <> '' \
+                OR TRIM(COALESCE(title, '')) <> '' \
              ORDER BY updated_at DESC LIMIT ?1",
         )
         .ok()?;
@@ -777,7 +781,10 @@ fn load_sessions_from_files(root: &Path) -> (Vec<SessionRecord>, bool) {
 }
 
 fn load_session_records(root: &Path) -> (Vec<SessionRecord>, bool) {
-    load_sessions_from_db(root).unwrap_or_else(|| load_sessions_from_files(root))
+    match load_sessions_from_db(root) {
+        Some((records, truncated)) if !records.is_empty() => (records, truncated),
+        _ => load_sessions_from_files(root),
+    }
 }
 
 fn find_session(root: &Path, session_id: &str) -> Option<SessionRecord> {

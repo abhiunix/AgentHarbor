@@ -2647,3 +2647,102 @@ export interface ModelRoutingAnalysis {
 export async function analyzeModelRouting(days?: number): Promise<ModelRoutingAnalysis> {
   return invoke<ModelRoutingAnalysis>("analyze_model_routing", { days });
 }
+
+export interface ClaudeRetentionStatus {
+  cleanup_period_days: number | null;
+  effective_days: number;
+  using_default: boolean;
+  sessions_in_history: number;
+  transcripts_on_disk: number;
+  sessions_pruned: number;
+  earliest_session: string | null;
+  earliest_transcript: string | null;
+}
+
+/**
+ * How much Claude Code session history has been pruned by its cleanup job.
+ * Deleted transcripts are the only source of per-message token/cost data, so
+ * this quantifies what analytics can no longer see.
+ */
+export async function getClaudeRetentionStatus(): Promise<ClaudeRetentionStatus> {
+  return invoke<ClaudeRetentionStatus>("get_claude_retention_status");
+}
+
+export interface CodexAgentNode {
+  session_id: string;
+  rollout_path: string;
+  nickname: string | null;
+  agent_path: string | null;
+  depth: number;
+  parent_id: string | null;
+  offsets_len: number;
+  started_at: string | null;
+  ended_at: string | null;
+  model: string | null;
+  tool_calls: number;
+  messages: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_cost: number | null;
+  file_size_bytes: number;
+  tools: [string, number][];
+  children: CodexAgentNode[];
+}
+
+export interface CodexProjectSummary {
+  project_path: string;
+  project_name: string;
+  sessions: number;
+  subagents: number;
+  total_tokens: number;
+  estimated_cost: number;
+  last_active: string | null;
+}
+
+export interface CodexProjectsOverview {
+  projects: CodexProjectSummary[];
+  total_sessions: number;
+  total_subagents: number;
+  scanned_files: number;
+}
+
+export interface CodexTimelineEvent {
+  ordinal: number;
+  timestamp: string | null;
+  kind: string;
+  name: string | null;
+  preview: string;
+  truncated: boolean;
+  full_text: string | null;
+}
+
+export interface CodexTimelinePage {
+  events: CodexTimelineEvent[];
+  total: number;
+  offset: number;
+  has_more: boolean;
+}
+
+export async function getCodexProjectsOverview(): Promise<CodexProjectsOverview> {
+  return invoke<CodexProjectsOverview>("get_codex_projects_overview");
+}
+
+export async function getCodexProjectSessions(projectPath?: string): Promise<CodexAgentNode[]> {
+  return invoke<CodexAgentNode[]>("get_codex_project_sessions", { projectPath: projectPath ?? null });
+}
+
+export async function getCodexSessionTimeline(
+  rolloutPath: string,
+  offset = 0,
+  limit = 100,
+  expandOrdinal?: number,
+): Promise<CodexTimelinePage> {
+  return invoke<CodexTimelinePage>("get_codex_session_timeline", {
+    rolloutPath,
+    offset,
+    limit,
+    expandOrdinal: expandOrdinal ?? null,
+  });
+}

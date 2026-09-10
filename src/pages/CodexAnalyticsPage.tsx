@@ -12,9 +12,13 @@ import {
   Cell,
   BarChart,
   Bar,
+  AreaChart,
+  Area,
+  CartesianGrid,
   XAxis,
   YAxis,
   Tooltip,
+  LabelList,
   ResponsiveContainer,
 } from "recharts";
 
@@ -447,6 +451,210 @@ function ActivityHeatmap({ daily }: { daily: DailyActivityPoint[] }) {
   );
 }
 
+type UsageDailyPoint = {
+  date: string;
+  tokens: number;
+  cost: number;
+  sessions: number;
+  session_ids?: string[];
+  approximate?: boolean;
+};
+
+type UsagePeriod = "daily" | "weekly" | "monthly";
+type UsageMetric = "cost" | "tokens" | "sessions";
+
+/** Monday-aligned week start for a YYYY-MM-DD date, as YYYY-MM-DD. */
+function weekStart(date: string): string {
+  const d = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return date;
+  const dow = (d.getDay() + 6) % 7; // Monday = 0
+  d.setDate(d.getDate() - dow);
+  // Format from local parts: toISOString() converts to UTC, which shifts the
+  // date backwards for negative-offset timezones and mislabels the week.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Re-bucket daily points into the requested period.
+ *
+ * Session counts union the distinct thread ids rather than summing the daily
+ * counts: summing would yield session-days, counting one session active on
+ * three days as three sessions.
+ */
+function bucketUsage(
+  daily: UsageDailyPoint[],
+  period: UsagePeriod,
+): { key: string; label: string; cost: number; tokens: number; sessions: number }[] {
+  const keyOf = (date: string) =>
+    period === "daily"
+      ? date
+      : period === "weekly"
+        ? weekStart(date)
+        : date.slice(0, 7);
+
+  const buckets = new Map<
+    string,
+    { cost: number; tokens: number; ids: Set<string>; fallbackSessions: number }
+  >();
+  for (const point of daily) {
+    if (!point.date) continue;
+    const key = keyOf(point.date);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { cost: 0, tokens: 0, ids: new Set(), fallbackSessions: 0 };
+      buckets.set(key, bucket);
+    }
+    bucket.cost += point.cost ?? 0;
+    bucket.tokens += point.tokens ?? 0;
+    if (point.session_ids?.length) {
+      for (const id of point.session_ids) bucket.ids.add(id);
+    } else {
+      bucket.fallbackSessions += point.sessions ?? 0;
+    }
+  }
+
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, b]) => ({
+      key,
+      label:
+        period === "monthly"
+          ? key
+          : period === "weekly"
+            ? key.slice(5)
+            : key.slice(5),
+      cost: b.cost,
+      tokens: b.tokens,
+      sessions: b.ids.size || b.fallbackSessions,
+    }));
+}
+
+function UsageOverTimeChart({ daily }: { daily: UsageDailyPoint[] }) {
+  const [period, setPeriod] = useState<UsagePeriod>("daily");
+  const [metric, setMetric] = useState<UsageMetric>("cost");
+
+  const data = bucketUsage(daily, period);
+  // Tallest bucket for the current metric, annotated inline on the chart.
+  const peakIdx = data.reduce((best, p, i, arr) => (p[metric] > arr[best][metric] ? i : best), 0);
+  const formatValue = (value: number) =>
+    metric === "cost"
+      ? formatUsd(value)
+      : metric === "tokens"
+        ? formatTokens(value)
+        : `${value}`;
+
+  const pill = (active: boolean) =>
+    `text-[10px] px-2 py-0.5 rounded transition-colors ${
+      active ? "bg-[#10a37f] text-white" : "text-text-muted hover:text-text-primary"
+    }`;
+
+  if (data.length === 0) {
+    return (
+      <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
+        <p className="text-[10px] text-text-muted uppercase tracking-wider mb-3">Usage Over Time</p>
+        <div className="h-48 flex items-center justify-center text-xs text-text-muted">
+          No usage data yet.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <p className="text-[10px] text-text-muted uppercase tracking-wider">Usage Over Time</p>
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1">
+            {(["daily", "weekly", "monthly"] as UsagePeriod[]).map((p) => (
+              <button key={p} type="button" onClick={() => setPeriod(p)} className={pill(period === p)}>
+                {p[0].toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1 border-l border-[#2a2b36] pl-3">
+            {(["cost", "tokens", "sessions"] as UsageMetric[]).map((m) => (
+              <button key={m} type="button" onClick={() => setMetric(m)} className={pill(metric === m)}>
+                {m === "cost" ? "Cost" : m === "tokens" ? "Tokens" : "Sessions"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="h-48">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ left: 0, right: 10, top: 24, bottom: 0 }}>
+            <defs>
+              <linearGradient id="codexUsageFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={ACCENT} stopOpacity={0.45} />
+                <stop offset="100%" stopColor={ACCENT} stopOpacity={0.03} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2a2b36" vertical={false} />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 9, fill: "#9394a1" }}
+              tickLine={false}
+              axisLine={false}
+              interval="preserveStartEnd"
+            />
+            <YAxis
+              tick={{ fontSize: 9, fill: "#9394a1" }}
+              tickLine={false}
+              axisLine={false}
+              width={44}
+              tickFormatter={(value: number) => formatValue(value)}
+            />
+            <Tooltip
+              cursor={{ stroke: ACCENT, strokeWidth: 1, strokeOpacity: 0.4 }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const row = payload[0].payload as (typeof data)[number];
+                return (
+                  <div className="bg-[#1a1b23] border border-[#2a2b36] rounded px-2 py-1 text-[10px]">
+                    <div className="text-text-primary">{row.key}</div>
+                    <div className="text-text-muted">
+                      {formatValue(row[metric])}
+                    </div>
+                  </div>
+                );
+              }}
+            />
+            {/* linear, not monotone: spline smoothing invents peaks between
+                sparse points (very visible with only a few monthly buckets). */}
+            <Area
+              type="linear"
+              dataKey={metric}
+              stroke={ACCENT}
+              strokeWidth={2}
+              fill="url(#codexUsageFill)"
+              dot={false}
+              activeDot={{ r: 3, fill: ACCENT }}
+            >
+              <LabelList
+                dataKey={metric}
+                content={(props: { x?: number | string; y?: number | string; index?: number }) => {
+                  const { x, y, index } = props;
+                  if (index !== peakIdx) return null;
+                  const value = data[peakIdx]?.[metric];
+                  if (!value) return null;
+                  return (
+                    <text x={Number(x)} y={Number(y) - 8} textAnchor="middle" fill="#e6e7ea" fontSize={10} fontWeight={600}>
+                      {`Peak ${formatValue(value)}`}
+                    </text>
+                  );
+                }}
+              />
+            </Area>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 function HourlyActivityChart({ hourCounts }: { hourCounts: number[] }) {
   const data = hourCounts.map((value, hour) => ({ hour, value }));
   return (
@@ -594,10 +802,15 @@ export function CodexAnalyticsPage() {
   // Enrichment data from extra
   const tokenBreakdown = (extra.token_breakdown as TokenBreakdown | undefined) ?? null;
   const tokenBreakdownCost = (extra.token_breakdown_estimated_cost as number | undefined) ?? 0;
-  const tokenBreakdownCostModel = (extra.token_breakdown_cost_model as string | undefined) ?? null;
   const projectBreakdown = (extra.project_breakdown as ProjectBreakdown[] | undefined) ?? [];
   const modelCatalog = (extra.model_catalog as ModelCatalogEntry[] | undefined) ?? [];
   const dailyActivity = (extra.daily_activity as DailyActivityPoint[] | undefined) ?? [];
+  const ratesAsOf = (extra.rates_as_of as string | undefined) ?? null;
+  const usageDaily = (extra.usage_daily as UsageDailyPoint[] | undefined) ?? [];
+  const unpricedModels = (extra.unpriced_models as string[] | undefined) ?? [];
+  const unpricedTokens = (extra.unpriced_tokens as number | undefined) ?? 0;
+  const approximateSessions = (extra.approximate_sessions as number | undefined) ?? 0;
+  const unaccountedSessions = (extra.unaccounted_sessions as number | undefined) ?? 0;
   const hourCounts = (extra.hour_counts as number[] | undefined) ?? [];
   const activeDays = (extra.active_days as number | undefined) ?? 0;
   const longestStreak = (extra.longest_streak as number | undefined) ?? 0;
@@ -771,10 +984,17 @@ export function CodexAnalyticsPage() {
             </div>
             <p className="text-[10px] text-text-muted mt-2">
               Aggregated from the last {tokenBreakdown.sessions_scanned} session{tokenBreakdown.sessions_scanned === 1 ? "" : "s"}&apos; rollout logs ({codexPath(codexHomePath, "sessions")}).
-              {tokenBreakdownCostModel && (
-                <> Split-rate estimate at {tokenBreakdownCostModel} rates: <span className="text-emerald-400 font-medium">{formatUsd(tokenBreakdownCost)}</span>.</>
+              {tokenBreakdownCost > 0 && (
+                <> Priced per request at each turn&apos;s own model: <span className="text-emerald-400 font-medium">{formatUsd(tokenBreakdownCost)}</span>.</>
               )}
             </p>
+          </Section>
+        )}
+
+        {/* Usage over time: daily/weekly/monthly x cost/tokens/sessions */}
+        {usageDaily.length > 0 && (
+          <Section title="Usage Over Time">
+            <UsageOverTimeChart daily={usageDaily} />
           </Section>
         )}
 
@@ -806,7 +1026,7 @@ export function CodexAnalyticsPage() {
                   <div className="text-[10px] text-text-muted mt-0.5">Estimated cost at OpenAI API pay-per-token rates (all time)</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">Per Message</div>
+                  <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">Per Session</div>
                   <div className="text-lg font-semibold text-text-primary">
                     {totalSessions > 0 ? formatUsd(estimatedTotalCost / totalSessions) : "$0.00"}
                   </div>
@@ -814,9 +1034,33 @@ export function CodexAnalyticsPage() {
                 </div>
               </div>
               <div className="bg-[#0e0f13] rounded-lg p-3 text-[10px] text-text-muted leading-relaxed">
-                <span className="text-amber-400 font-medium">How to read this:</span> Your Team subscription includes all this usage in your flat monthly fee.
+                <span className="text-amber-400 font-medium">How to read this:</span> Your{" "}
+                {planType && planType !== "Unknown" ? <span className="capitalize">{planType}</span> : null} subscription includes all this usage in your flat monthly fee.
                 The &quot;{formatUsd(estimatedTotalCost)}&quot; represents what equivalent API usage would cost without a subscription; it shows the
                 <span className="text-emerald-400 font-medium"> compute value</span> you&apos;re getting from your plan, not what you&apos;re being charged.
+                {(unpricedModels.length > 0 || approximateSessions > 0 || unaccountedSessions > 0) && (
+                  <div className="mt-2 pt-2 border-t border-[#2a2b36] space-y-0.5">
+                    {unpricedModels.length > 0 && (
+                      <div>
+                        <span className="text-amber-400">Rate unknown:</span>{" "}
+                        {unpricedModels.join(", ")} ({formatTokens(unpricedTokens)} tokens) excluded from the total.
+                      </div>
+                    )}
+                    {approximateSessions > 0 && (
+                      <div>
+                        <span className="text-amber-400">Approximate:</span>{" "}
+                        {approximateSessions} session{approximateSessions !== 1 ? "s" : ""} use an older rollout format
+                        whose counters reset per turn, so their usage is reconstructed rather than exact.
+                      </div>
+                    )}
+                    {unaccountedSessions > 0 && (
+                      <div>
+                        <span className="text-amber-400">Unaccounted:</span>{" "}
+                        {unaccountedSessions} session{unaccountedSessions !== 1 ? "s" : ""} record no usage data.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -856,14 +1100,14 @@ export function CodexAnalyticsPage() {
                     <a href="https://openai.com/api/pricing/" target="_blank" rel="noopener noreferrer" className="text-[#10a37f] hover:underline">
                       OpenAI Pricing
                     </a>{" "}
-                    (estimated combined average input and output per Mtok):
+                    (input / cached input / output per Mtok{ratesAsOf ? `, as of ${ratesAsOf}` : ""}):
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-text-muted font-mono">
-                    <span><span className="text-emerald-400">GPT-5.4:</span> ~$10/Mtok</span>
-                    <span><span className="text-emerald-400">GPT-5.4-mini:</span> ~$2.5/Mtok</span>
-                    <span><span className="text-blue-400">GPT-5.3-codex:</span> ~$10/Mtok</span>
-                    <span><span className="text-blue-400">GPT-5.1-codex:</span> ~$7.5/Mtok</span>
-                    <span><span className="text-purple-400">GPT-5:</span> ~$5/Mtok</span>
+                    <span><span className="text-emerald-400">GPT-5.6-sol:</span> $4 / $0.40 / $20</span>
+                    <span><span className="text-emerald-400">GPT-5.5:</span> $5 / $0.50 / $30</span>
+                    <span><span className="text-blue-400">GPT-5.4:</span> $2.50 / $0.25 / $15</span>
+                    <span><span className="text-blue-400">GPT-5.3-codex:</span> $1.75 / $0.175 / $14</span>
+                    <span><span className="text-purple-400">GPT-5.1-codex:</span> $1.25 / $0.125 / $10</span>
                   </div>
                 </div>
               </div>
@@ -1251,6 +1495,8 @@ export function CodexAnalyticsPage() {
             "token_breakdown", "token_breakdown_estimated_cost", "token_breakdown_cost_model",
             "daily_activity", "hour_counts", "active_days", "longest_streak",
             "current_streak", "peak_hour", "offline_rate_limits", "offline_plan_type",
+            "usage_daily", "unpriced_models", "unpriced_tokens", "approximate_sessions",
+            "unaccounted_sessions", "rates_as_of",
           ]);
           const remainingExtra = Object.entries(extra).filter(([key]) => !displayedKeys.has(key));
           if (remainingExtra.length === 0) return null;

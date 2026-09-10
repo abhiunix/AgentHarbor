@@ -1,7 +1,7 @@
 {
   "name": "agentharbor",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.2.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "clear-quarantine": "bash scripts/clear-quarantine-mac.sh",
-    "test:regression": "npm run build && cd src-tauri && cargo test"
+    "test:regression": "npm run build && cd src-tauri && cargo test",
+    "clean": "bash scripts/clean-caches.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

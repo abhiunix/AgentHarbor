@@ -428,91 +428,202 @@ fn app_server_credit_usage(limits: &[AppServerRateLimit]) -> Option<CreditUsage>
     })
 }
 
+/// A window is "weekly" when it spans roughly a week. Codex reports several
+/// buckets (5h, 7d, per-model); the weekly quota is the one that actually
+/// governs how much work is left, so it is what the banner reports.
+const WEEKLY_WINDOW_MIN_MINS: i64 = 60 * 24 * 5; // >= ~5 days counts as weekly
+
+fn weekly_window(limit: &AppServerRateLimit) -> Option<&AppServerRateWindow> {
+    limit
+        .primary
+        .iter()
+        .chain(limit.secondary.iter())
+        .filter(|w| {
+            w.window_duration_mins
+                .is_some_and(|mins| mins >= WEEKLY_WINDOW_MIN_MINS)
+        })
+        // If several qualify, the longest is the governing quota.
+        .max_by_key(|w| w.window_duration_mins.unwrap_or(0))
+}
+
+/// Codex's limit banner is driven by the **weekly** quota.
+///
+/// Short buckets (the 5h `codex-spark` window, for instance) routinely sit at
+/// 100% and refill within hours; surfacing those as "Limit reached" is noise,
+/// and because the API returns limits in a `HashMap`, whichever one appeared
+/// first was effectively arbitrary. A genuine server-side block still wins,
+/// since at that point no work is possible regardless of any percentage.
 fn app_server_limit_state(limits: &[AppServerRateLimit]) -> Option<LimitState> {
-    limits.iter().find_map(|limit| {
-        let reached = limit.rate_limit_reached_type.is_some()
-            || limit.spend_control_reached == Some(true)
-            || limit
-                .primary
-                .iter()
-                .chain(limit.secondary.iter())
-                .any(|window| window.used_percent.is_some_and(|percent| percent >= 100.0));
-        if !reached {
-            return None;
-        }
-        let used_pct = limit
+    // 1. A real block always takes precedence: the server has said no.
+    if let Some(blocked) = limits.iter().find(|limit| {
+        limit.rate_limit_reached_type.is_some() || limit.spend_control_reached == Some(true)
+    }) {
+        let used_pct = blocked
             .primary
             .iter()
-            .chain(limit.secondary.iter())
-            .filter_map(|window| window.used_percent)
+            .chain(blocked.secondary.iter())
+            .filter_map(|w| w.used_percent)
             .fold(100.0_f64, f64::max);
-        let resets_at = limit
+        let resets_at = blocked
             .primary
             .iter()
-            .chain(limit.secondary.iter())
-            .filter_map(|window| window.resets_at)
+            .chain(blocked.secondary.iter())
+            .filter_map(|w| w.resets_at)
             .min()
-            .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
-            .map(|date| date.to_rfc3339());
-        Some(LimitState::Reached {
-            scope: LimitScope::Custom(limit.limit_id.clone().unwrap_or_else(|| "codex".into())),
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+            .map(|d| d.to_rfc3339());
+        return Some(LimitState::Reached {
+            scope: LimitScope::Custom(
+                blocked
+                    .limit_name
+                    .clone()
+                    .or_else(|| blocked.limit_id.clone())
+                    .unwrap_or_else(|| "codex".into()),
+            ),
             used_pct,
             cap: None,
             resets_at,
-        })
+        });
+    }
+
+    // 2. Otherwise report only the weekly quota, and only once it is spent.
+    let (limit, window) = limits
+        .iter()
+        .filter_map(|limit| weekly_window(limit).map(|w| (limit, w)))
+        .max_by(|a, b| {
+            a.1.used_percent
+                .unwrap_or(0.0)
+                .partial_cmp(&b.1.used_percent.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })?;
+
+    if !window.used_percent.is_some_and(|pct| pct >= 100.0) {
+        return None;
+    }
+
+    Some(LimitState::Reached {
+        scope: LimitScope::Custom(
+            limit
+                .limit_name
+                .clone()
+                .or_else(|| limit.limit_id.clone())
+                .unwrap_or_else(|| "weekly".into()),
+        ),
+        used_pct: window.used_percent.unwrap_or(100.0),
+        cap: None,
+        resets_at: window
+            .resets_at
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+            .map(|d| d.to_rfc3339()),
     })
 }
 
 // ── Cost estimation ─────────────────────────────────────────────────────────
+//
+// API-equivalent value only: Codex plans are flat-fee, so these figures show
+// what the same usage would cost at pay-per-token API rates.
+//
+// Rates as of RATES_AS_OF, from developers.openai.com/api/docs/pricing.
+// `gpt-daybreak-blue-latest` is a *moving* alias (currently -> gpt-5.6-sol);
+// re-check it when updating this table.
 
-/// Combined (blended average of input+output) per-million-token rate for a model.
-/// Labeled estimates — Codex plans are flat-fee, this is API-equivalent value only.
-fn combined_rate_per_million(model: &str) -> f64 {
-    match model.to_lowercase().as_str() {
-        m if m.contains("gpt-5.6") => 12.0,
-        m if m.contains("gpt-5.5") => 10.0,
-        m if m.contains("gpt-5.4-mini") => 2.5,
-        m if m.contains("gpt-5.4") => 10.0,
-        m if m.contains("gpt-5.3-codex") => 10.0,
-        m if m.contains("gpt-5.2-codex") => 7.5,
-        m if m.contains("gpt-5.1-codex-max") => 7.5,
-        m if m.contains("gpt-5.1-codex") => 7.5,
-        m if m.contains("gpt-5") => 5.0,
-        _ => 5.0, // default
-    }
-}
+/// Basis date for the rate table below. Surfaced to the UI so a stale table is
+/// visible rather than silent.
+const RATES_AS_OF: &str = "2026-09-08";
 
-/// Estimate USD cost for a Codex session based on model and token count.
-/// Uses combined (average of input+output) per-million-token rates.
-fn estimate_codex_cost(model: &str, tokens: i64) -> f64 {
-    (tokens as f64 / 1_000_000.0) * combined_rate_per_million(model)
-}
+/// Input tokens above this threshold in a single request bill at the
+/// long-context tier (2x input / 1.5x output).
+const LONG_CONTEXT_THRESHOLD: u64 = 272_000;
 
-/// Distinct per-token-type rates, derived from the combined rate. Labeled
-/// estimate: cached input is cheap, output is the most expensive tier.
+/// Per-million-token USD rates for one model. `cache_write` is stored
+/// explicitly rather than derived: the 1.25x premium is documented for Astra
+/// and the gpt-5.6 family, but gpt-5.5 publishes no cache-write rate.
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct ModelRates {
     input: f64,
     cached_input: f64,
+    cache_write: f64,
     output: f64,
 }
 
-fn split_rates_per_million(model: &str) -> ModelRates {
-    let combined = combined_rate_per_million(model);
-    ModelRates {
-        input: combined * 0.5,
-        cached_input: combined * 0.05,
-        output: combined * 4.0,
+impl ModelRates {
+    const fn new(input: f64, cached_input: f64, cache_write: f64, output: f64) -> Self {
+        Self { input, cached_input, cache_write, output }
+    }
+
+    /// Long-context tier: input-side rates double, output rises 1.5x.
+    fn long_context(self) -> Self {
+        Self {
+            input: self.input * 2.0,
+            cached_input: self.cached_input * 2.0,
+            cache_write: self.cache_write * 2.0,
+            output: self.output * 1.5,
+        }
     }
 }
 
-/// Estimate cost for a rollout token usage snapshot using distinct
-/// input/cached-input/output rates instead of one blended figure.
-fn estimate_split_cost(usage: &RolloutTokenUsage, model: &str) -> f64 {
-    let rates = split_rates_per_million(model);
-    let uncached_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
-    (uncached_input as f64 / 1_000_000.0) * rates.input
-        + (usage.cached_input_tokens as f64 / 1_000_000.0) * rates.cached_input
-        + (usage.output_tokens as f64 / 1_000_000.0) * rates.output
+/// Normalize a raw model string to a canonical id: lowercase, strip a
+/// provider namespace (`openai/gpt-5.5` -> `gpt-5.5`) and any date suffix.
+fn normalize_model_id(model: &str) -> String {
+    let lower = model.trim().to_lowercase();
+    let base = lower.rsplit('/').next().unwrap_or(&lower);
+    base.to_string()
+}
+
+/// Exact-match rate lookup. Returns `None` for genuinely unknown models so
+/// callers can report them as unpriced instead of inventing a default.
+///
+/// Exact ids (plus an explicit alias map) rather than substring matching:
+/// `gpt-5.5-pro` has different rates and no cached-input discount, so a
+/// `contains("gpt-5.5")` test would misprice it.
+fn model_rates(model: &str) -> Option<ModelRates> {
+    let id = normalize_model_id(model);
+    let canonical = match id.as_str() {
+        // Moving aliases, resolved explicitly.
+        "gpt-daybreak-blue-latest" | "gpt-daybreak-blue" => "gpt-5.6-sol",
+        "gpt-5.6" => "gpt-5.6-sol",
+        other => other,
+    };
+    let rates = match canonical {
+        "gpt-6-astra" => ModelRates::new(10.0, 1.00, 12.50, 50.0),
+        "gpt-5.6-sol" => ModelRates::new(4.0, 0.40, 5.00, 20.0),
+        "gpt-5.6-terra" => ModelRates::new(2.0, 0.20, 2.50, 12.0),
+        "gpt-5.6-luna" => ModelRates::new(0.20, 0.02, 0.25, 1.20),
+        "gpt-5.5" => ModelRates::new(5.0, 0.50, 6.25, 30.0),
+        "gpt-5.4-mini" => ModelRates::new(0.75, 0.075, 0.9375, 4.50),
+        "gpt-5.4" => ModelRates::new(2.50, 0.25, 3.125, 15.0),
+        "gpt-5.3-codex" | "gpt-5.3-codex-spark" => ModelRates::new(1.75, 0.175, 2.1875, 14.0),
+        "gpt-5.2" | "gpt-5.2-codex" => ModelRates::new(1.75, 0.175, 2.1875, 14.0),
+        "gpt-5.1-codex-max" | "gpt-5.1-codex" | "gpt-5.1" => {
+            ModelRates::new(1.25, 0.125, 1.5625, 10.0)
+        }
+        "gpt-5" => ModelRates::new(1.25, 0.125, 1.5625, 10.0),
+        _ => return None,
+    };
+    Some(rates)
+}
+
+/// Cost for one request's usage, priced at its own turn's model.
+///
+/// `cached_input_tokens` and `cache_write_input_tokens` are *subsets* of
+/// `input_tokens` (verified across ~30,600 records), so ordinary input is the
+/// remainder. `reasoning_output_tokens` is already inside `output_tokens`
+/// (`total == input + output` holds exactly) and must not be added again.
+fn estimate_usage_cost(usage: &RolloutTokenUsage, model: &str) -> Option<f64> {
+    let mut rates = model_rates(model)?;
+    if usage.input_tokens > LONG_CONTEXT_THRESHOLD {
+        rates = rates.long_context();
+    }
+    let ordinary_input = usage
+        .input_tokens
+        .saturating_sub(usage.cached_input_tokens)
+        .saturating_sub(usage.cache_write_input_tokens);
+    Some(
+        (ordinary_input as f64 / 1_000_000.0) * rates.input
+            + (usage.cached_input_tokens as f64 / 1_000_000.0) * rates.cached_input
+            + (usage.cache_write_input_tokens as f64 / 1_000_000.0) * rates.cache_write
+            + (usage.output_tokens as f64 / 1_000_000.0) * rates.output,
+    )
 }
 
 // ── Local data types ────────────────────────────────────────────────────────
@@ -529,6 +640,9 @@ struct CodexSession {
     reasoning_effort: Option<String>,
     created_at: Option<String>,
     updated_at: Option<String>,
+    /// True when this session's tokens came from the approximate legacy path.
+    #[serde(default)]
+    tokens_approximate: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -540,6 +654,16 @@ struct CodexLocalStats {
     sessions_by_project: HashMap<String, i64>,
     estimated_total_cost: f64,
     cost_by_model: HashMap<String, f64>,
+    /// Per-day usage buckets, each carrying the distinct thread ids active
+    /// that day so weekly/monthly views can union rather than sum them.
+    usage_daily: Vec<serde_json::Value>,
+    /// Models with no known rate; their tokens are excluded from cost.
+    unpriced_models: Vec<String>,
+    unpriced_tokens: u64,
+    /// Sessions valued via the approximate legacy path.
+    approximate_sessions: u32,
+    /// Sessions where no usage could be recovered at all.
+    unaccounted_sessions: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -725,6 +849,429 @@ fn rollout_rate_limits_to_windows(rl: &RolloutRateLimits) -> Vec<RateLimitWindow
         }
     }
     out
+}
+
+// ── Per-request usage accounting ────────────────────────────────────────────
+//
+// Two rollout formats exist on disk and both must be handled:
+//
+//  * "modern" files carry one `token_usage_record` per billable request, with
+//    a `timestamp`, a `response_id` and a per-request `usage` split. Summing
+//    these reconciles exactly (diff = 0) against the session's final
+//    cumulative `thread_token_usage`.
+//  * "legacy" files carry only `total_token_usage` / `last_token_usage` on
+//    `token_count` events. Those counters *reset between turns*, so the last
+//    snapshot is not the lifetime total (and `threads.tokens_used`, which
+//    inherits that bug, undercounts one verified session ~4.4x).
+//
+// Legacy reconstruction is inherently approximate: validated against the
+// modern files where ground truth exists, the best strategy matched only
+// 16/26 within 2%. Legacy rows are therefore flagged `approximate` and the UI
+// discloses the count rather than presenting them as exact.
+
+/// One billable request, attributed to the model that produced it.
+#[derive(Debug, Clone)]
+struct UsageRow {
+    /// Thread id (`threads.id`), the identity used for distinct-session counts.
+    thread_id: String,
+    /// Local-date bucket, `YYYY-MM-DD`, from this request's own timestamp.
+    date: String,
+    model: String,
+    usage: RolloutTokenUsage,
+    /// True when derived from the legacy format's resetting counters.
+    approximate: bool,
+    /// True when the model came from `threads.model` rather than a
+    /// `turn_context` in the rollout itself.
+    model_fallback: bool,
+}
+
+/// Result of scanning one rollout file.
+#[derive(Debug, Clone, Default)]
+struct RolloutScan {
+    rows: Vec<UsageRow>,
+    /// No usage could be recovered in either format.
+    unaccounted: bool,
+}
+
+/// Convert an RFC 3339 rollout timestamp to a local `YYYY-MM-DD` bucket.
+/// Rollout timestamps are strings (`2026-09-07T20:08:48.671Z`), not epoch
+/// millis, so they must be parsed rather than fed to `timestamp_millis_opt`.
+fn rfc3339_to_local_date(ts: &str) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(ts)
+        .ok()
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+}
+
+/// Cheap substring prefilter: only these lines can carry usage or model info,
+/// so everything else skips JSON parsing entirely. Rollouts are dominated by
+/// response and tool-output lines, which would otherwise cost a full parse.
+fn line_is_interesting(line: &str) -> bool {
+    line.contains("token_usage_record")
+        || line.contains("last_token_usage")
+        || line.contains("total_token_usage")
+        || line.contains("turn_context")
+}
+
+/// Scan one rollout into per-request usage rows.
+///
+/// `db_model` is the `threads.model` fallback, used only when a record cannot
+/// be tied to a `turn_context` (counted via `model_fallback`).
+fn scan_rollout_usage(path: &std::path::Path, thread_id: &str, db_model: &str) -> RolloutScan {
+    use std::io::BufRead;
+
+    let Ok(file) = fs::File::open(path) else {
+        return RolloutScan { rows: Vec::new(), unaccounted: true };
+    };
+    // Streaming read: rollouts reach multiple GB, so the file is never held in
+    // memory. This also replaces the old 25 MB cap, which silently discarded
+    // 89% of on-disk bytes.
+    let reader = std::io::BufReader::new(file);
+
+    let mut modern: Vec<UsageRow> = Vec::new();
+    let mut legacy: std::collections::BTreeMap<String, UsageRow> = std::collections::BTreeMap::new();
+    let mut seen_response_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Records whose `turn_context` has not been seen yet: a context can appear
+    // *after* its usage record (7 verified cases), so running state is unsafe.
+    let mut pending: Vec<(usize, String)> = Vec::new();
+    let mut turn_models: HashMap<String, String> = HashMap::new();
+    let mut current_model: Option<String> = None;
+
+    for line in reader.lines() {
+        let Ok(line) = line else { continue };
+        if !line_is_interesting(&line) {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            // Partially written or corrupt line: skip it, keep everything else.
+            continue;
+        };
+
+        // `turn_context` carries the active model for a turn.
+        if let Some(payload) = value.get("payload") {
+            if payload.get("type").and_then(|v| v.as_str()) == Some("turn_context") {
+                if let Some(model) = payload.get("model").and_then(|v| v.as_str()) {
+                    current_model = Some(model.to_string());
+                    for key in ["turn_id", "root_turn_id"] {
+                        if let Some(tid) = payload.get(key).and_then(|v| v.as_str()) {
+                            turn_models.insert(tid.to_string(), model.to_string());
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Modern: one record per billable request.
+        if value.get("type").and_then(|v| v.as_str()) == Some("token_usage_record") {
+            let Some(payload) = value.get("payload") else { continue };
+            if let Some(rid) = payload.get("response_id").and_then(|v| v.as_str()) {
+                if !seen_response_ids.insert(rid.to_string()) {
+                    continue; // duplicate request, count once
+                }
+            }
+            let Some(usage_value) = payload.get("usage") else { continue };
+            let Ok(usage) = serde_json::from_value::<RolloutTokenUsage>(usage_value.clone()) else {
+                continue;
+            };
+            let date = value
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .and_then(rfc3339_to_local_date)
+                .unwrap_or_default();
+            let turn_id = payload
+                .get("turn_id")
+                .or_else(|| payload.get("root_turn_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let resolved = turn_id.as_ref().and_then(|t| turn_models.get(t).cloned());
+            let model = resolved.clone().or_else(|| current_model.clone());
+            if model.is_none() {
+                if let Some(t) = turn_id.clone() {
+                    pending.push((modern.len(), t));
+                }
+            }
+            modern.push(UsageRow {
+                thread_id: thread_id.to_string(),
+                date,
+                model: model.unwrap_or_else(|| db_model.to_string()),
+                usage,
+                approximate: false,
+                model_fallback: resolved.is_none() && current_model.is_none(),
+            });
+            continue;
+        }
+
+        // Legacy: `token_count` events carrying resetting cumulative counters.
+        // Keep one entry per turn, keyed by turn id where available.
+        if value.get("type").and_then(|v| v.as_str()) == Some("event_msg") {
+            let Some(payload) = value.get("payload") else { continue };
+            if payload.get("type").and_then(|v| v.as_str()) != Some("token_count") {
+                continue;
+            }
+            let usage_value = payload
+                .pointer("/info/last_token_usage")
+                .or_else(|| payload.pointer("/info/total_token_usage"))
+                .or_else(|| payload.get("last_token_usage"))
+                .or_else(|| payload.get("total_token_usage"));
+            let Some(usage_value) = usage_value else { continue };
+            let Ok(usage) = serde_json::from_value::<RolloutTokenUsage>(usage_value.clone()) else {
+                continue;
+            };
+            // Compaction markers report no real traffic: input and output are
+            // zero while `total_tokens` carries only the compacted context.
+            if usage.input_tokens == 0 && usage.output_tokens == 0 {
+                continue;
+            }
+            let date = value
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .and_then(rfc3339_to_local_date)
+                .unwrap_or_default();
+            let turn_key = payload
+                .get("turn_id")
+                .or_else(|| payload.get("root_turn_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    // No turn id: fall back to a value fingerprint. Imprecise,
+                    // which is part of why legacy rows are flagged approximate.
+                    format!(
+                        "{}:{}:{}:{}",
+                        date, usage.input_tokens, usage.output_tokens, usage.total_tokens
+                    )
+                });
+            // Legacy files are NOT single-model: 10 of 81 carry two models,
+            // including a gpt-5.4 + gpt-5.5 pair whose input rates differ 2x.
+            let model = current_model.clone();
+            legacy.insert(
+                turn_key,
+                UsageRow {
+                    thread_id: thread_id.to_string(),
+                    date,
+                    model: model.clone().unwrap_or_else(|| db_model.to_string()),
+                    usage,
+                    approximate: true,
+                    model_fallback: model.is_none(),
+                },
+            );
+        }
+    }
+
+    // Resolve records whose `turn_context` arrived after them.
+    for (idx, turn_id) in pending {
+        if let Some(model) = turn_models.get(&turn_id) {
+            if let Some(row) = modern.get_mut(idx) {
+                row.model = model.clone();
+                row.model_fallback = false;
+            }
+        }
+    }
+
+    // Prefer the modern format wherever it exists; it is exact.
+    if !modern.is_empty() {
+        return RolloutScan { rows: modern, unaccounted: false };
+    }
+    let rows: Vec<UsageRow> = legacy.into_values().collect();
+    let unaccounted = rows.is_empty();
+    RolloutScan { rows, unaccounted }
+}
+
+/// Cached per-rollout scan, keyed by path and invalidated on `(mtime, size)`.
+/// A full cold scan of a large history costs seconds, which is too slow to
+/// repeat on every 60s analytics refresh; rollouts are append-only, so an
+/// unchanged file can reuse its previous rows verbatim.
+struct CachedScan {
+    mtime: std::time::SystemTime,
+    size: u64,
+    rows: Vec<UsageRow>,
+    unaccounted: bool,
+}
+
+static USAGE_CACHE: Mutex<Option<HashMap<PathBuf, CachedScan>>> = Mutex::new(None);
+
+/// Everything derived from a full pass over the rollout corpus.
+#[derive(Default)]
+struct UsageCorpus {
+    rows: Vec<UsageRow>,
+    /// Sessions where no usage could be recovered in either format.
+    unaccounted_sessions: u32,
+    /// Models seen in usage rows that have no known rate.
+    unpriced_models: std::collections::BTreeSet<String>,
+    /// Tokens attributed to unpriced models, excluded from cost totals.
+    unpriced_tokens: u64,
+    /// Sessions whose figures came from the legacy (approximate) path.
+    approximate_sessions: u32,
+}
+
+impl UsageCorpus {
+    /// Total cost across every priced row. Unpriced rows are excluded rather
+    /// than guessed, and surface separately via `unpriced_models`.
+    fn total_cost(&self) -> f64 {
+        self.rows
+            .iter()
+            .filter_map(|r| estimate_usage_cost(&r.usage, &r.model))
+            .sum()
+    }
+
+    fn cost_by_model(&self) -> HashMap<String, f64> {
+        let mut out: HashMap<String, f64> = HashMap::new();
+        for row in &self.rows {
+            if let Some(cost) = estimate_usage_cost(&row.usage, &row.model) {
+                *out.entry(row.model.clone()).or_insert(0.0) += cost;
+            }
+        }
+        out
+    }
+
+    /// Token totals per model, derived from the *same* rows as cost so the two
+    /// can never disagree on the page.
+    fn tokens_by_model(&self) -> HashMap<String, i64> {
+        let mut out: HashMap<String, i64> = HashMap::new();
+        for row in &self.rows {
+            *out.entry(row.model.clone()).or_insert(0) += row.usage.total_tokens as i64;
+        }
+        out
+    }
+
+    fn total_tokens(&self) -> i64 {
+        self.rows.iter().map(|r| r.usage.total_tokens as i64).sum()
+    }
+
+    /// Per-thread token totals, replacing the broken `threads.tokens_used`
+    /// column for the Recent Sessions list.
+    fn tokens_by_thread(&self) -> HashMap<String, (i64, bool)> {
+        let mut out: HashMap<String, (i64, bool)> = HashMap::new();
+        for row in &self.rows {
+            let entry = out.entry(row.thread_id.clone()).or_insert((0, false));
+            entry.0 += row.usage.total_tokens as i64;
+            entry.1 |= row.approximate;
+        }
+        out
+    }
+
+    /// Daily buckets. Distinct threads are tracked as a set per day so callers
+    /// can union them for weekly/monthly views; summing daily counts would
+    /// yield session-days, not distinct sessions.
+    fn daily(&self) -> Vec<serde_json::Value> {
+        use std::collections::BTreeMap;
+        let mut by_day: BTreeMap<String, (i64, f64, std::collections::BTreeSet<String>, bool)> =
+            BTreeMap::new();
+        for row in &self.rows {
+            if row.date.is_empty() {
+                continue;
+            }
+            let entry = by_day.entry(row.date.clone()).or_insert((
+                0,
+                0.0,
+                std::collections::BTreeSet::new(),
+                false,
+            ));
+            entry.0 += row.usage.total_tokens as i64;
+            if let Some(cost) = estimate_usage_cost(&row.usage, &row.model) {
+                entry.1 += cost;
+            }
+            entry.2.insert(row.thread_id.clone());
+            entry.3 |= row.approximate;
+        }
+        by_day
+            .into_iter()
+            .map(|(date, (tokens, cost, threads, approximate))| {
+                serde_json::json!({
+                    "date": date,
+                    "tokens": tokens,
+                    "cost": cost,
+                    "sessions": threads.len(),
+                    "session_ids": threads.into_iter().collect::<Vec<_>>(),
+                    "approximate": approximate,
+                })
+            })
+            .collect()
+    }
+}
+
+/// Scan every thread's rollout once and build the corpus all cost, token and
+/// time-series figures are derived from.
+///
+/// Deliberately unbounded: `ROLLOUT_SCAN_LIMIT` must not apply here, or an
+/// "all-time" total would silently omit older sessions once the history grows
+/// past the limit.
+fn build_usage_corpus(conn: &rusqlite::Connection) -> UsageCorpus {
+    let mut corpus = UsageCorpus::default();
+
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, rollout_path, COALESCE(model, 'unknown') FROM threads \
+         WHERE rollout_path IS NOT NULL",
+    ) else {
+        return corpus;
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    }) else {
+        return corpus;
+    };
+
+    let mut cache_guard = USAGE_CACHE.lock().ok();
+    let mut cache = cache_guard
+        .as_mut()
+        .map(|slot| slot.get_or_insert_with(HashMap::new));
+    let mut live_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+    for (thread_id, rollout_path, db_model) in rows.flatten() {
+        let path = PathBuf::from(&rollout_path);
+        let Ok(meta) = fs::metadata(&path) else { continue };
+        let (mtime, size) = (meta.modified().ok(), meta.len());
+        live_paths.insert(path.clone());
+
+        let cached = cache.as_ref().and_then(|c| c.get(&path)).filter(|entry| {
+            Some(entry.mtime) == mtime && entry.size == size
+        });
+
+        let (rows, unaccounted) = if let Some(entry) = cached {
+            (entry.rows.clone(), entry.unaccounted)
+        } else {
+            let scan = scan_rollout_usage(&path, &thread_id, &db_model);
+            (scan.rows, scan.unaccounted)
+        };
+
+        if let (Some(cache), Some(mtime)) = (cache.as_mut(), mtime) {
+            // Replace (not accumulate) this path's entry.
+            cache.insert(
+                path.clone(),
+                CachedScan { mtime, size, rows: rows.clone(), unaccounted },
+            );
+        }
+
+        if unaccounted {
+            corpus.unaccounted_sessions += 1;
+        }
+        if rows.iter().any(|r| r.approximate) {
+            corpus.approximate_sessions += 1;
+        }
+        for row in &rows {
+            if model_rates(&row.model).is_none() {
+                corpus.unpriced_models.insert(row.model.clone());
+                corpus.unpriced_tokens += row.usage.total_tokens;
+            }
+        }
+        corpus.rows.extend(rows);
+    }
+
+    // Evict entries for rollouts that no longer exist, so the cache cannot
+    // grow without bound as sessions are deleted.
+    if let Some(cache) = cache {
+        cache.retain(|path, _| live_paths.contains(path));
+    }
+
+    corpus
 }
 
 /// Aggregate token usage summed across the most recently touched sessions.
@@ -1127,6 +1674,7 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
                 reasoning_effort: row.get(7)?,
                 created_at: ms_to_rfc3339(created_at_ms),
                 updated_at: ms_to_rfc3339(updated_at_ms),
+                tokens_approximate: false,
             })
         })
         .map_err(|e| format!("Query error: {}", e))?
@@ -1173,14 +1721,40 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
         }
     }
 
-    // Compute cost estimates per model
-    let mut estimated_total_cost = 0.0f64;
-    let mut cost_by_model: HashMap<String, f64> = HashMap::new();
-    for (model, &tokens) in &tokens_by_model {
-        let cost = estimate_codex_cost(model, tokens);
-        estimated_total_cost += cost;
-        cost_by_model.insert(model.clone(), cost);
-    }
+    // Cost, per-model tokens and per-session tokens all come from the same
+    // per-request corpus, so the page cannot show tokens and costs that
+    // disagree. `threads.tokens_used` is not used for any of them: it counts
+    // cached reads at full price and, on legacy rollouts, reflects only the
+    // final turn segment.
+    let corpus = build_usage_corpus(&conn);
+    let estimated_total_cost = corpus.total_cost();
+    let cost_by_model = corpus.cost_by_model();
+    let corpus_tokens_by_model = corpus.tokens_by_model();
+    let tokens_by_model = if corpus_tokens_by_model.is_empty() {
+        tokens_by_model
+    } else {
+        corpus_tokens_by_model
+    };
+    let corpus_total_tokens = corpus.total_tokens();
+    let total_tokens_used = if corpus_total_tokens > 0 {
+        corpus_total_tokens
+    } else {
+        total_tokens_used
+    };
+
+    // Replace the Recent Sessions token column too, otherwise the per-session
+    // list contradicts the corrected totals on the same page.
+    let per_thread = corpus.tokens_by_thread();
+    let sessions: Vec<CodexSession> = sessions
+        .into_iter()
+        .map(|mut session| {
+            if let Some((tokens, approximate)) = per_thread.get(&session.id) {
+                session.tokens_used = *tokens;
+                session.tokens_approximate = *approximate;
+            }
+            session
+        })
+        .collect();
 
     Ok(CodexLocalStats {
         total_sessions,
@@ -1190,6 +1764,11 @@ fn fetch_local_stats() -> Result<CodexLocalStats, String> {
         sessions_by_project,
         estimated_total_cost,
         cost_by_model,
+        usage_daily: corpus.daily(),
+        unpriced_models: corpus.unpriced_models.iter().cloned().collect(),
+        unpriced_tokens: corpus.unpriced_tokens,
+        approximate_sessions: corpus.approximate_sessions,
+        unaccounted_sessions: corpus.unaccounted_sessions,
     })
 }
 
@@ -1238,47 +1817,33 @@ struct CodexWindowStats {
     cost: f64,
 }
 
-/// Run a windowed session/token/cost query against `threads`. Hoisted to
-/// module scope (rather than nested in `fetch_multi_window_stats`) so the
-/// date-window SQL fix is directly unit-testable against a fixture DB.
-fn query_window(
-    conn: &rusqlite::Connection,
-    where_clause: &str,
-    params: &[&str],
-) -> CodexWindowStats {
-    let sql_count = format!(
-        "SELECT COUNT(*), COALESCE(SUM(tokens_used), 0) FROM threads WHERE {}",
-        where_clause
-    );
-    let (sessions, tokens): (i64, i64) = conn
-        .query_row(
-            &sql_count,
-            rusqlite::params_from_iter(params.iter()),
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap_or((0, 0));
-
-    let sql_cost = format!(
-        "SELECT COALESCE(model, 'unknown'), COALESCE(tokens_used, 0) FROM threads WHERE {}",
-        where_clause
-    );
+/// Aggregate a time window from per-request usage rows.
+///
+/// Windows are filtered on each request's **own** local date. The previous
+/// SQL version matched whole threads by `created_at`/`updated_at` and then
+/// attributed the session's entire lifetime tokens to that window, so a
+/// session created on one day and touched days later dumped all of its tokens
+/// into both windows.
+fn window_from_rows(rows: &[UsageRow], from_date: &str, to_date: Option<&str>) -> CodexWindowStats {
+    let mut tokens = 0i64;
     let mut cost = 0.0f64;
-    if let Ok(mut stmt) = conn.prepare(&sql_cost) {
-        if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-            let model: String = row.get(0)?;
-            let tok: i64 = row.get(1)?;
-            Ok((model, tok))
-        }) {
-            for row in rows.flatten() {
-                cost += estimate_codex_cost(&row.0, row.1);
+    let mut threads: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for row in rows {
+        if row.date.is_empty() || row.date.as_str() < from_date {
+            continue;
+        }
+        if let Some(to) = to_date {
+            if row.date.as_str() > to {
+                continue;
             }
         }
+        tokens += row.usage.total_tokens as i64;
+        if let Some(c) = estimate_usage_cost(&row.usage, &row.model) {
+            cost += c;
+        }
+        threads.insert(row.thread_id.as_str());
     }
-    CodexWindowStats {
-        sessions,
-        tokens,
-        cost,
-    }
+    CodexWindowStats { sessions: threads.len() as i64, tokens, cost }
 }
 
 /// Get stats for 2 time windows from SQLite: today (since midnight), this week (since Monday)
@@ -1294,15 +1859,9 @@ fn fetch_multi_window_stats() -> Option<(CodexWindowStats, CodexWindowStats)> {
     let monday = local_now.date_naive() - chrono::Duration::days(weekday as i64);
     let monday_str = monday.format("%Y-%m-%d").to_string();
 
-    // created_at/updated_at are epoch-second INTEGER columns, not date strings —
-    // date() needs the 'unixepoch' modifier or it silently returns NULL and
-    // these windows are always empty.
-    let stats_today = query_window(&conn,
-        "date(created_at, 'unixepoch', 'localtime') = ?1 OR date(updated_at, 'unixepoch', 'localtime') = ?1",
-        &[&today_str]);
-    let stats_week = query_window(&conn,
-        "date(created_at, 'unixepoch', 'localtime') >= ?1 OR date(updated_at, 'unixepoch', 'localtime') >= ?1",
-        &[&monday_str]);
+    let corpus = build_usage_corpus(&conn);
+    let stats_today = window_from_rows(&corpus.rows, &today_str, Some(&today_str));
+    let stats_week = window_from_rows(&corpus.rows, &monday_str, None);
 
     Some((stats_today, stats_week))
 }
@@ -1330,6 +1889,26 @@ fn enrich_with_local_data(
         extra.insert(
             "tokens_by_model".into(),
             serde_json::to_value(&stats.tokens_by_model).unwrap_or_default(),
+        );
+        extra.insert(
+            "usage_daily".into(),
+            serde_json::to_value(&stats.usage_daily).unwrap_or_default(),
+        );
+        extra.insert(
+            "unpriced_models".into(),
+            serde_json::to_value(&stats.unpriced_models).unwrap_or_default(),
+        );
+        extra.insert(
+            "unpriced_tokens".into(),
+            serde_json::json!(stats.unpriced_tokens),
+        );
+        extra.insert(
+            "approximate_sessions".into(),
+            serde_json::json!(stats.approximate_sessions),
+        );
+        extra.insert(
+            "unaccounted_sessions".into(),
+            serde_json::json!(stats.unaccounted_sessions),
         );
         extra.insert(
             "sessions_by_project".into(),
@@ -1443,22 +2022,22 @@ fn enrich_with_local_data(
             "token_breakdown".into(),
             serde_json::to_value(&scan.token_breakdown).unwrap_or_default(),
         );
-        let cost_model = config_model.as_deref().unwrap_or("gpt-5.5");
-        let breakdown_usage = RolloutTokenUsage {
-            input_tokens: scan.token_breakdown.input_tokens,
-            cached_input_tokens: scan.token_breakdown.cached_input_tokens,
-            cache_write_input_tokens: scan.token_breakdown.cache_write_input_tokens,
-            output_tokens: scan.token_breakdown.output_tokens,
-            reasoning_output_tokens: scan.token_breakdown.reasoning_output_tokens,
-            total_tokens: scan.token_breakdown.total_tokens,
-        };
+        // Cost for the breakdown is taken from the per-request corpus, where
+        // every request is priced at its own turn's model. Pricing this
+        // aggregate at a single `config_model` was wrong whenever a session
+        // used more than one model.
+        let breakdown_cost = open_codex_db()
+            .map(|conn| build_usage_corpus(&conn).total_cost())
+            .unwrap_or(0.0);
         extra.insert(
             "token_breakdown_estimated_cost".into(),
-            serde_json::json!(estimate_split_cost(&breakdown_usage, cost_model)),
+            serde_json::json!(breakdown_cost),
         );
+        // Pricing is per turn now, so a single "cost model" label would be
+        // false. Expose the rate table's basis date instead.
         extra.insert(
-            "token_breakdown_cost_model".into(),
-            serde_json::Value::String(cost_model.to_string()),
+            "rates_as_of".into(),
+            serde_json::Value::String(RATES_AS_OF.to_string()),
         );
 
         if let Some(rl) = scan.offline_rate_limits {
@@ -2089,66 +2668,350 @@ model = "gpt-5.6-luna"
     }
 
     // ── SQLite date-window fix (today/this-week) ────────────────────────────
+    // ── Cost estimation (per-request, per-model rates) ──────────────────────
 
-    fn make_fixture_threads_db() -> rusqlite::Connection {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE threads (
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                model TEXT,
-                tokens_used INTEGER NOT NULL DEFAULT 0
-            );",
-        )
-        .unwrap();
-        conn
+    fn usage(input: u64, cached: u64, cache_write: u64, output: u64) -> RolloutTokenUsage {
+        RolloutTokenUsage {
+            input_tokens: input,
+            cached_input_tokens: cached,
+            cache_write_input_tokens: cache_write,
+            output_tokens: output,
+            reasoning_output_tokens: 0,
+            total_tokens: input + output,
+        }
     }
 
     #[test]
-    fn date_window_query_matches_todays_epoch_row_with_unixepoch_modifier() {
-        let conn = make_fixture_threads_db();
-        let now = chrono::Local::now().timestamp();
-        let ten_days_ago = now - 10 * 24 * 60 * 60;
-        conn.execute(
-            "INSERT INTO threads (created_at, updated_at, model, tokens_used) VALUES (?1, ?1, 'gpt-5.5', 1000)",
-            [now],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO threads (created_at, updated_at, model, tokens_used) VALUES (?1, ?1, 'gpt-5.5', 2000)",
-            [ten_days_ago],
-        )
-        .unwrap();
-
-        let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let stats = query_window(
-            &conn,
-            "date(created_at, 'unixepoch', 'localtime') = ?1 OR date(updated_at, 'unixepoch', 'localtime') = ?1",
-            &[&today_str],
+    fn daybreak_alias_resolves_to_sol_rates() {
+        assert_eq!(
+            model_rates("gpt-daybreak-blue-latest"),
+            model_rates("gpt-5.6-sol")
         );
-        assert_eq!(stats.sessions, 1);
-        assert_eq!(stats.tokens, 1000);
     }
 
     #[test]
-    fn buggy_date_query_without_unixepoch_modifier_finds_nothing() {
-        // Regression guard: demonstrates the original bug — date() on a raw
-        // epoch integer (without the 'unixepoch' modifier) never matches.
-        let conn = make_fixture_threads_db();
-        let now = chrono::Local::now().timestamp();
-        conn.execute(
-            "INSERT INTO threads (created_at, updated_at, model, tokens_used) VALUES (?1, ?1, 'gpt-5.5', 1000)",
-            [now],
-        )
-        .unwrap();
+    fn cached_input_is_ten_percent_of_input() {
+        let rates = model_rates("gpt-5.6-sol").unwrap();
+        assert!((rates.cached_input - rates.input * 0.10).abs() < 1e-9);
+    }
 
-        let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let stats = query_window(
-            &conn,
-            "date(created_at) = ?1 OR date(updated_at) = ?1",
-            &[&today_str],
+    #[test]
+    fn cache_write_is_125_percent_of_input() {
+        let rates = model_rates("gpt-5.6-sol").unwrap();
+        assert!((rates.cache_write - rates.input * 1.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn reasoning_tokens_do_not_change_cost() {
+        // reasoning_output_tokens is already inside output_tokens.
+        let mut a = usage(1_000, 0, 0, 1_000);
+        let base = estimate_usage_cost(&a, "gpt-5.5").unwrap();
+        a.reasoning_output_tokens = 900;
+        assert!((estimate_usage_cost(&a, "gpt-5.5").unwrap() - base).abs() < 1e-12);
+    }
+
+    #[test]
+    fn unknown_model_is_unpriced_not_defaulted() {
+        assert!(model_rates("totally-unknown-model").is_none());
+        assert!(estimate_usage_cost(&usage(1_000_000, 0, 0, 0), "totally-unknown-model").is_none());
+    }
+
+    #[test]
+    fn exact_ids_do_not_collide_on_substrings() {
+        // gpt-5.5-pro has different rates and no cached discount: a
+        // contains("gpt-5.5") match would misprice it.
+        assert!(model_rates("gpt-5.5-pro").is_none());
+        assert_ne!(model_rates("gpt-5.4-mini"), model_rates("gpt-5.4"));
+        assert_ne!(model_rates("gpt-5.6-sol"), model_rates("gpt-5.6-terra"));
+    }
+
+    #[test]
+    fn long_context_requests_use_the_higher_tier() {
+        let small = usage(1_000, 0, 0, 1_000);
+        let large = usage(LONG_CONTEXT_THRESHOLD + 1, 0, 0, 1_000);
+        let rates = model_rates("gpt-5.5").unwrap();
+
+        let small_cost = estimate_usage_cost(&small, "gpt-5.5").unwrap();
+        let expected_small =
+            (1_000.0 / 1e6) * rates.input + (1_000.0 / 1e6) * rates.output;
+        assert!((small_cost - expected_small).abs() < 1e-12);
+
+        let large_cost = estimate_usage_cost(&large, "gpt-5.5").unwrap();
+        let expected_large = ((LONG_CONTEXT_THRESHOLD + 1) as f64 / 1e6) * rates.input * 2.0
+            + (1_000.0 / 1e6) * rates.output * 1.5;
+        assert!((large_cost - expected_large).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cached_and_cache_write_are_subtracted_from_ordinary_input() {
+        let rates = model_rates("gpt-5.5").unwrap();
+        // Kept under LONG_CONTEXT_THRESHOLD so this exercises the base tier.
+        let u = usage(100_000, 60_000, 30_000, 0);
+        let expected = (10_000.0 / 1e6) * rates.input
+            + (60_000.0 / 1e6) * rates.cached_input
+            + (30_000.0 / 1e6) * rates.cache_write;
+        assert!((estimate_usage_cost(&u, "gpt-5.5").unwrap() - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn oversubscribed_cache_counts_do_not_underflow() {
+        // Saturating arithmetic: cached + cache_write > input must not panic
+        // or wrap around.
+        let u = usage(10, 900, 900, 0);
+        assert!(estimate_usage_cost(&u, "gpt-5.5").is_some());
+    }
+
+    // ── Rollout usage scanning (two formats) ────────────────────────────────
+
+    fn write_rollout(lines: &[String]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout-test.jsonl");
+        fs::write(&path, lines.join("\n")).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn modern_rollout_yields_one_row_per_request() {
+        let lines = vec![
+            r#"{"type":"event_msg","payload":{"type":"turn_context","turn_id":"t1","model":"gpt-5.5"}}"#.to_string(),
+            r#"{"type":"token_usage_record","timestamp":"2026-09-07T20:08:48.671Z","payload":{"response_id":"r1","turn_id":"t1","usage":{"input_tokens":1000,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":500,"total_tokens":1500}}}"#.to_string(),
+        ];
+        let (_dir, path) = write_rollout(&lines);
+        let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.4");
+        assert_eq!(scan.rows.len(), 1);
+        assert_eq!(scan.rows[0].model, "gpt-5.5"); // turn model, not db fallback
+        assert!(!scan.rows[0].approximate);
+        assert_eq!(scan.rows[0].date, "2026-09-08");
+    }
+
+    #[test]
+    fn duplicate_response_ids_are_counted_once() {
+        let record = r#"{"type":"token_usage_record","timestamp":"2026-09-07T20:08:48.671Z","payload":{"response_id":"r1","turn_id":"t1","usage":{"input_tokens":1000,"output_tokens":500,"total_tokens":1500}}}"#;
+        let lines = vec![
+            r#"{"type":"event_msg","payload":{"type":"turn_context","turn_id":"t1","model":"gpt-5.5"}}"#.to_string(),
+            record.to_string(),
+            record.to_string(),
+        ];
+        let (_dir, path) = write_rollout(&lines);
+        let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.5");
+        assert_eq!(scan.rows.len(), 1);
+    }
+
+    #[test]
+    fn turn_context_arriving_after_its_record_still_attributes() {
+        // Verified to happen in real rollouts: running state alone would
+        // mis-attribute the first request of a turn.
+        let lines = vec![
+            r#"{"type":"token_usage_record","timestamp":"2026-09-07T20:08:48.671Z","payload":{"response_id":"r1","turn_id":"t9","usage":{"input_tokens":1000,"output_tokens":0,"total_tokens":1000}}}"#.to_string(),
+            r#"{"type":"event_msg","payload":{"type":"turn_context","turn_id":"t9","model":"gpt-5.6-sol"}}"#.to_string(),
+        ];
+        let (_dir, path) = write_rollout(&lines);
+        let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.4");
+        assert_eq!(scan.rows[0].model, "gpt-5.6-sol");
+        assert!(!scan.rows[0].model_fallback);
+    }
+
+    #[test]
+    fn malformed_line_is_skipped_without_losing_others() {
+        let lines = vec![
+            r#"{"type":"event_msg","payload":{"type":"turn_context","turn_id":"t1","model":"gpt-5.5"}}"#.to_string(),
+            r#"{"type":"token_usage_record","timestamp":"2026-09-07T20:08:48.671Z","payload":{"response_id":"r1","usage":{"input_tokens":10,"output_tokens":0,"total_tokens":10}}}"#.to_string(),
+            r#"{"type":"token_usage_record","timestamp":"2026-09-"#.to_string(), // truncated
+        ];
+        let (_dir, path) = write_rollout(&lines);
+        let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.5");
+        assert_eq!(scan.rows.len(), 1);
+    }
+
+    #[test]
+    fn legacy_rollout_survives_counter_resets() {
+        // Legacy counters reset between turns, so the final snapshot is not
+        // the lifetime total. Each turn must be retained separately.
+        let lines = vec![
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:00:00.000Z","payload":{"type":"turn_context","turn_id":"t1","model":"gpt-5.5"}}"#.to_string(),
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:00:01.000Z","payload":{"type":"token_count","turn_id":"t1","info":{"last_token_usage":{"input_tokens":5000,"output_tokens":100,"total_tokens":5100}}}}"#.to_string(),
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:05:00.000Z","payload":{"type":"turn_context","turn_id":"t2","model":"gpt-5.5"}}"#.to_string(),
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:05:01.000Z","payload":{"type":"token_count","turn_id":"t2","info":{"last_token_usage":{"input_tokens":200,"output_tokens":50,"total_tokens":250}}}}"#.to_string(),
+        ];
+        let (_dir, path) = write_rollout(&lines);
+        let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.5");
+        assert_eq!(scan.rows.len(), 2, "each legacy turn is retained");
+        assert!(scan.rows.iter().all(|r| r.approximate));
+        let total: u64 = scan.rows.iter().map(|r| r.usage.total_tokens).sum();
+        assert_eq!(total, 5350, "not just the final 250-token segment");
+    }
+
+    #[test]
+    fn legacy_multi_model_attributes_per_turn() {
+        // 10 of 81 real legacy files carry two models; a gpt-5.4 + gpt-5.5
+        // pair differs 2x on input rate.
+        let lines = vec![
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:00:00.000Z","payload":{"type":"turn_context","turn_id":"t1","model":"gpt-5.4"}}"#.to_string(),
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:00:01.000Z","payload":{"type":"token_count","turn_id":"t1","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}"#.to_string(),
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:05:00.000Z","payload":{"type":"turn_context","turn_id":"t2","model":"gpt-5.5"}}"#.to_string(),
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:05:01.000Z","payload":{"type":"token_count","turn_id":"t2","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}"#.to_string(),
+        ];
+        let (_dir, path) = write_rollout(&lines);
+        let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.1");
+        let models: std::collections::BTreeSet<_> =
+            scan.rows.iter().map(|r| r.model.as_str()).collect();
+        assert!(models.contains("gpt-5.4") && models.contains("gpt-5.5"));
+    }
+
+    #[test]
+    fn compaction_markers_are_ignored() {
+        let lines = vec![
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:00:00.000Z","payload":{"type":"turn_context","turn_id":"t1","model":"gpt-5.5"}}"#.to_string(),
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:00:01.000Z","payload":{"type":"token_count","turn_id":"t1","info":{"last_token_usage":{"input_tokens":0,"output_tokens":0,"total_tokens":90000}}}}"#.to_string(),
+        ];
+        let (_dir, path) = write_rollout(&lines);
+        let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.5");
+        assert!(scan.rows.is_empty());
+        assert!(scan.unaccounted);
+    }
+
+    #[test]
+    fn modern_format_wins_when_both_present() {
+        let lines = vec![
+            r#"{"type":"event_msg","payload":{"type":"turn_context","turn_id":"t1","model":"gpt-5.5"}}"#.to_string(),
+            r#"{"type":"event_msg","timestamp":"2026-09-07T10:00:01.000Z","payload":{"type":"token_count","turn_id":"t1","info":{"last_token_usage":{"input_tokens":9999,"output_tokens":9999,"total_tokens":19998}}}}"#.to_string(),
+            r#"{"type":"token_usage_record","timestamp":"2026-09-07T20:08:48.671Z","payload":{"response_id":"r1","turn_id":"t1","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}"#.to_string(),
+        ];
+        let (_dir, path) = write_rollout(&lines);
+        let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.5");
+        assert_eq!(scan.rows.len(), 1);
+        assert_eq!(scan.rows[0].usage.total_tokens, 15);
+        assert!(!scan.rows[0].approximate);
+    }
+
+    #[test]
+    fn rfc3339_timestamps_parse_to_local_dates() {
+        assert!(rfc3339_to_local_date("2026-09-07T20:08:48.671Z").is_some());
+        assert!(rfc3339_to_local_date("2026-09-07T20:08:48+05:30").is_some());
+        assert!(rfc3339_to_local_date("not-a-timestamp").is_none());
+        // Epoch millis must NOT parse as a date.
+        assert!(rfc3339_to_local_date("1788699163000").is_none());
+    }
+
+    #[test]
+    fn window_rows_filter_by_request_date() {
+        let mk = |date: &str, thread: &str, tokens: u64| UsageRow {
+            thread_id: thread.into(),
+            date: date.into(),
+            model: "gpt-5.5".into(),
+            usage: usage(tokens, 0, 0, 0),
+            approximate: false,
+            model_fallback: false,
+        };
+        // One session active on two days: its tokens must split by day, not
+        // land wholesale in both windows.
+        let rows = vec![
+            mk("2026-09-07", "t1", 1_000),
+            mk("2026-09-08", "t1", 2_000),
+            mk("2026-09-08", "t2", 3_000),
+        ];
+        let today = window_from_rows(&rows, "2026-09-08", Some("2026-09-08"));
+        assert_eq!(today.tokens, 5_000);
+        assert_eq!(today.sessions, 2, "distinct threads, not rows");
+
+        let week = window_from_rows(&rows, "2026-09-07", None);
+        assert_eq!(week.tokens, 6_000);
+        assert_eq!(week.sessions, 2, "t1 counted once across both days");
+    }
+
+
+    // ── Limit-state prioritisation ──────────────────────────────────────────
+
+    fn window(pct: f64, mins: i64, resets: i64) -> AppServerRateWindow {
+        AppServerRateWindow {
+            used_percent: Some(pct),
+            window_duration_mins: Some(mins),
+            resets_at: Some(resets),
+        }
+    }
+
+    fn limit(
+        id: &str,
+        primary: Option<AppServerRateWindow>,
+        secondary: Option<AppServerRateWindow>,
+        reached: Option<&str>,
+    ) -> AppServerRateLimit {
+        AppServerRateLimit {
+            limit_id: Some(id.into()),
+            limit_name: Some(id.into()),
+            primary,
+            secondary,
+            credits: None,
+            plan_type: None,
+            rate_limit_reached_type: reached.map(str::to_string),
+            spend_control_reached: None,
+        }
+    }
+
+    #[test]
+    fn spent_short_window_alone_does_not_trigger_the_banner() {
+        // The real complaint: a 5h bucket at 100% (refills in hours) while the
+        // weekly quota still has headroom must NOT report "Limit reached".
+        let spark_5h = limit("spark-5h", Some(window(100.0, 300, 1_000)), None, None);
+        let weekly = limit("weekly", Some(window(94.0, 10_080, 5_000)), None, None);
+        assert!(
+            app_server_limit_state(&[spark_5h, weekly]).is_none(),
+            "a spent 5h bucket must not raise the banner while weekly has room"
         );
-        assert_eq!(stats.sessions, 0);
+    }
+
+    #[test]
+    fn exhausted_weekly_quota_is_reported() {
+        let spark_5h = limit("spark-5h", Some(window(100.0, 300, 1_000)), None, None);
+        let weekly = limit("weekly", Some(window(100.0, 10_080, 5_000)), None, None);
+        let state = app_server_limit_state(&[spark_5h, weekly]).expect("weekly is spent");
+        match state {
+            LimitState::Reached { scope, resets_at, .. } => {
+                assert!(format!("{scope:?}").contains("weekly"));
+                // Reset must be the weekly window's, not the 5h one's.
+                let expected = chrono::DateTime::from_timestamp(5_000, 0).unwrap().to_rfc3339();
+                assert_eq!(resets_at.expect("reset"), expected);
+            }
+            other => panic!("expected Reached, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hard_block_outranks_any_percentage_window() {
+        // A server-side block means no work is possible, so it wins even when
+        // the weekly quota still has headroom.
+        let weekly = limit("weekly", Some(window(40.0, 10_080, 5_000)), None, None);
+        let blocked = limit("blocked", Some(window(100.0, 60, 100)), None, Some("usage"));
+        let state = app_server_limit_state(&[weekly, blocked]).expect("reached");
+        match state {
+            LimitState::Reached { scope, .. } => {
+                assert!(format!("{scope:?}").contains("blocked"), "a real block wins");
+            }
+            other => panic!("expected Reached, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_limit_reached_yields_none() {
+        let a = limit("a", Some(window(91.0, 10_080, 5_000)), None, None);
+        let b = limit("b", Some(window(45.0, 300, 1_000)), None, None);
+        assert!(app_server_limit_state(&[a, b]).is_none());
+    }
+
+    #[test]
+    fn weekly_window_is_matched_by_duration_not_name() {
+        // The 7d per-model bucket also counts as weekly; the busiest weekly
+        // window is the one reported.
+        let spark_7d = limit("spark-7d", Some(window(100.0, 10_080, 7_000)), None, None);
+        let weekly = limit("weekly", Some(window(45.0, 10_080, 5_000)), None, None);
+        let state = app_server_limit_state(&[weekly, spark_7d]).expect("one weekly is spent");
+        match state {
+            LimitState::Reached { scope, used_pct, .. } => {
+                assert!(format!("{scope:?}").contains("spark-7d"));
+                assert_eq!(used_pct, 100.0);
+            }
+            other => panic!("expected Reached, got {other:?}"),
+        }
     }
 
     // ── Activity stats (daily heatmap, streaks, peak hour) ──────────────────
@@ -2183,28 +3046,6 @@ model = "gpt-5.6-luna"
 
     // ── Cost estimation ──────────────────────────────────────────────────────
 
-    #[test]
-    fn split_cost_weighs_output_more_than_cached_input() {
-        let usage = RolloutTokenUsage {
-            input_tokens: 1_000_000,
-            cached_input_tokens: 1_000_000,
-            cache_write_input_tokens: 0,
-            output_tokens: 1_000_000,
-            reasoning_output_tokens: 0,
-            total_tokens: 2_000_000,
-        };
-        let cost = estimate_split_cost(&usage, "gpt-5.5");
-        // All-cached input (no uncached input) + 1M output at the output rate.
-        let rates = split_rates_per_million("gpt-5.5");
-        assert!((cost - (rates.cached_input + rates.output)).abs() < 1e-9);
-    }
-
-    #[test]
-    fn combined_rate_covers_newer_model_families() {
-        assert_eq!(combined_rate_per_million("gpt-5.6-sol"), 12.0);
-        assert_eq!(combined_rate_per_million("gpt-5.5"), 10.0);
-        assert_eq!(combined_rate_per_million("gpt-5.1-codex-max"), 7.5);
-    }
 
     const APP_SERVER_RATE_LIMITS_WITH_SPARK: &str = r#"{
         "rateLimits": {

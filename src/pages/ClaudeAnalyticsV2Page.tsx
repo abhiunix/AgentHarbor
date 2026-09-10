@@ -5,9 +5,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { useNavigate } from "react-router-dom";
+import {
+  getClaudeRetentionStatus,
+  type ClaudeRetentionStatus,
+} from "../lib/tauri";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
-  PieChart, Pie, Cell, AreaChart, Area,
+  PieChart, Pie, Cell, AreaChart, Area, LabelList,
 } from "recharts";
 import {
   LimitStateBanner,
@@ -377,6 +382,45 @@ function formatResetDateLabel(rl: RateLimitWindow): string {
 
 const COLORS = ["#3b82f6", "#8b5cf6", "#22c55e", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16", "#a855f7", "#14b8a6"];
 const TOOLTIP_STYLE = { background: "#1a1b23", border: "1px solid #2a2b36", borderRadius: "8px", fontSize: "11px" };
+
+/** Monday-aligned week start for a YYYY-MM-DD date, as YYYY-MM-DD. */
+function weekStartOf(date: string): string {
+  const d = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return date;
+  const dow = (d.getDay() + 6) % 7; // Monday = 0
+  d.setDate(d.getDate() - dow);
+  // Format from local parts: toISOString() converts to UTC, which shifts the
+  // date backwards for negative-offset timezones and mislabels the week.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Re-bucket the daily token timeseries into daily/weekly/monthly points.
+ * Token and cost fields are additive, so each bucket is a straight sum.
+ */
+function bucketTokenTs(points: TokenTimePoint[], period: "daily" | "weekly" | "monthly"): TokenTimePoint[] {
+  if (period === "daily") return points;
+  const keyOf = (date: string) => (period === "weekly" ? weekStartOf(date) : date.slice(0, 7));
+  const buckets = new Map<string, TokenTimePoint>();
+  for (const point of points) {
+    if (!point.date) continue;
+    const key = keyOf(point.date);
+    const bucket = buckets.get(key);
+    if (!bucket) {
+      buckets.set(key, { ...point, date: key });
+      continue;
+    }
+    bucket.input += point.input;
+    bucket.output += point.output;
+    bucket.cache_read += point.cache_read;
+    bucket.cache_write += point.cache_write;
+    bucket.estimated_cost += point.estimated_cost;
+  }
+  return [...buckets.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
 
 // ── Skeleton Components ──────────────────────────────────────────────────────
 
@@ -961,6 +1005,9 @@ function ClaudeAnalyticsV2Inner() {
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<"tokens" | "cost">("tokens");
+  const [chartPeriod, setChartPeriod] = useState<"daily" | "weekly" | "monthly">("daily");
+  const navigate = useNavigate();
+  const [retention, setRetention] = useState<ClaudeRetentionStatus | null>(null);
   const [logPage, setLogPage] = useState(1);
   const [projectFilter, _setProjectFilter] = useState<string | null>(null);
 
@@ -986,6 +1033,15 @@ function ClaudeAnalyticsV2Inner() {
       }
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Retention status: how much history Claude Code's cleanup has already
+  // pruned. Read-only and cheap, so it loads independently of the analytics
+  // fetch and never blocks the page.
+  useEffect(() => {
+    getClaudeRetentionStatus()
+      .then(setRetention)
+      .catch(() => setRetention(null));
+  }, []);
 
   const loadData = useCallback(async (range: string, force: boolean) => {
     setLoading(true);
@@ -1109,6 +1165,61 @@ function ClaudeAnalyticsV2Inner() {
     overview.limit_state?.kind === "unauthenticated" && !isLocalOnly;
 
   // ── Derived data ────────────────────────────────────────────────────
+
+  const chartTs = bucketTokenTs(tokenTs, chartPeriod);
+  // Index of the tallest bucket, so the peak can be annotated inline.
+  const peakTokenIdx = chartTs.reduce(
+    (best, p, i, arr) => {
+      const total = p.input + p.output + p.cache_read + p.cache_write;
+      const bestTotal =
+        arr[best].input + arr[best].output + arr[best].cache_read + arr[best].cache_write;
+      return total > bestTotal ? i : best;
+    },
+    0,
+  );
+  const peakCostIdx = chartTs.reduce(
+    (best, p, i, arr) => (p.estimated_cost > arr[best].estimated_cost ? i : best),
+    0,
+  );
+
+  /** Renders the value above the highest point only; other points render nothing. */
+  const makePeakLabel =
+    (peakIdx: number, valueAt: (p: TokenTimePoint) => number, format: (n: number) => string) =>
+    (props: { x?: number | string; y?: number | string; index?: number }) => {
+      const { x, y, index } = props;
+      if (index !== peakIdx || chartTs.length === 0) return null;
+      const point = chartTs[peakIdx];
+      if (!point) return null;
+      const value = valueAt(point);
+      if (!Number.isFinite(value) || value <= 0) return null;
+      return (
+        <text
+          x={Number(x)}
+          y={Number(y) - 8}
+          textAnchor="middle"
+          fill="#e6e7ea"
+          fontSize={10}
+          fontWeight={600}
+        >
+          {`Peak ${format(value)}`}
+        </text>
+      );
+    };
+
+  const peakTokenLabel = makePeakLabel(
+    peakTokenIdx,
+    p => p.input + p.output + p.cache_read + p.cache_write,
+    formatNum,
+  );
+  const peakCostLabel = makePeakLabel(
+    peakCostIdx,
+    p => p.estimated_cost,
+    n => `$${n.toFixed(2)}`,
+  );
+  // Daily/weekly keys are YYYY-MM-DD (show MM-DD); monthly keys are YYYY-MM
+  // and must not be sliced the same way.
+  const chartTickFormatter = (value: string) =>
+    chartPeriod === "monthly" ? value : String(value).slice(5);
 
   const trayFromExtra =
     timeRange === "today" ? getClaudeTrayIstTodayDisplay(overview.extra) : null;
@@ -1920,6 +2031,38 @@ function ClaudeAnalyticsV2Inner() {
             <StatCard label="Cache Read" value={formatNum(displayTotalCacheRead)} color="text-emerald-400" />
             <StatCard label="Cache Write" value={formatNum(displayTotalCacheWrite)} color="text-amber-400" />
           </div>
+          {retention && retention.sessions_pruned > 0 && (
+            <div className="bg-amber-500/5 border border-amber-500/25 rounded-lg p-3 mb-3">
+              <div className="text-[11px] leading-relaxed">
+                <span className="text-amber-400 font-medium">History was trimmed.</span>{" "}
+                Claude Code deletes session transcripts older than{" "}
+                <span className="text-text-primary font-medium">
+                  {retention.effective_days} days
+                </span>
+                {retention.using_default && " (its default)"}. Token and cost data lives only in
+                those transcripts, so charts cannot show what was removed.
+              </div>
+              <div className="text-[10px] text-text-muted mt-1">
+                {formatNum(retention.sessions_pruned)} of{" "}
+                {formatNum(retention.sessions_in_history)} sessions no longer have transcripts
+                {retention.earliest_session && (
+                  <> &middot; first session {retention.earliest_session}</>
+                )}
+                {retention.earliest_transcript && (
+                  <> &middot; charts start {retention.earliest_transcript}</>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate("/adapters/claude-code/permissions#cleanup-period")
+                }
+                className="text-[10px] text-accent-blue hover:underline mt-2"
+              >
+                Change retention in Permissions &amp; Control &rarr;
+              </button>
+            </div>
+          )}
           {tokenTs.length > 0 && (
             <div className="bg-[#1a1b23] rounded-lg border border-[#2a2b36] p-4">
               {trayFromExtra && (
@@ -1927,30 +2070,81 @@ function ClaudeAnalyticsV2Inner() {
                   Chart data is built from local project logs and may not match the menu bar totals above.
                 </p>
               )}
-              <div className="flex justify-end gap-2 mb-2">
-                <button onClick={() => setChartMode("tokens")} className={`text-[10px] px-2 py-0.5 rounded ${chartMode === "tokens" ? "bg-accent-blue text-white" : "text-text-muted"}`}>Tokens</button>
-                <button onClick={() => setChartMode("cost")} className={`text-[10px] px-2 py-0.5 rounded ${chartMode === "cost" ? "bg-accent-blue text-white" : "text-text-muted"}`}>Cost $</button>
+              <div className="flex justify-end items-center gap-3 mb-2">
+                <div className="flex gap-1">
+                  {(["daily", "weekly", "monthly"] as const).map(p => (
+                    <button
+                      key={p}
+                      onClick={() => {
+                        setChartPeriod(p);
+                        // Widen the fetched window to match: weekly/monthly
+                        // buckets are meaningless inside a 30d range.
+                        if ((p === "monthly" || p === "weekly") && timeRange !== "all") {
+                          setTimeRange("all");
+                          loadData("all", false);
+                        }
+                      }}
+                      className={`text-[10px] px-2 py-0.5 rounded ${chartPeriod === p ? "bg-accent-blue text-white" : "text-text-muted"}`}
+                    >
+                      {p[0].toUpperCase() + p.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2 border-l border-[#2a2b36] pl-3">
+                  <button onClick={() => setChartMode("tokens")} className={`text-[10px] px-2 py-0.5 rounded ${chartMode === "tokens" ? "bg-accent-blue text-white" : "text-text-muted"}`}>Tokens</button>
+                  <button onClick={() => setChartMode("cost")} className={`text-[10px] px-2 py-0.5 rounded ${chartMode === "cost" ? "bg-accent-blue text-white" : "text-text-muted"}`}>Cost $</button>
+                </div>
               </div>
               <ResponsiveContainer width="100%" height={250}>
                 {chartMode === "tokens" ? (
-                  <AreaChart data={tokenTs}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2b36" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9394a1" }} tickFormatter={v => v.slice(5)} />
-                    <YAxis tick={{ fontSize: 10, fill: "#9394a1" }} tickFormatter={v => formatNum(v)} />
+                  <AreaChart data={chartTs} margin={{ top: 24, right: 12, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="claudeCacheRead" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#22c55e" stopOpacity={0.75} />
+                        <stop offset="100%" stopColor="#22c55e" stopOpacity={0.08} />
+                      </linearGradient>
+                      <linearGradient id="claudeCacheWrite" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.75} />
+                        <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.08} />
+                      </linearGradient>
+                      <linearGradient id="claudeInput" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.75} />
+                        <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.08} />
+                      </linearGradient>
+                      <linearGradient id="claudeOutput" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.75} />
+                        <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.08} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2b36" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9394a1" }} tickFormatter={chartTickFormatter} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#9394a1" }} tickFormatter={v => formatNum(v)} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={TOOLTIP_STYLE} />
                     <Legend wrapperStyle={{ fontSize: "10px" }} />
-                    <Area type="monotone" dataKey="cache_read" stackId="1" stroke="#22c55e" fill="#22c55e" fillOpacity={0.3} name="Cache Read" />
-                    <Area type="monotone" dataKey="cache_write" stackId="1" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.3} name="Cache Write" />
-                    <Area type="monotone" dataKey="input" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} name="Input" />
-                    <Area type="monotone" dataKey="output" stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} name="Output" />
+                    {/* linear, not monotone: spline smoothing invents peaks
+                        between sparse points and can bow below zero. */}
+                    <Area type="linear" dataKey="cache_read" stackId="1" stroke="#22c55e" strokeWidth={1.5} fill="url(#claudeCacheRead)" name="Cache Read" dot={false} />
+                    <Area type="linear" dataKey="cache_write" stackId="1" stroke="#f59e0b" strokeWidth={1.5} fill="url(#claudeCacheWrite)" name="Cache Write" dot={false} />
+                    <Area type="linear" dataKey="input" stackId="1" stroke="#3b82f6" strokeWidth={1.5} fill="url(#claudeInput)" name="Input" dot={false} />
+                    <Area type="linear" dataKey="output" stackId="1" stroke="#8b5cf6" strokeWidth={1.5} fill="url(#claudeOutput)" name="Output" dot={false}>
+                      <LabelList dataKey="date" content={peakTokenLabel} />
+                    </Area>
                   </AreaChart>
                 ) : (
-                  <AreaChart data={tokenTs}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2b36" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9394a1" }} tickFormatter={v => v.slice(5)} />
-                    <YAxis tick={{ fontSize: 10, fill: "#9394a1" }} tickFormatter={v => `$${v.toFixed(2)}`} />
+                  <AreaChart data={chartTs} margin={{ top: 24, right: 12, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="claudeCostFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#22c55e" stopOpacity={0.75} />
+                        <stop offset="100%" stopColor="#22c55e" stopOpacity={0.08} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2b36" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9394a1" }} tickFormatter={chartTickFormatter} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#9394a1" }} tickFormatter={v => `$${v.toFixed(2)}`} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => `$${v.toFixed(4)}`} />
-                    <Area type="monotone" dataKey="estimated_cost" stroke="#22c55e" fill="#22c55e" fillOpacity={0.3} name="Estimated Cost" />
+                    <Area type="linear" dataKey="estimated_cost" stroke="#22c55e" strokeWidth={1.5} fill="url(#claudeCostFill)" name="Estimated Cost" dot={false}>
+                      <LabelList dataKey="date" content={peakCostLabel} />
+                    </Area>
                   </AreaChart>
                 )}
               </ResponsiveContainer>

@@ -4,6 +4,7 @@ import { Header } from "./Header";
 import { MainContent } from "./MainContent";
 import { ShortcutsHelp } from "../common/ShortcutsHelp";
 import { UpdateBanner } from "../common/UpdateBanner";
+import { HeaderTips } from "./HeaderTips";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 
 export function AppLayout() {
@@ -32,6 +33,7 @@ export function AppLayout() {
   return (
     <div className="flex flex-col h-screen bg-app-bg text-text-primary">
       <UpdateBanner />
+      <HeaderTips />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <div className="flex-1 flex flex-col overflow-hidden">

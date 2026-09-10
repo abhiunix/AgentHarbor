@@ -143,9 +143,27 @@ function TrayHealthBar({
   const lsDanger = limitStateIsDanger(activeLimit ?? undefined);
   const lsWarn = limitStateIsWarning(activeLimit ?? undefined);
 
-  const activeProviderWorstRL = activeProvider?.rate_limits
-    .filter((rl) => rl.remaining_percent < 30)
-    .sort((a, b) => a.remaining_percent - b.remaining_percent)[0] ?? null;
+  // Which window represents the provider in the header.
+  //
+  // Codex is pinned to its **weekly** quota: its short buckets (the 5h window,
+  // and per-model variants like "GPT-5.3-Codex-Spark (5h)") routinely sit at
+  // 100% and refill within hours, so surfacing those reads as "out of quota"
+  // while the week still has room. Every other provider keeps the previous
+  // "most constrained window" behaviour.
+  const activeProviderWorstRL = (() => {
+    const limits = activeProvider?.rate_limits ?? [];
+    if (activeProviderId === "codex") {
+      const weekly =
+        limits.find((rl) => rl.label.startsWith("Weekly")) ??
+        limits.find((rl) => rl.label.includes("Weekly"));
+      return weekly && weekly.remaining_percent < 30 ? weekly : null;
+    }
+    return (
+      limits
+        .filter((rl) => rl.remaining_percent < 30)
+        .sort((a, b) => a.remaining_percent - b.remaining_percent)[0] ?? null
+    );
+  })();
 
   const geminiHighlightLimit =
     activeProviderId === "gemini" && activeProvider
@@ -218,7 +236,7 @@ function TrayHealthBar({
                 : "text-[#9394a1]"
             }
           >
-            {`${geminiHighlightLimit.label}: ${geminiHighlightLimit.remaining_percent.toFixed(0)}%`}
+            {`${geminiHighlightLimit.label}: ${geminiHighlightLimit.used_percent.toFixed(0)}% used`}
           </span>
         ) : isWarning && activeProviderWorstRL ? (
           <span
@@ -226,7 +244,7 @@ function TrayHealthBar({
           >
             {lsWarn && activeLimit?.kind === "approaching"
               ? `${activeLimit.label} · ${activeLimit.worst_pct.toFixed(0)}%`
-              : `${activeProviderWorstRL.label}: ${activeProviderWorstRL.remaining_percent.toFixed(0)}%`}
+              : `${activeProviderWorstRL.label}: ${activeProviderWorstRL.used_percent.toFixed(0)}% used`}
           </span>
         ) : (
           <button

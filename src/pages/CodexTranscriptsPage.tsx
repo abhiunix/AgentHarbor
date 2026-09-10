@@ -42,6 +42,44 @@ function shortPath(path: string): string {
   return match ? `~${match[1] ?? ""}` : path;
 }
 
+interface CodexProjectGroup {
+  projectPath: string;
+  displayPath: string;
+  sessions: CodexTranscriptSession[];
+  latestDate: string;
+}
+
+function groupByProject(
+  sessions: CodexTranscriptSession[],
+): CodexProjectGroup[] {
+  const map = new Map<string, CodexTranscriptSession[]>();
+  for (const session of sessions) {
+    const key = session.projectPath || session.projectName || "Unknown project";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(session);
+  }
+
+  const groups: CodexProjectGroup[] = [];
+  for (const [projectPath, items] of map) {
+    const sorted = [...items].sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
+    groups.push({
+      projectPath,
+      displayPath: shortPath(projectPath),
+      sessions: sorted,
+      latestDate: sorted[0]?.updatedAt ?? "",
+    });
+  }
+
+  groups.sort(
+    (a, b) =>
+      new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime(),
+  );
+  return groups;
+}
+
 function mergeSessions(
   current: CodexTranscriptSession[],
   incoming: CodexTranscriptSession[],
@@ -57,6 +95,9 @@ export function CodexTranscriptsPage() {
   const [sessions, setSessions] = useState<CodexTranscriptSession[]>([]);
   const [sessionResult, setSessionResult] =
     useState<CodexTranscriptSessionPage | null>(null);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
+    new Set(),
+  );
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [projectScope, setProjectScope] = useState<string | null>(null);
@@ -202,6 +243,35 @@ export function CodexTranscriptsPage() {
     void loadTranscript(session, 0, false);
   };
 
+  const toggleProject = (projectPath: string) => {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectPath)) {
+        next.delete(projectPath);
+      } else {
+        next.add(projectPath);
+      }
+      return next;
+    });
+  };
+
+  const groups = groupByProject(sessions);
+
+  // Keep the most recent project open by default, and expand every group while
+  // a search is active so matches are never hidden behind a collapsed header.
+  useEffect(() => {
+    if (groups.length === 0) return;
+    if (debouncedQuery) {
+      setExpandedProjects(new Set(groups.map((group) => group.projectPath)));
+      return;
+    }
+    setExpandedProjects((prev) => {
+      if (prev.size > 0) return prev;
+      return new Set([groups[0].projectPath]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQuery, groups.length]);
+
   const searching = query.trim() !== debouncedQuery;
 
   return (
@@ -315,50 +385,87 @@ export function CodexTranscriptsPage() {
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto min-h-0">
-              {sessions.map((session) => (
-                <button
-                  key={session.sessionId}
-                  type="button"
-                  onClick={() => selectSession(session)}
-                  aria-pressed={
-                    selectedSession?.sessionId === session.sessionId
-                  }
-                  className={`w-full text-left px-4 py-3 border-b border-border/70 transition-colors ${
-                    selectedSession?.sessionId === session.sessionId
-                      ? "bg-accent-blue/10 border-l-2 border-l-accent-blue"
-                      : "hover:bg-app-card-hover"
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <p className="flex-1 min-w-0 text-sm font-medium text-text-primary line-clamp-2">
-                      {session.title}
-                    </p>
-                    <time
-                      className="text-[10px] text-text-muted whitespace-nowrap"
-                      dateTime={session.updatedAt}
+              {groups.map((group) => {
+                const isExpanded = expandedProjects.has(group.projectPath);
+                return (
+                  <div key={group.projectPath}>
+                    <button
+                      type="button"
+                      onClick={() => toggleProject(group.projectPath)}
+                      aria-expanded={isExpanded}
+                      className="w-full text-left px-3 py-2.5 border-b border-border/70 hover:bg-app-card-hover transition-colors"
                     >
-                      {formatRelativeTime(session.updatedAt)}
-                    </time>
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-muted text-[10px] w-3 shrink-0">
+                          {isExpanded ? "▼" : "▶"}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div
+                            className="text-sm font-medium text-text-primary truncate"
+                            title={group.projectPath}
+                          >
+                            {group.displayPath}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 text-[10px] text-text-muted">
+                            <span className="px-1.5 py-0.5 rounded bg-accent-blue/15 text-accent-blue">
+                              Codex
+                            </span>
+                            <span>
+                              {group.sessions.length} session
+                              {group.sessions.length !== 1 ? "s" : ""}
+                            </span>
+                            {group.latestDate && (
+                              <span>
+                                · {formatRelativeTime(group.latestDate)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+
+                    {isExpanded &&
+                      group.sessions.map((session) => (
+                        <button
+                          key={session.sessionId}
+                          type="button"
+                          onClick={() => selectSession(session)}
+                          aria-pressed={
+                            selectedSession?.sessionId === session.sessionId
+                          }
+                          className={`w-full text-left pl-8 pr-4 py-3 border-b border-border/70 transition-colors ${
+                            selectedSession?.sessionId === session.sessionId
+                              ? "bg-accent-blue/10 border-l-2 border-l-accent-blue"
+                              : "hover:bg-app-card-hover"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <p className="flex-1 min-w-0 text-sm font-medium text-text-primary line-clamp-2">
+                              {session.title}
+                            </p>
+                            <time
+                              className="text-[10px] text-text-muted whitespace-nowrap"
+                              dateTime={session.updatedAt}
+                            >
+                              {formatRelativeTime(session.updatedAt)}
+                            </time>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-text-muted">
+                            <span>{formatSize(session.fileSizeBytes)}</span>
+                            <span className="font-mono">
+                              {session.sessionId.slice(0, 8)}
+                            </span>
+                            {session.archived && (
+                              <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300">
+                                Archived
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      ))}
                   </div>
-                  <p
-                    className="text-xs text-text-secondary truncate mt-1"
-                    title={session.projectPath}
-                  >
-                    {session.projectName || shortPath(session.projectPath)}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1.5 text-[10px] text-text-muted">
-                    <span>{formatSize(session.fileSizeBytes)}</span>
-                    <span className="font-mono">
-                      {session.sessionId.slice(0, 8)}
-                    </span>
-                    {session.archived && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300">
-                        Archived
-                      </span>
-                    )}
-                  </div>
-                </button>
-              ))}
+                );
+              })}
 
               {sessionResult?.hasMore && (
                 <div className="p-3 text-center">

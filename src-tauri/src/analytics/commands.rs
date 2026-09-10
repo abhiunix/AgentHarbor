@@ -623,31 +623,32 @@ fn pick_primary_provider_rate(provider: &TrayProviderSummary) -> Option<RateLimi
         }
     }
 
-    // Codex (WHAM): prefer Primary (5h) for menu-bar % so it matches the first
-    // bar in the popover — same precedence as Claude session vs weekly. Using
-    // "most constrained" across 5h + weekly would pick Weekly (lower remaining).
+    // Codex: always report the **weekly** quota in the menu bar.
+    //
+    // Codex exposes several buckets (a 5h window, a weekly window, and
+    // per-model variants such as "GPT-5.3-Codex-Spark (5h)"). The short ones
+    // routinely sit at 100% and refill within hours, so showing them reads as
+    // "you are out of quota" when the week still has room. The weekly quota is
+    // what actually governs remaining work, so that is what the tray shows.
     if provider.provider_id == "codex" {
-        let primary = provider
-            .rate_limits
-            .iter()
-            .find(|rl| rl.label.contains("5h"))
-            .cloned();
-        if let Some(ref p) = primary {
-            if p.used_percent > 0.0 {
-                return primary;
-            }
-        }
         let weekly = provider
             .rate_limits
             .iter()
-            .find(|rl| rl.label.contains("Weekly"))
+            // Match the account-level weekly window, not a per-model 7d bucket
+            // like "GPT-5.3-Codex-Spark (7d)".
+            .find(|rl| rl.label.starts_with("Weekly"))
+            .or_else(|| {
+                provider
+                    .rate_limits
+                    .iter()
+                    .find(|rl| rl.label.contains("Weekly") || rl.label.contains("7d"))
+            })
             .cloned();
         if weekly.is_some() {
             return weekly;
         }
-        if primary.is_some() {
-            return primary;
-        }
+        // No weekly window reported: fall through to the generic handling
+        // below rather than pinning the tray to a short bucket.
     }
 
     // Non-Claude providers: pick the most constrained primary window

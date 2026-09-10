@@ -821,6 +821,19 @@ function CodexCard({ provider }: { provider: TrayProviderSummary }) {
           <TokenWindowRow label="Today" stats={statsToday} />
           <TokenWindowRow label="This Week" stats={statsWeek} />
           <TokenWindowRow label="All Time" stats={statsAllTime} />
+          {(() => {
+            // Disclose usage excluded from the cost figures, so the tray does
+            // not silently understate what the plan actually covered.
+            const unpriced = (ex.unpriced_models as string[] | undefined) ?? [];
+            const approx = (ex.approximate_sessions as number | undefined) ?? 0;
+            if (unpriced.length === 0 && approx === 0) return null;
+            const parts: string[] = [];
+            if (unpriced.length > 0) parts.push(`${unpriced.length} model${unpriced.length !== 1 ? "s" : ""} unpriced`);
+            if (approx > 0) parts.push(`${approx} approximate`);
+            return (
+              <div className="text-[9px] text-text-muted mt-1">{parts.join(" · ")}</div>
+            );
+          })()}
         </div>
       )}
     </div>

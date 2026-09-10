@@ -72,7 +72,12 @@ use commands::backup::{
     cleanup_backups, create_project_backup, delete_project_backup, get_project_backups,
     restore_project_backup, run_backup_cleanup_on_launch,
 };
-use commands::claude_history::{get_claude_active_sessions, get_claude_history};
+use analytics::codex_projects::{
+    get_codex_project_sessions, get_codex_projects_overview, get_codex_session_timeline,
+};
+use commands::claude_history::{
+    get_claude_active_sessions, get_claude_history, get_claude_retention_status,
+};
 use commands::claude_metadata::{
     get_claude_app_info, get_claude_custom_commands, get_claude_file_history_stats,
     get_claude_hooks_summary, get_claude_installed_plugins, get_claude_plans_summary,
@@ -578,6 +583,10 @@ pub fn run() {
             get_kimi_config_tunables,
             set_kimi_config_value,
             get_claude_history,
+            get_claude_retention_status,
+            get_codex_projects_overview,
+            get_codex_project_sessions,
+            get_codex_session_timeline,
             get_claude_active_sessions,
             get_claude_app_info,
             get_claude_installed_plugins,

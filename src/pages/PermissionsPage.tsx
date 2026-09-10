@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getClaudePermissions,
@@ -265,6 +265,48 @@ export function PermissionsPage() {
   const [defaultShell, setDefaultShell] = useState("");
   const [plansDirectory, setPlansDirectory] = useState("");
   const [cleanupPeriodDays, setCleanupPeriodDays] = useState("");
+  const [highlightCleanup, setHighlightCleanup] = useState(false);
+  // Serialized snapshot of the settings as last loaded/saved. Comparing the
+  // live payload against it is simpler and less error-prone than tracking a
+  // dirty flag across ~30 individual field setters.
+  const [claudeBaseline, setClaudeBaseline] = useState<string | null>(null);
+  // Pending navigation held while the unsaved-changes modal is open.
+  const [pendingNav, setPendingNav] = useState<(() => void) | null>(null);
+  // Set while replaying a confirmed navigation so the guard ignores that click.
+  const pendingNavRef = useRef(false);
+
+  // Deep link support: `/adapters/claude-code/permissions#cleanup-period`
+  // scrolls to the retention field and flashes it, so a link from Analytics
+  // lands on the right control instead of the top of a long page.
+  //
+  // The page renders a loading screen first, so the target element does not
+  // exist on mount; poll briefly until it appears rather than firing once.
+  useEffect(() => {
+    if (window.location.hash !== "#cleanup-period") return;
+    let cancelled = false;
+    let clearHighlight: ReturnType<typeof setTimeout> | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const deadline = Date.now() + 10_000;
+
+    const tryScroll = () => {
+      if (cancelled) return;
+      const target = document.getElementById("cleanup-period");
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        setHighlightCleanup(true);
+        clearHighlight = setTimeout(() => setHighlightCleanup(false), 3000);
+        return;
+      }
+      if (Date.now() < deadline) retry = setTimeout(tryScroll, 100);
+    };
+    tryScroll();
+
+    return () => {
+      cancelled = true;
+      if (clearHighlight) clearTimeout(clearHighlight);
+      if (retry) clearTimeout(retry);
+    };
+  }, []);
   const [claudeMdExcludes, setClaudeMdExcludes] = useState<string[]>([]);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [statusLineEnabled, setStatusLineEnabled] = useState(false);
@@ -510,8 +552,85 @@ export function PermissionsPage() {
     loadData();
   }, [projectScope]);
 
-  async function handleClaudeSave() {
-    if (!window.confirm("Save Claude Code permissions? This directly affects IDE behavior.")) return;
+  // Snapshot the baseline once freshly loaded values are committed to state.
+  // Runs after every load (including the reload following a save), so saving
+  // clears the dirty state automatically.
+  useEffect(() => {
+    if (loading) return;
+    setClaudeBaseline(JSON.stringify(buildClaudePayload()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, projectScope]);
+
+  // Dirty when the live payload differs from the last loaded/saved snapshot.
+  const claudeDirty =
+    !loading && claudeBaseline !== null &&
+    JSON.stringify(buildClaudePayload()) !== claudeBaseline;
+
+  const discardClaudeChanges = useCallback(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectScope]);
+
+  // In-app navigation guard.
+  //
+  // Two constraints shape this:
+  //  * The app uses BrowserRouter (not a data router), so `useBlocker` is
+  //    unavailable; sidebar clicks are intercepted in the capture phase.
+  //  * `window.confirm` is NON-BLOCKING inside a Tauri webview: it is
+  //    intercepted and shown as a native async dialog, returning a Promise
+  //    rather than a boolean. Using it here let navigation continue behind
+  //    the dialog, so the answer arrived too late to matter. The prompt is
+  //    therefore a normal in-app modal: the click is always cancelled first,
+  //    and the navigation is replayed only if the user confirms.
+  useEffect(() => {
+    if (!claudeDirty) return;
+    const onClickCapture = (event: MouseEvent) => {
+      if (pendingNavRef.current) {
+        pendingNavRef.current = false;
+        return; // replayed click: the user already confirmed
+      }
+      if (event.defaultPrevented || event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      const nav = target?.closest(".sidebar-item, a[href]");
+      if (!nav || !(nav instanceof HTMLElement)) return;
+      if (nav.getAttribute("href")?.startsWith("#")) return;
+      if (nav.closest("[data-permissions-root]")) return;
+      if (nav.classList.contains("active")) return;
+
+      // Always stop this click; it is replayed after the user decides.
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingNav(() => () => {
+        pendingNavRef.current = true;
+        nav.click();
+      });
+    };
+    document.addEventListener("click", onClickCapture, true);
+    return () => document.removeEventListener("click", onClickCapture, true);
+  }, [claudeDirty]);
+
+  // Warn before leaving the page (window close / reload) with unsaved edits.
+  useEffect(() => {
+    if (!claudeDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [claudeDirty]);
+
+
+  // `silent` skips the extra confirm when the caller already asked (e.g. the
+  // unsaved-changes modal). Note `window.confirm` is async inside a Tauri
+  // webview, so it is awaited rather than used as a blocking boolean.
+  async function handleClaudeSave(options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      const ok = await Promise.resolve(
+        window.confirm("Save Claude Code permissions? This directly affects IDE behavior."),
+      );
+      if (!ok) return;
+    }
     setClaudeSaving(true);
     try {
       await updateClaudePermissions(buildClaudePayload());
@@ -695,7 +814,79 @@ export function PermissionsPage() {
   const isGlobal = projectScope == null;
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div data-permissions-root className={`p-6 max-w-6xl${claudeDirty ? " pb-24" : ""}`}>
+      {pendingNav && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-lg border border-border bg-[#12131a] p-5 shadow-xl">
+            <h2 className="text-sm font-semibold text-text-primary mb-2">
+              Unsaved permission changes
+            </h2>
+            <p className="text-xs text-text-secondary leading-relaxed mb-4">
+              You have changes that have not been applied. Apply them now, discard
+              them and continue, or stay on this page.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingNav(null)}
+                className="px-3 py-1.5 text-xs rounded bg-[#1a1b23] text-text-secondary hover:text-text-primary hover:bg-[#22232e]"
+              >
+                Stay here
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const go = pendingNav;
+                  setPendingNav(null);
+                  setClaudeBaseline(null); // suppress the guard during unmount
+                  go?.();
+                }}
+                className="px-3 py-1.5 text-xs rounded bg-[#1a1b23] text-amber-300 hover:bg-[#22232e]"
+              >
+                Discard &amp; leave
+              </button>
+              <button
+                type="button"
+                disabled={claudeSaving}
+                onClick={async () => {
+                  const go = pendingNav;
+                  setPendingNav(null);
+                  await handleClaudeSave({ silent: true });
+                  go?.();
+                }}
+                className="px-3 py-1.5 text-xs rounded bg-accent-blue text-white hover:bg-accent-blue/90 disabled:opacity-50"
+              >
+                {claudeSaving ? "Applying…" : "Apply & leave"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Unsaved-changes bar: pinned to the bottom of the scroll container so
+          it stays reachable no matter how far down the form the edit was. */}
+      {claudeDirty && (
+        <div className="fixed bottom-4 right-6 z-40 flex items-center gap-3 rounded-lg border border-accent-blue/40 bg-[#12131a] px-4 py-3 shadow-lg shadow-black/40">
+          <span className="text-xs text-text-secondary">
+            You have unsaved changes
+          </span>
+          <button
+            type="button"
+            onClick={discardClaudeChanges}
+            disabled={claudeSaving}
+            className="px-3 py-1.5 text-xs rounded bg-[#1a1b23] text-text-secondary hover:text-text-primary hover:bg-[#22232e] disabled:opacity-50"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleClaudeSave()}
+            disabled={claudeSaving}
+            className="px-3 py-1.5 text-xs rounded bg-accent-blue text-white hover:bg-accent-blue/90 disabled:opacity-50"
+          >
+            {claudeSaving ? "Applying…" : "Apply changes"}
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
         <div>
           <h1 className="text-2xl font-bold text-text-primary mb-2">
@@ -1044,13 +1235,22 @@ export function PermissionsPage() {
                     { value: "latest", label: "latest" },
                   ]}
                 />
-                <NumberRow
-                  label="Cleanup period (days)"
-                  info="Days before session files are deleted at startup (default 30)."
-                  value={cleanupPeriodDays}
-                  onChange={setCleanupPeriodDays}
-                  placeholder="30"
-                />
+                <div
+                  id="cleanup-period"
+                  className={
+                    highlightCleanup
+                      ? "rounded-md ring-2 ring-amber-400/70 bg-amber-500/5 transition-shadow"
+                      : "transition-shadow"
+                  }
+                >
+                  <NumberRow
+                    label="Cleanup period (days)"
+                    info="Days before Claude Code deletes session transcripts at startup (default 30). Those transcripts are the only source of token and cost history, so a short window permanently removes analytics data."
+                    value={cleanupPeriodDays}
+                    onChange={setCleanupPeriodDays}
+                    placeholder="30"
+                  />
+                </div>
               </div>
 
               <div className="border-t border-border pt-4 mt-2 mb-4">
@@ -1068,7 +1268,7 @@ export function PermissionsPage() {
               </div>
 
               <button
-                onClick={handleClaudeSave}
+                onClick={() => void handleClaudeSave()}
                 disabled={claudeSaving}
                 className="w-full mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >

@@ -165,6 +165,7 @@ export const adapterPlugins: AdapterPlugin[] = [
     defaultExpanded: false,
     features: [
       { id: "analytics", label: "Analytics", icon: "\uD83D\uDCCA", route: "/adapters/codex/analytics" },
+      { id: "projects", label: "Projects", icon: "\uD83D\uDCC1", route: "/adapters/codex/projects" },
       { id: "instructions", label: "Instructions", icon: "\uD83D\uDCDD", route: "/adapters/codex/instructions" },
       { id: "memory", label: "Memory", icon: "\uD83E\uDDE0", route: "/adapters/codex/memory" },
       { id: "control", label: "Permissions & Control", icon: "\uD83D\uDD12", route: "/adapters/codex/control" },
