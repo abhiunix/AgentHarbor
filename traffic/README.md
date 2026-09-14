@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-09-13.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-09-14.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 474 | 155 |
-| Clones | 1005 | 494 |
+| Views | 478 | 157 |
+| Clones | 1039 | 509 |
 
 Stars 12 | Forks 0 | Open issues 9
 
@@ -28,13 +28,13 @@ Stars 12 | Forks 0 | Open issues 9
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| github.com | 7 | 6 |
+| github.com | 5 | 5 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 25 | 20 |
+| / | 24 | 19 |
 | /issues | 2 | 2 |
 | /blob/main/docs/analytics.md | 1 | 1 |
 | /blob/main/docs/assets/presets.png | 1 | 1 |
@@ -43,4 +43,4 @@ Stars 12 | Forks 0 | Open issues 9
 | /blob/main/docs/opencode-adapter-research.md | 1 | 1 |
 | /blob/main/docs/regression-checklist.md | 1 | 1 |
 | /blob/main/docs/troubleshooting.md | 1 | 1 |
-| /commit/129405a853be51802f528ee3805c9393a3d97909 | 1 | 1 |
+| /commit/0b837312484d7f92925207dd5ee9637e10300965 | 1 | 1 |

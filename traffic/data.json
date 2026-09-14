@@ -223,6 +223,10 @@
     "2026-09-11": {
       "count": 4,
       "uniques": 2
+    },
+    "2026-09-12": {
+      "count": 4,
+      "uniques": 2
     }
   },
   "clones": {
@@ -449,6 +453,10 @@
     "2026-09-11": {
       "count": 8,
       "uniques": 6
+    },
+    "2026-09-12": {
+      "count": 34,
+      "uniques": 15
     }
   },
   "referrers": {
@@ -1221,6 +1229,13 @@
         "referrer": "github.com",
         "count": 7,
         "uniques": 6
+      }
+    ],
+    "2026-09-14": [
+      {
+        "referrer": "github.com",
+        "count": 5,
+        "uniques": 5
       }
     ]
   },
@@ -3460,6 +3475,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-09-14": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 24,
+        "uniques": 19
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/analytics.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/presets.png",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/features.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/getting-started.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/opencode-adapter-research.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/regression-checklist.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/troubleshooting.md",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/0b837312484d7f92925207dd5ee9637e10300965",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -3677,17 +3744,22 @@
       "stars": 12,
       "forks": 0,
       "issues": 9
+    },
+    "2026-09-14": {
+      "stars": 12,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-09-13",
+    "asOf": "2026-09-14",
     "views": {
-      "count": 42,
-      "uniques": 20
+      "count": 43,
+      "uniques": 19
     },
     "clones": {
-      "count": 171,
-      "uniques": 71
+      "count": 164,
+      "uniques": 75
     }
   }
 }
