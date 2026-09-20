@@ -247,6 +247,10 @@
     "2026-09-17": {
       "count": 2,
       "uniques": 2
+    },
+    "2026-09-18": {
+      "count": 0,
+      "uniques": 0
     }
   },
   "clones": {
@@ -497,6 +501,10 @@
     "2026-09-17": {
       "count": 21,
       "uniques": 14
+    },
+    "2026-09-18": {
+      "count": 6,
+      "uniques": 4
     }
   },
   "referrers": {
@@ -1307,6 +1315,13 @@
       }
     ],
     "2026-09-19": [
+      {
+        "referrer": "github.com",
+        "count": 5,
+        "uniques": 5
+      }
+    ],
+    "2026-09-20": [
       {
         "referrer": "github.com",
         "count": 5,
@@ -3862,6 +3877,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-09-20": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 25,
+        "uniques": 18
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/0b837312484d7f92925207dd5ee9637e10300965",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/129405a853be51802f528ee3805c9393a3d97909",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/43f6b38e762d588210b0431d1b8f31f2f60569bf",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/aaeb74c0dea1e2316d339d766da5f72371819ab6",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/ab3691bf7cc5ef588894a612d0747b1d670257e1",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/graphs/code-frequency",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/graphs/commit-activity",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/network",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -4109,17 +4176,22 @@
       "stars": 12,
       "forks": 0,
       "issues": 9
+    },
+    "2026-09-20": {
+      "stars": 12,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-09-19",
+    "asOf": "2026-09-20",
     "views": {
-      "count": 40,
+      "count": 39,
       "uniques": 18
     },
     "clones": {
-      "count": 217,
-      "uniques": 107
+      "count": 210,
+      "uniques": 97
     }
   }
 }
