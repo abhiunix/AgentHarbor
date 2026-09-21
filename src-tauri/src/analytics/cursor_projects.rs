@@ -845,12 +845,16 @@ struct RealGitRunner;
 
 impl GitRunner for RealGitRunner {
     fn rev_list_all(&self, repo_path: &Path, max_count: usize) -> Result<Vec<String>, String> {
-        let output = std::process::Command::new("git")
-            .arg("-C")
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("-C")
             .arg(repo_path)
             .arg("rev-list")
             .arg("--all")
-            .arg(format!("--max-count={}", max_count))
+            .arg(format!("--max-count={}", max_count));
+        // Up to GIT_MAX_CONCURRENT of these run at once; without this each one
+        // flashes a console window on Windows.
+        crate::utils::platform::hide_console_window(&mut cmd);
+        let output = cmd
             .output()
             .map_err(|e| format!("git spawn failed: {}", e))?;
         if !output.status.success() {
@@ -950,11 +954,10 @@ fn save_commit_repo_cache(map: &HashMap<String, String>) {
 }
 
 fn git_available() -> bool {
-    std::process::Command::new("git")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("--version");
+    crate::utils::platform::hide_console_window(&mut cmd);
+    cmd.output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 lazy_static::lazy_static! {

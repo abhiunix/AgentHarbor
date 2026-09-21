@@ -277,6 +277,12 @@ fn request_with_program(
     timeout: Duration,
 ) -> Result<Value, AppServerError> {
     let mut command = Command::new(program);
+    // Windows: the app has no console of its own, so a console child allocates
+    // a new one and the default terminal host pops a visible window. Every
+    // analytics refresh issues several of these requests, and each is torn
+    // down with kill() (exit code 1), which Windows Terminal's default
+    // closeOnExit=graceful leaves on screen instead of closing.
+    crate::utils::platform::hide_console_window(&mut command);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
