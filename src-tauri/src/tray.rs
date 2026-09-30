@@ -169,7 +169,7 @@ pub fn setup_tray(app: &AppHandle<Wry>, show: bool) -> tauri::Result<()> {
         let _tray = TrayIconBuilder::with_id("main-tray")
             .icon(app.default_window_icon().unwrap().clone())
             .menu(&menu)
-            .menu_on_left_click(false)
+            .show_menu_on_left_click(false)
             .on_menu_event(|app: &AppHandle<Wry>, event| match event.id.as_ref() {
                 "quit" => {
                     app.exit(0);
