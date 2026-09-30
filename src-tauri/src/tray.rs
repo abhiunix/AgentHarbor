@@ -98,6 +98,8 @@ pub fn restore_main_window(app: &AppHandle<Wry>) {
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(target_os = "windows")]
+        let _ = window.set_skip_taskbar(false);
         let _ = window.show();
         let _ = window.set_focus();
     }

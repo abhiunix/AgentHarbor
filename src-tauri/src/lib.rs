@@ -226,7 +226,15 @@ fn set_dev_dock_icon() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // A second launch while the window is hidden must reuse the existing tray.
+    // Register first so the new process exits before it creates any windows.
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        tray::restore_main_window(app);
+    }));
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -252,6 +260,8 @@ pub fn run() {
                             api.prevent_close();
                             if let Some(w) = handle.get_webview_window("main") {
                                 let _ = w.hide();
+                                #[cfg(target_os = "windows")]
+                                let _ = w.set_skip_taskbar(true);
                             }
                             // Leave the Dock/Cmd-Tab so a detached window reads as closed.
                             #[cfg(target_os = "macos")]

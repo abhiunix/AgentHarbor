@@ -54,6 +54,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 zstd = "0.13"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+tauri-plugin-single-instance = "2"
 # PID liveness via OpenProcess instead of spawning `tasklist`, which flashes a
 # console window per call because the app has no console of its own.
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
