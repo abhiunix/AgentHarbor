@@ -1,18 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" width="720" height="320" role="img" aria-label="Cumulative GitHub stars for abhiunix/AgentHarbor: 12 as of Sep 30">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" width="720" height="320" role="img" aria-label="Cumulative GitHub stars for abhiunix/AgentHarbor: 13 as of Oct 1">
   <rect width="720" height="320" fill="#1a1a19" rx="6"/>
   <g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
   <line x1="40" y1="284.0" x2="672" y2="284.0" stroke="#2c2c2a" stroke-width="1"/>
   <text x="32" y="287.5" text-anchor="end" fill="#898781" font-size="11">0</text>
-  <line x1="40" y1="156.0" x2="672" y2="156.0" stroke="#2c2c2a" stroke-width="1"/>
-  <text x="32" y="159.5" text-anchor="end" fill="#898781" font-size="11">7</text>
+  <line x1="40" y1="147.5" x2="672" y2="147.5" stroke="#2c2c2a" stroke-width="1"/>
+  <text x="32" y="151.0" text-anchor="end" fill="#898781" font-size="11">8</text>
   <line x1="40" y1="28.0" x2="672" y2="28.0" stroke="#2c2c2a" stroke-width="1"/>
-  <text x="32" y="31.5" text-anchor="end" fill="#898781" font-size="11">14</text>
+  <text x="32" y="31.5" text-anchor="end" fill="#898781" font-size="11">15</text>
   <line x1="40" y1="284" x2="672" y2="284" stroke="#383835" stroke-width="1"/>
   <text x="40.0" y="308" text-anchor="start" fill="#898781" font-size="11">May 21</text>
   <text x="356.0" y="308" text-anchor="middle" fill="#898781" font-size="11">Jul 26</text>
-  <text x="672.0" y="308" text-anchor="end" fill="#898781" font-size="11">Sep 30</text>
-  <path d="M 40.0 284.0 L 40.0 284.0 L 40.0 265.7 L 56.1 265.7 L 56.1 247.4 L 67.7 247.4 L 67.7 229.1 L 68.8 229.1 L 68.8 210.9 L 245.5 210.9 L 245.5 192.6 L 261.0 192.6 L 261.0 174.3 L 303.5 174.3 L 303.5 156.0 L 326.7 156.0 L 326.7 137.7 L 402.7 137.7 L 402.7 119.4 L 457.7 119.4 L 457.7 101.1 L 465.1 101.1 L 465.1 82.9 L 576.4 82.9 L 576.4 64.6 L 672.0 64.6" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"/>
-  <circle cx="672.0" cy="64.6" r="4" fill="#3987e5"/>
-  <text x="680.0" y="68.6" fill="#c3c2b7" font-size="12" font-weight="600">12</text>
+  <text x="672.0" y="308" text-anchor="end" fill="#898781" font-size="11">Oct 1</text>
+  <path d="M 40.0 284.0 L 40.0 284.0 L 40.0 266.9 L 56.0 266.9 L 56.0 249.9 L 67.5 249.9 L 67.5 232.8 L 68.6 232.8 L 68.6 215.7 L 244.0 215.7 L 244.0 198.7 L 259.3 198.7 L 259.3 181.6 L 301.5 181.6 L 301.5 164.5 L 324.5 164.5 L 324.5 147.5 L 399.9 147.5 L 399.9 130.4 L 454.5 130.4 L 454.5 113.3 L 461.8 113.3 L 461.8 96.3 L 572.3 96.3 L 572.3 79.2 L 671.0 79.2 L 671.0 62.1 L 672.0 62.1" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="672.0" cy="62.1" r="4" fill="#3987e5"/>
+  <text x="680.0" y="66.1" fill="#c3c2b7" font-size="12" font-weight="600">13</text>
   </g>
 </svg>
