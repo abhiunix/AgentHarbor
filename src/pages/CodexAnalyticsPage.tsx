@@ -941,6 +941,60 @@ export function CodexAnalyticsPage() {
           )}
         </Section>
 
+        {/* Rate Limits */}
+        {effectiveRateLimits.length > 0 && (
+          <Section title="Rate Limits">
+            {usingOfflineRateLimits && (
+              <div className="flex items-center gap-2 mb-3">
+                <Badge color="#f59e0b">Offline snapshot</Badge>
+                <span className="text-[10px] text-text-muted">
+                  Live API unreachable; showing the last rate-limit snapshot from local session logs
+                  {offlinePlanType && ` (plan: ${offlinePlanType})`}.
+                </span>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {effectiveRateLimits.map((rl) => {
+                const resetInfo = rl.resets_at
+                  ? formatResetTime(rl.resets_at)
+                  : rl.resets_in_seconds
+                  ? `in ${formatDuration(rl.resets_in_seconds)}`
+                  : undefined;
+
+                return (
+                  <ProgressBar
+                    key={rl.label}
+                    label={rl.label}
+                    percent={rl.used_percent}
+                    resetInfo={resetInfo}
+                  />
+                );
+              })}
+            </div>
+          </Section>
+        )}
+
+        {/* Optional additional credits */}
+        {credit_usage && (
+          <Section title="Additional Credits">
+            <div className="grid grid-cols-2 gap-4">
+              <StatCard
+                label="Balance"
+                value={
+                  unlimitedCredits
+                    ? "Unlimited"
+                    : `${credit_usage.remaining.toFixed(2)} ${credit_usage.currency}`
+                }
+              />
+              <StatCard
+                label="Plan"
+                value={credit_usage.plan_name ?? planType}
+                sub={credit_usage.billing_cycle_end ? `Resets ${formatResetTime(credit_usage.billing_cycle_end)}` : undefined}
+              />
+            </div>
+          </Section>
+        )}
+
         {/* Session Stats: only show if we have local data */}
         {hasLocalData && (
           <Section title="Session Stats">
@@ -1284,60 +1338,6 @@ export function CodexAnalyticsPage() {
                   Showing top 20 of {projectBreakdown.length} projects by token usage.
                 </div>
               )}
-            </div>
-          </Section>
-        )}
-
-        {/* Rate Limits */}
-        {effectiveRateLimits.length > 0 && (
-          <Section title="Rate Limits">
-            {usingOfflineRateLimits && (
-              <div className="flex items-center gap-2 mb-3">
-                <Badge color="#f59e0b">Offline snapshot</Badge>
-                <span className="text-[10px] text-text-muted">
-                  Live API unreachable; showing the last rate-limit snapshot from local session logs
-                  {offlinePlanType && ` (plan: ${offlinePlanType})`}.
-                </span>
-              </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {effectiveRateLimits.map((rl) => {
-                const resetInfo = rl.resets_at
-                  ? formatResetTime(rl.resets_at)
-                  : rl.resets_in_seconds
-                  ? `in ${formatDuration(rl.resets_in_seconds)}`
-                  : undefined;
-
-                return (
-                  <ProgressBar
-                    key={rl.label}
-                    label={rl.label}
-                    percent={rl.used_percent}
-                    resetInfo={resetInfo}
-                  />
-                );
-              })}
-            </div>
-          </Section>
-        )}
-
-        {/* Optional additional credits */}
-        {credit_usage && (
-          <Section title="Additional Credits">
-            <div className="grid grid-cols-2 gap-4">
-              <StatCard
-                label="Balance"
-                value={
-                  unlimitedCredits
-                    ? "Unlimited"
-                    : `${credit_usage.remaining.toFixed(2)} ${credit_usage.currency}`
-                }
-              />
-              <StatCard
-                label="Plan"
-                value={credit_usage.plan_name ?? planType}
-                sub={credit_usage.billing_cycle_end ? `Resets ${formatResetTime(credit_usage.billing_cycle_end)}` : undefined}
-              />
             </div>
           </Section>
         )}
