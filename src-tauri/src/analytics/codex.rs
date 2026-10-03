@@ -2772,9 +2772,30 @@ model = "gpt-5.6-luna"
 
     #[test]
     fn modern_rollout_yields_one_row_per_request() {
+        use chrono::TimeZone;
+
+        // Keep the expected local date stable across developer and CI time zones.
+        let local_time = chrono::Local
+            .with_ymd_and_hms(2026, 9, 8, 12, 8, 48)
+            .single()
+            .unwrap();
         let lines = vec![
             r#"{"type":"event_msg","payload":{"type":"turn_context","turn_id":"t1","model":"gpt-5.5"}}"#.to_string(),
-            r#"{"type":"token_usage_record","timestamp":"2026-09-07T20:08:48.671Z","payload":{"response_id":"r1","turn_id":"t1","usage":{"input_tokens":1000,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":500,"total_tokens":1500}}}"#.to_string(),
+            serde_json::json!({
+                "type": "token_usage_record",
+                "timestamp": local_time.with_timezone(&chrono::Utc).to_rfc3339(),
+                "payload": {
+                    "response_id": "r1",
+                    "turn_id": "t1",
+                    "usage": {
+                        "input_tokens": 1000,
+                        "cached_input_tokens": 0,
+                        "cache_write_input_tokens": 0,
+                        "output_tokens": 500,
+                        "total_tokens": 1500
+                    }
+                }
+            }).to_string(),
         ];
         let (_dir, path) = write_rollout(&lines);
         let scan = scan_rollout_usage(&path, "thread-1", "gpt-5.4");
