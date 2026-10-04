@@ -1,6 +1,6 @@
 [package]
 name = "agentharbor"
-version = "1.2.9"
+version = "1.2.10"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -34,7 +34,7 @@ reqwest = { version = "0.11", features = ["blocking", "json"] }
 zip = "0.6"
 flate2 = "1.0"
 tar = "0.4"
-tokio = { version = "1", features = ["sync", "time", "rt"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "net"] }
 lazy_static = "1.4"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 dunce = "1"
@@ -52,6 +52,10 @@ urlencoding = "2"
 getrandom = "0.3"
 rusqlite = { version = "0.31", features = ["bundled"] }
 zstd = "0.13"
+
+[target.'cfg(unix)'.dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tauri-plugin-single-instance = "2"

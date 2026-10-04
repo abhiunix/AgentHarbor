@@ -7,6 +7,18 @@ import type {
   AgentImportResult,
 } from "./types";
 
+export interface CodexActivity {
+  working_conversations: number;
+  working_helpers: number;
+  waiting: number;
+  idle: number;
+  errored: number;
+}
+
+export function getCodexActivity(): Promise<CodexActivity> {
+  return invoke<CodexActivity>("get_codex_activity");
+}
+
 export async function getAllCapabilities(): Promise<UniversalCapability[]> {
   return invoke<UniversalCapability[]>("get_all_capabilities");
 }

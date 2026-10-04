@@ -4,6 +4,7 @@ pub mod backup;
 pub mod claude_history;
 pub mod claude_metadata;
 pub mod codex;
+pub mod codex_activity;
 pub mod codex_app_server;
 pub mod codex_history;
 pub mod codex_parity;

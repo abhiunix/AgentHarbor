@@ -87,6 +87,7 @@ use commands::codex::{
     get_codex_home_path, list_codex_skills, read_codex_config, read_codex_config_snapshot,
     read_codex_skill_file, write_codex_config, write_codex_config_snapshot,
 };
+use commands::codex_activity::get_codex_activity;
 use commands::codex_history::{
     get_codex_memory_status, get_codex_plans_and_todos, get_codex_prompt_history,
     list_codex_transcript_sessions, read_codex_memory_document, read_codex_transcript,
@@ -595,6 +596,7 @@ pub fn run() {
             get_claude_history,
             get_claude_retention_status,
             get_codex_projects_overview,
+            get_codex_activity,
             get_codex_project_sessions,
             get_codex_session_timeline,
             get_claude_active_sessions,

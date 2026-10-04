@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { LimitStateBanner, type LimitState } from "../analytics/LimitStateBanner";
+import { CodexActivityBadge } from "./CodexActivityBadge";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -293,6 +294,7 @@ function DisconnectedCard({
           {provider.provider_name}
         </span>
       </div>
+      {provider.provider_id === "codex" && <div className="mb-2"><CodexActivityBadge /></div>}
       <p className="text-[#9394a1] text-xs mb-2">Not connected</p>
       <button
         onClick={handleConnect}
@@ -1204,6 +1206,7 @@ export function TrayProviderCard({
               {provider.email}
             </div>
           )}
+          {provider.provider_id === "codex" && <CodexActivityBadge />}
         </div>
         {/* Last refreshed timestamp */}
         {provider.fetched_at && (

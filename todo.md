@@ -2,6 +2,8 @@
 
 Known items identified during work sessions; each entry has enough reference for an agent to pick up later.
 
+- **Codex live activity is unavailable on Windows**: `commands/codex_activity.rs::get_codex_activity` reads the running Codex service through its local Unix socket on Unix platforms. The Windows branch returns an explicit unavailable status; the Windows service transport is not covered. The tray component is `src/components/tray/CodexActivityBadge.tsx`. Counts cover the connected local service, so separately hosted Codex processes are outside this snapshot.
+
 - **Claude analytics cold start**: disk-persisted per-file aggregates keyed by (path, mtime, size) so app restarts skip re-parsing unchanged JSONL; see profiler report fixes #4/#5 (per-range mtime floors) in session notes and `claude_v2.rs` corpus cache added in 3b25f06.
 - **OpenCode assets**: proper sidebar logo (currently reuses codex icon) and tray PNGs (`src-tauri/icons/providers/opencode*.png` + `include_bytes!` arms in `analytics/commands.rs`); plan Phase 8.5.
 - **Kimi/DeepSeek menubar icons are colored logo resizes**: consider monochrome/template variants matching macOS menu bar style (`src-tauri/icons/providers/kimi*.png`, `deepseek*.png`).
