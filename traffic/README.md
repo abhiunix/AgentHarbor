@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-03.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-04.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 536 | 196 |
-| Clones | 1744 | 757 |
+| Views | 539 | 198 |
+| Clones | 1768 | 769 |
 
 Stars 13 | Forks 0 | Open issues 9
 
@@ -28,19 +28,20 @@ Stars 13 | Forks 0 | Open issues 9
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| github.com | 9 | 8 |
+| github.com | 10 | 9 |
 | t.co | 1 | 1 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 25 | 16 |
+| / | 26 | 17 |
 | /tree/v1.2.6 | 4 | 2 |
-| /issues | 2 | 2 |
+| /blob/main/package-lock.json | 2 | 2 |
 | /releases/tag/v1.2.6 | 2 | 2 |
 | /abhiunix/agentharbor | 2 | 1 |
-| /blob/main/package-lock.json | 1 | 1 |
+| /blob/main/docs/assets/screenshot-tray.webp | 1 | 1 |
+| /issues | 1 | 1 |
 | /releases | 1 | 1 |
 | /releases/tag/v1.2.7 | 1 | 1 |
 | /releases/tag/v1.2.8 | 1 | 1 |
