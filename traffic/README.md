@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-04.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-05.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 539 | 198 |
-| Clones | 1768 | 769 |
+| Views | 542 | 199 |
+| Clones | 1786 | 780 |
 
 Stars 13 | Forks 0 | Open issues 9
 
@@ -28,14 +28,14 @@ Stars 13 | Forks 0 | Open issues 9
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| github.com | 10 | 9 |
+| github.com | 11 | 7 |
 | t.co | 1 | 1 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 26 | 17 |
+| / | 25 | 14 |
 | /tree/v1.2.6 | 4 | 2 |
 | /blob/main/package-lock.json | 2 | 2 |
 | /releases/tag/v1.2.6 | 2 | 2 |
