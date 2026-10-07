@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-06.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-07.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 544 | 200 |
-| Clones | 1824 | 799 |
+| Views | 545 | 201 |
+| Clones | 1835 | 806 |
 
 Stars 13 | Forks 0 | Open issues 9
 
@@ -35,7 +35,7 @@ Stars 13 | Forks 0 | Open issues 9
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 24 | 14 |
+| / | 24 | 15 |
 | /tree/v1.2.6 | 3 | 2 |
 | /blob/main/package-lock.json | 2 | 2 |
 | /abhiunix/agentharbor | 2 | 1 |
