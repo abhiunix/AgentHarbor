@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-07.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-08.
 
 ## Git clones
 
@@ -19,25 +19,25 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 545 | 201 |
-| Clones | 1835 | 806 |
+| Views | 547 | 202 |
+| Clones | 1865 | 826 |
 
-Stars 13 | Forks 0 | Open issues 9
+Stars 14 | Forks 0 | Open issues 9
 
 ## Referrers (last 14 days)
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| github.com | 11 | 7 |
+| github.com | 7 | 4 |
 | t.co | 1 | 1 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 24 | 15 |
-| /tree/v1.2.6 | 3 | 2 |
+| / | 22 | 13 |
 | /blob/main/package-lock.json | 2 | 2 |
+| /tree/v1.2.6 | 2 | 1 |
 | /abhiunix/agentharbor | 2 | 1 |
 | /blob/main/docs/assets/screenshot-tray.webp | 1 | 1 |
 | /issues | 1 | 1 |
