@@ -327,6 +327,10 @@
     "2026-10-07": {
       "count": 2,
       "uniques": 1
+    },
+    "2026-10-08": {
+      "count": 2,
+      "uniques": 2
     }
   },
   "clones": {
@@ -657,6 +661,10 @@
     "2026-10-07": {
       "count": 30,
       "uniques": 20
+    },
+    "2026-10-08": {
+      "count": 22,
+      "uniques": 14
     }
   },
   "referrers": {
@@ -1649,6 +1657,13 @@
         "referrer": "t.co",
         "count": 1,
         "uniques": 1
+      }
+    ],
+    "2026-10-09": [
+      {
+        "referrer": "github.com",
+        "count": 8,
+        "uniques": 5
       }
     ]
   },
@@ -5138,6 +5153,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-10-09": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 20,
+        "uniques": 12
+      },
+      {
+        "path": "/abhiunix/agentharbor",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/screenshot-tray.webp",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/package-lock.json",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues/17",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.2.10",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.2.7",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.2.8",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -5480,17 +5547,22 @@
       "stars": 14,
       "forks": 0,
       "issues": 9
+    },
+    "2026-10-09": {
+      "stars": 14,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-10-08",
+    "asOf": "2026-10-09",
     "views": {
-      "count": 34,
-      "uniques": 16
+      "count": 30,
+      "uniques": 15
     },
     "clones": {
-      "count": 630,
-      "uniques": 153
+      "count": 645,
+      "uniques": 161
     }
   }
 }
