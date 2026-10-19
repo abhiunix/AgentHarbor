@@ -363,6 +363,14 @@
     "2026-10-16": {
       "count": 0,
       "uniques": 0
+    },
+    "2026-10-17": {
+      "count": 0,
+      "uniques": 0
+    },
+    "2026-10-18": {
+      "count": 0,
+      "uniques": 0
     }
   },
   "clones": {
@@ -729,6 +737,14 @@
     "2026-10-16": {
       "count": 23,
       "uniques": 15
+    },
+    "2026-10-17": {
+      "count": 20,
+      "uniques": 16
+    },
+    "2026-10-18": {
+      "count": 19,
+      "uniques": 11
     }
   },
   "referrers": {
@@ -1791,6 +1807,13 @@
         "referrer": "github.com",
         "count": 8,
         "uniques": 5
+      }
+    ],
+    "2026-10-19": [
+      {
+        "referrer": "github.com",
+        "count": 4,
+        "uniques": 4
       }
     ]
   },
@@ -5780,6 +5803,38 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-10-19": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 11,
+        "uniques": 8
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues/17",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.2.10",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/tree/main/docs",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/agentharbor",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -6172,16 +6227,21 @@
       "stars": 14,
       "forks": 0,
       "issues": 9
+    },
+    "2026-10-19": {
+      "stars": 14,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-10-18",
+    "asOf": "2026-10-19",
     "views": {
-      "count": 23,
-      "uniques": 13
+      "count": 17,
+      "uniques": 12
     },
     "clones": {
-      "count": 340,
+      "count": 337,
       "uniques": 176
     }
   }

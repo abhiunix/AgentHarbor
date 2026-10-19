@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-18.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-19.
 
 ## Git clones
 
@@ -20,7 +20,7 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
 | Views | 559 | 212 |
-| Clones | 2084 | 971 |
+| Clones | 2123 | 998 |
 
 Stars 14 | Forks 0 | Open issues 9
 
@@ -28,16 +28,14 @@ Stars 14 | Forks 0 | Open issues 9
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| github.com | 8 | 5 |
+| github.com | 4 | 4 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 15 | 9 |
+| / | 11 | 8 |
 | /releases | 2 | 2 |
-| /blob/main/docs/assets/screenshot-tray.webp | 1 | 1 |
-| /blob/main/package-lock.json | 1 | 1 |
 | /issues/17 | 1 | 1 |
 | /releases/tag/v1.2.10 | 1 | 1 |
 | /tree/main/docs | 1 | 1 |
