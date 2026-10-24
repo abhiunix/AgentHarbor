@@ -383,6 +383,10 @@
     "2026-10-21": {
       "count": 0,
       "uniques": 0
+    },
+    "2026-10-22": {
+      "count": 0,
+      "uniques": 0
     }
   },
   "clones": {
@@ -769,6 +773,10 @@
     "2026-10-21": {
       "count": 26,
       "uniques": 14
+    },
+    "2026-10-22": {
+      "count": 8,
+      "uniques": 5
     }
   },
   "referrers": {
@@ -1866,6 +1874,13 @@
         "referrer": "github.com",
         "count": 4,
         "uniques": 4
+      }
+    ],
+    "2026-10-24": [
+      {
+        "referrer": "github.com",
+        "count": 3,
+        "uniques": 3
       }
     ]
   },
@@ -6015,6 +6030,28 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-10-24": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 6,
+        "uniques": 5
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/tree/main/docs",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/agentharbor",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -6432,17 +6469,22 @@
       "stars": 14,
       "forks": 0,
       "issues": 9
+    },
+    "2026-10-24": {
+      "stars": 14,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-10-23",
+    "asOf": "2026-10-24",
     "views": {
-      "count": 12,
-      "uniques": 9
+      "count": 10,
+      "uniques": 8
     },
     "clones": {
-      "count": 318,
-      "uniques": 163
+      "count": 304,
+      "uniques": 157
     }
   }
 }
