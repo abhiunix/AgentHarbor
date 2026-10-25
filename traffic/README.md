@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-24.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-25.
 
 ## Git clones
 
@@ -20,7 +20,7 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
 | Views | 559 | 212 |
-| Clones | 2191 | 1037 |
+| Clones | 2207 | 1046 |
 
 Stars 14 | Forks 0 | Open issues 9
 
@@ -34,7 +34,6 @@ Stars 14 | Forks 0 | Open issues 9
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 6 | 5 |
+| / | 5 | 4 |
 | /releases | 2 | 2 |
-| /tree/main/docs | 1 | 1 |
 | /abhiunix/agentharbor | 1 | 1 |
