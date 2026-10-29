@@ -407,6 +407,10 @@
     "2026-10-27": {
       "count": 1,
       "uniques": 1
+    },
+    "2026-10-28": {
+      "count": 14,
+      "uniques": 14
     }
   },
   "clones": {
@@ -817,6 +821,10 @@
     "2026-10-27": {
       "count": 19,
       "uniques": 12
+    },
+    "2026-10-28": {
+      "count": 18,
+      "uniques": 11
     }
   },
   "referrers": {
@@ -1947,6 +1955,23 @@
     "2026-10-28": [
       {
         "referrer": "Google",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-10-29": [
+      {
+        "referrer": "aocr.org",
+        "count": 13,
+        "uniques": 13
+      },
+      {
+        "referrer": "Google",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "referrer": "github.com",
         "count": 1,
         "uniques": 1
       }
@@ -6203,6 +6228,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-10-29": [
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 9,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 7,
+        "uniques": 6
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues/102",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/1",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/11",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/12",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/12/files",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/4",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/5",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/50",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -6645,17 +6722,22 @@
       "stars": 14,
       "forks": 0,
       "issues": 9
+    },
+    "2026-10-29": {
+      "stars": 14,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-10-28",
+    "asOf": "2026-10-29",
     "views": {
-      "count": 18,
-      "uniques": 5
+      "count": 32,
+      "uniques": 19
     },
     "clones": {
-      "count": 262,
-      "uniques": 119
+      "count": 260,
+      "uniques": 116
     }
   }
 }
