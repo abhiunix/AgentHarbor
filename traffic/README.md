@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-30.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-10-31.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 598 | 238 |
-| Clones | 2313 | 1117 |
+| Views | 600 | 240 |
+| Clones | 2335 | 1131 |
 
 Stars 14 | Forks 0 | Open issues 9
 
@@ -28,8 +28,8 @@ Stars 14 | Forks 0 | Open issues 9
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| aocr.org | 19 | 19 |
-| t.co | 2 | 2 |
+| aocr.org | 20 | 20 |
+| t.co | 3 | 3 |
 | Google | 1 | 1 |
 | github.com | 1 | 1 |
 
@@ -37,11 +37,11 @@ Stars 14 | Forks 0 | Open issues 9
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
+| / | 9 | 8 |
 | /issues | 9 | 1 |
-| / | 8 | 7 |
+| /pull/57 | 3 | 3 |
 | /pull/18/files | 2 | 2 |
 | /pull/52 | 2 | 2 |
-| /pull/57 | 2 | 2 |
 | /issues/102 | 2 | 1 |
 | /pull/1 | 1 | 1 |
 | /pull/11 | 1 | 1 |
