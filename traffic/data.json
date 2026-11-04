@@ -431,6 +431,10 @@
     "2026-11-02": {
       "count": 2,
       "uniques": 1
+    },
+    "2026-11-03": {
+      "count": 0,
+      "uniques": 0
     }
   },
   "clones": {
@@ -865,6 +869,10 @@
     "2026-11-02": {
       "count": 36,
       "uniques": 22
+    },
+    "2026-11-03": {
+      "count": 40,
+      "uniques": 20
     }
   },
   "referrers": {
@@ -2105,6 +2113,33 @@
       }
     ],
     "2026-11-03": [
+      {
+        "referrer": "aocr.org",
+        "count": 20,
+        "uniques": 20
+      },
+      {
+        "referrer": "t.co",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "referrer": "github.com",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "referrer": "Google",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "referrer": "com.twitter.android",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-11-04": [
       {
         "referrer": "aocr.org",
         "count": 20,
@@ -6695,6 +6730,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-11-04": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 12,
+        "uniques": 11
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 10,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/57",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/18/files",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/52",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues/102",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/1",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/11",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/12",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/12/files",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -7167,17 +7254,22 @@
       "stars": 14,
       "forks": 0,
       "issues": 9
+    },
+    "2026-11-04": {
+      "stars": 14,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-11-03",
+    "asOf": "2026-11-04",
     "views": {
       "count": 45,
       "uniques": 31
     },
     "clones": {
-      "count": 267,
-      "uniques": 120
+      "count": 290,
+      "uniques": 128
     }
   }
 }
