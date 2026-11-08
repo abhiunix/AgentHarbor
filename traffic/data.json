@@ -447,6 +447,10 @@
     "2026-11-06": {
       "count": 0,
       "uniques": 0
+    },
+    "2026-11-07": {
+      "count": 1,
+      "uniques": 1
     }
   },
   "clones": {
@@ -897,6 +901,10 @@
     "2026-11-06": {
       "count": 13,
       "uniques": 10
+    },
+    "2026-11-07": {
+      "count": 62,
+      "uniques": 32
     }
   },
   "referrers": {
@@ -2254,6 +2262,33 @@
         "referrer": "github.com",
         "count": 3,
         "uniques": 3
+      },
+      {
+        "referrer": "t.co",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "referrer": "Google",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "referrer": "com.twitter.android",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-11-08": [
+      {
+        "referrer": "aocr.org",
+        "count": 44,
+        "uniques": 44
+      },
+      {
+        "referrer": "github.com",
+        "count": 4,
+        "uniques": 4
       },
       {
         "referrer": "t.co",
@@ -7043,6 +7078,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-11-08": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 13,
+        "uniques": 12
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 10,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/57",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/12",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/18/files",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/52",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/6",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/pull/9",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues/102",
+        "count": 2,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/04e4fea44e55c51513583fa9993709898bb40a8a",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -7535,17 +7622,22 @@
       "stars": 14,
       "forks": 0,
       "issues": 9
+    },
+    "2026-11-08": {
+      "stars": 14,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-11-07",
+    "asOf": "2026-11-08",
     "views": {
       "count": 70,
       "uniques": 56
     },
     "clones": {
-      "count": 289,
-      "uniques": 129
+      "count": 330,
+      "uniques": 142
     }
   }
 }
