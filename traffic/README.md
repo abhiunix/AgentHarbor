@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-08.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-09.
 
 ## Git clones
 
@@ -19,10 +19,10 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 630 | 269 |
-| Clones | 2558 | 1258 |
+| Views | 632 | 271 |
+| Clones | 2583 | 1275 |
 
-Stars 14 | Forks 0 | Open issues 9
+Stars 15 | Forks 0 | Open issues 9
 
 ## Referrers (last 14 days)
 
@@ -38,13 +38,13 @@ Stars 14 | Forks 0 | Open issues 9
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 13 | 12 |
-| /issues | 10 | 2 |
+| / | 13 | 13 |
 | /pull/57 | 3 | 3 |
 | /pull/12 | 2 | 2 |
 | /pull/18/files | 2 | 2 |
 | /pull/52 | 2 | 2 |
 | /pull/6 | 2 | 2 |
 | /pull/9 | 2 | 2 |
-| /issues/102 | 2 | 1 |
 | /commit/04e4fea44e55c51513583fa9993709898bb40a8a | 1 | 1 |
+| /commit/0802018eef411349bd31eed90d1bb066e23ef28b | 1 | 1 |
+| /commit/58f291aa84fa8c306419b777ca6ec749d39c37d6 | 1 | 1 |
