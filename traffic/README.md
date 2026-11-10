@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-09.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-10.
 
 ## Git clones
 
@@ -19,10 +19,10 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 632 | 271 |
-| Clones | 2583 | 1275 |
+| Views | 638 | 275 |
+| Clones | 2592 | 1283 |
 
-Stars 15 | Forks 0 | Open issues 9
+Stars 16 | Forks 0 | Open issues 9
 
 ## Referrers (last 14 days)
 
@@ -31,20 +31,20 @@ Stars 15 | Forks 0 | Open issues 9
 | aocr.org | 44 | 44 |
 | github.com | 4 | 4 |
 | t.co | 3 | 3 |
-| Google | 1 | 1 |
 | com.twitter.android | 1 | 1 |
+| linkedin.com | 1 | 1 |
 
 ## Popular content (last 14 days)
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 13 | 13 |
+| / | 17 | 16 |
 | /pull/57 | 3 | 3 |
 | /pull/12 | 2 | 2 |
 | /pull/18/files | 2 | 2 |
 | /pull/52 | 2 | 2 |
 | /pull/6 | 2 | 2 |
 | /pull/9 | 2 | 2 |
+| /blob/main/docs/assets/screenshot-tray.webp | 1 | 1 |
 | /commit/04e4fea44e55c51513583fa9993709898bb40a8a | 1 | 1 |
 | /commit/0802018eef411349bd31eed90d1bb066e23ef28b | 1 | 1 |
-| /commit/58f291aa84fa8c306419b777ca6ec749d39c37d6 | 1 | 1 |
