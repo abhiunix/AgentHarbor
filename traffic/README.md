@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-10.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-11.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 638 | 275 |
-| Clones | 2592 | 1283 |
+| Views | 639 | 276 |
+| Clones | 2618 | 1299 |
 
 Stars 16 | Forks 0 | Open issues 9
 
@@ -30,7 +30,7 @@ Stars 16 | Forks 0 | Open issues 9
 | --- | --- | --- |
 | aocr.org | 44 | 44 |
 | github.com | 4 | 4 |
-| t.co | 3 | 3 |
+| t.co | 4 | 4 |
 | com.twitter.android | 1 | 1 |
 | linkedin.com | 1 | 1 |
 
