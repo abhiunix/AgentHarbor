@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-11.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-12.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 639 | 276 |
-| Clones | 2618 | 1299 |
+| Views | 640 | 277 |
+| Clones | 2632 | 1307 |
 
 Stars 16 | Forks 0 | Open issues 9
 
@@ -28,9 +28,9 @@ Stars 16 | Forks 0 | Open issues 9
 
 | Site | Views | Unique visitors |
 | --- | --- | --- |
-| aocr.org | 44 | 44 |
-| github.com | 4 | 4 |
+| aocr.org | 31 | 31 |
 | t.co | 4 | 4 |
+| github.com | 3 | 3 |
 | com.twitter.android | 1 | 1 |
 | linkedin.com | 1 | 1 |
 
@@ -38,13 +38,13 @@ Stars 16 | Forks 0 | Open issues 9
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 17 | 16 |
-| /pull/57 | 3 | 3 |
-| /pull/12 | 2 | 2 |
+| / | 16 | 15 |
+| /issues | 2 | 2 |
 | /pull/18/files | 2 | 2 |
-| /pull/52 | 2 | 2 |
-| /pull/6 | 2 | 2 |
-| /pull/9 | 2 | 2 |
+| /pull/57 | 2 | 2 |
 | /blob/main/docs/assets/screenshot-tray.webp | 1 | 1 |
 | /commit/04e4fea44e55c51513583fa9993709898bb40a8a | 1 | 1 |
 | /commit/0802018eef411349bd31eed90d1bb066e23ef28b | 1 | 1 |
+| /commit/58f291aa84fa8c306419b777ca6ec749d39c37d6 | 1 | 1 |
+| /commit/71f7802d5bf160620b4062db1de83448cb51f315 | 1 | 1 |
+| /commit/903e86bbab410c055661de6f5a9d24d301302176 | 1 | 1 |
