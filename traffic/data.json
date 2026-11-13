@@ -467,6 +467,10 @@
     "2026-11-11": {
       "count": 1,
       "uniques": 1
+    },
+    "2026-11-12": {
+      "count": 1,
+      "uniques": 1
     }
   },
   "clones": {
@@ -937,6 +941,10 @@
     "2026-11-11": {
       "count": 14,
       "uniques": 8
+    },
+    "2026-11-12": {
+      "count": 20,
+      "uniques": 12
     }
   },
   "referrers": {
@@ -2434,6 +2442,33 @@
         "referrer": "github.com",
         "count": 3,
         "uniques": 3
+      },
+      {
+        "referrer": "com.twitter.android",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "referrer": "linkedin.com",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-11-13": [
+      {
+        "referrer": "aocr.org",
+        "count": 25,
+        "uniques": 25
+      },
+      {
+        "referrer": "github.com",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "referrer": "t.co",
+        "count": 2,
+        "uniques": 2
       },
       {
         "referrer": "com.twitter.android",
@@ -7478,6 +7513,58 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-11-13": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 14,
+        "uniques": 13
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/screenshot-tray.webp",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/04e4fea44e55c51513583fa9993709898bb40a8a",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/0802018eef411349bd31eed90d1bb066e23ef28b",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/58f291aa84fa8c306419b777ca6ec749d39c37d6",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/71f7802d5bf160620b4062db1de83448cb51f315",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/903e86bbab410c055661de6f5a9d24d301302176",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/d8257eeddde7cc7ebce96acdcc323c8fdcdbf170",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/commit/e6bd61541136433f6119b27f9ffdf5e18c4e406a",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -7995,17 +8082,22 @@
       "stars": 16,
       "forks": 0,
       "issues": 9
+    },
+    "2026-11-13": {
+      "stars": 16,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-11-12",
+    "asOf": "2026-11-13",
     "views": {
-      "count": 50,
-      "uniques": 47
+      "count": 43,
+      "uniques": 40
     },
     "clones": {
-      "count": 330,
-      "uniques": 142
+      "count": 339,
+      "uniques": 145
     }
   }
 }
