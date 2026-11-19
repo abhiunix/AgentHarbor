@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-18.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-19.
 
 ## Git clones
 
@@ -20,7 +20,7 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
 | Views | 652 | 286 |
-| Clones | 2927 | 1388 |
+| Clones | 2957 | 1405 |
 
 Stars 16 | Forks 0 | Open issues 9
 
@@ -29,7 +29,7 @@ Stars 16 | Forks 0 | Open issues 9
 | Site | Views | Unique visitors |
 | --- | --- | --- |
 | aocr.org | 24 | 24 |
-| github.com | 3 | 3 |
+| github.com | 2 | 2 |
 | linkedin.com | 1 | 1 |
 | t.co | 1 | 1 |
 
@@ -37,7 +37,7 @@ Stars 16 | Forks 0 | Open issues 9
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 14 | 13 |
+| / | 13 | 12 |
 | /releases/tag/v1.2.10 | 3 | 3 |
 | /blob/041dd07bf3bad8f1e9613b1a2705efda9c4cf4e6/src/components/registry/CapabilityEditor.tsx | 2 | 2 |
 | /releases | 2 | 2 |
