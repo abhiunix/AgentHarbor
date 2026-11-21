@@ -499,6 +499,10 @@
     "2026-11-19": {
       "count": 1,
       "uniques": 1
+    },
+    "2026-11-20": {
+      "count": 0,
+      "uniques": 0
     }
   },
   "clones": {
@@ -1001,6 +1005,10 @@
     "2026-11-19": {
       "count": 33,
       "uniques": 18
+    },
+    "2026-11-20": {
+      "count": 20,
+      "uniques": 13
     }
   },
   "referrers": {
@@ -2685,6 +2693,23 @@
       }
     ],
     "2026-11-20": [
+      {
+        "referrer": "github.com",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "referrer": "t.co",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "referrer": "linkedin.com",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-11-21": [
       {
         "referrer": "github.com",
         "count": 2,
@@ -8134,6 +8159,43 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-11-21": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 14,
+        "uniques": 13
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.2.10",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/041dd07bf3bad8f1e9613b1a2705efda9c4cf4e6/src/components/registry/CapabilityEditor.tsx",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/screenshot-tray.webp",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues/102",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -8691,17 +8753,22 @@
       "stars": 16,
       "forks": 0,
       "issues": 9
+    },
+    "2026-11-21": {
+      "stars": 16,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-11-20",
+    "asOf": "2026-11-21",
     "views": {
       "count": 24,
       "uniques": 18
     },
     "clones": {
-      "count": 507,
-      "uniques": 156
+      "count": 514,
+      "uniques": 157
     }
   }
 }
