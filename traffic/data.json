@@ -503,6 +503,10 @@
     "2026-11-20": {
       "count": 0,
       "uniques": 0
+    },
+    "2026-11-21": {
+      "count": 0,
+      "uniques": 0
     }
   },
   "clones": {
@@ -1009,6 +1013,10 @@
     "2026-11-20": {
       "count": 20,
       "uniques": 13
+    },
+    "2026-11-21": {
+      "count": 465,
+      "uniques": 9
     }
   },
   "referrers": {
@@ -2719,6 +2727,23 @@
         "referrer": "t.co",
         "count": 2,
         "uniques": 2
+      },
+      {
+        "referrer": "linkedin.com",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-11-22": [
+      {
+        "referrer": "t.co",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "referrer": "github.com",
+        "count": 1,
+        "uniques": 1
       },
       {
         "referrer": "linkedin.com",
@@ -8196,6 +8221,43 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-11-22": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 13,
+        "uniques": 12
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.2.10",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/041dd07bf3bad8f1e9613b1a2705efda9c4cf4e6/src/components/registry/CapabilityEditor.tsx",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/screenshot-tray.webp",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues/102",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -8758,17 +8820,22 @@
       "stars": 16,
       "forks": 0,
       "issues": 9
+    },
+    "2026-11-22": {
+      "stars": 16,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-11-21",
+    "asOf": "2026-11-22",
     "views": {
-      "count": 24,
-      "uniques": 18
+      "count": 23,
+      "uniques": 17
     },
     "clones": {
-      "count": 514,
-      "uniques": 157
+      "count": 917,
+      "uniques": 141
     }
   }
 }
