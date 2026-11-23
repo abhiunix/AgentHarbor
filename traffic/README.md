@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-22.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-23.
 
 ## Git clones
 
@@ -19,8 +19,8 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
-| Views | 653 | 287 |
-| Clones | 3475 | 1445 |
+| Views | 655 | 288 |
+| Clones | 3518 | 1469 |
 
 Stars 16 | Forks 0 | Open issues 9
 
@@ -36,10 +36,11 @@ Stars 16 | Forks 0 | Open issues 9
 
 | Path | Views | Unique visitors |
 | --- | --- | --- |
-| / | 13 | 12 |
+| / | 11 | 10 |
+| /releases | 3 | 3 |
 | /releases/tag/v1.2.10 | 3 | 3 |
 | /blob/041dd07bf3bad8f1e9613b1a2705efda9c4cf4e6/src/components/registry/CapabilityEditor.tsx | 2 | 2 |
-| /releases | 2 | 2 |
+| /blob/main/docs/assets/screenshot-token-usage.webp | 1 | 1 |
 | /blob/main/docs/assets/screenshot-tray.webp | 1 | 1 |
 | /issues | 1 | 1 |
 | /issues/102 | 1 | 1 |
