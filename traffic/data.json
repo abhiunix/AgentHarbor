@@ -511,6 +511,10 @@
     "2026-11-22": {
       "count": 2,
       "uniques": 1
+    },
+    "2026-11-23": {
+      "count": 0,
+      "uniques": 0
     }
   },
   "clones": {
@@ -1025,6 +1029,10 @@
     "2026-11-22": {
       "count": 43,
       "uniques": 24
+    },
+    "2026-11-23": {
+      "count": 40,
+      "uniques": 22
     }
   },
   "referrers": {
@@ -2772,6 +2780,18 @@
       },
       {
         "referrer": "linkedin.com",
+        "count": 1,
+        "uniques": 1
+      }
+    ],
+    "2026-11-24": [
+      {
+        "referrer": "t.co",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "referrer": "github.com",
         "count": 1,
         "uniques": 1
       }
@@ -8325,6 +8345,43 @@
         "count": 1,
         "uniques": 1
       }
+    ],
+    "2026-11-24": [
+      {
+        "path": "/abhiunix/AgentHarbor",
+        "count": 6,
+        "uniques": 6
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/releases/tag/v1.2.10",
+        "count": 3,
+        "uniques": 3
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/041dd07bf3bad8f1e9613b1a2705efda9c4cf4e6/src/components/registry/CapabilityEditor.tsx",
+        "count": 2,
+        "uniques": 2
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/blob/main/docs/assets/screenshot-token-usage.webp",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues",
+        "count": 1,
+        "uniques": 1
+      },
+      {
+        "path": "/abhiunix/AgentHarbor/issues/102",
+        "count": 1,
+        "uniques": 1
+      }
     ]
   },
   "repo": {
@@ -8897,17 +8954,22 @@
       "stars": 16,
       "forks": 0,
       "issues": 9
+    },
+    "2026-11-24": {
+      "stars": 16,
+      "forks": 0,
+      "issues": 9
     }
   },
   "window": {
-    "asOf": "2026-11-23",
+    "asOf": "2026-11-24",
     "views": {
-      "count": 23,
-      "uniques": 16
+      "count": 17,
+      "uniques": 12
     },
     "clones": {
-      "count": 935,
-      "uniques": 147
+      "count": 966,
+      "uniques": 158
     }
   }
 }
