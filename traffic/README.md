@@ -1,6 +1,6 @@
 # Traffic history
 
-Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-26.
+Collected daily from the GitHub Traffic API, which only retains 14 days; this file and `data.json` preserve the full record since collection began. Last updated 2026-11-27.
 
 ## Git clones
 
@@ -20,7 +20,7 @@ Collected daily from the GitHub Traffic API, which only retains 14 days; this fi
 | Metric | Total | Unique (sum of daily) |
 | --- | --- | --- |
 | Views | 671 | 290 |
-| Clones | 3620 | 1526 |
+| Clones | 3651 | 1545 |
 
 Stars 16 | Forks 0 | Open issues 9
 
@@ -45,4 +45,3 @@ Stars 16 | Forks 0 | Open issues 9
 | /blob/main/docs/assets/screenshot-token-usage.webp | 1 | 1 |
 | /blob/main/docs/getting-started.md | 1 | 1 |
 | /commit/96da70aabc6675f059d25b89db74be55f50f4700 | 1 | 1 |
-| /issues/102 | 1 | 1 |
